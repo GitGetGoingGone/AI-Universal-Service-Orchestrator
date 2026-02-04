@@ -1,0 +1,304 @@
+openapi: 3.1.0
+info:
+  title: Discovery Service API
+  description: |
+    Module 1: Multi-Protocol Scout Engine - Chat-First API with JSON-LD and Adaptive Cards.
+    Designed for AI agents (Gemini, ChatGPT) and omnichannel clients.
+  version: 0.1.0
+  contact:
+    name: AI Universal Service Orchestrator
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+  - url: "{API_BASE_URL}"
+    description: Environment-specific base URL
+    variables:
+      API_BASE_URL:
+        default: https://api.example.com
+
+tags:
+  - name: Discover
+    description: Product discovery endpoints
+  - name: Health
+    description: Liveness and readiness probes
+
+paths:
+  /api/v1/discover:
+    get:
+      operationId: discoverProducts
+      summary: Discover products by intent/query
+      description: |
+        Chat-First endpoint returning products matching the search intent.
+        Response includes raw data, JSON-LD (schema.org ItemList), and Adaptive Card
+        for AI agent consumption (Gemini Dynamic View, ChatGPT native rendering).
+      tags:
+        - Discover
+      parameters:
+        - name: intent
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "flowers"
+          description: Search query (e.g. 'flowers', 'chocolates')
+        - name: location
+          in: query
+          required: false
+          schema:
+            type: string
+            nullable: true
+          description: Optional location filter
+        - name: partner_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+            nullable: true
+          description: Filter by partner ID
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Max number of products to return
+      responses:
+        "200":
+          description: Successful discovery response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoverResponse"
+        "422":
+          description: Validation error (e.g. missing intent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /health:
+    get:
+      operationId: health
+      summary: Liveness probe
+      description: Returns 200 if the process is running. Used by Kubernetes/orchestrators.
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /ready:
+    get:
+      operationId: ready
+      summary: Readiness probe
+      description: Returns 200 if the service can accept traffic (dependencies healthy).
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Service is ready to accept traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+
+  /:
+    get:
+      operationId: root
+      summary: Service info
+      description: Returns service metadata and available endpoints.
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Service info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    type: string
+                    example: discovery-service
+                  module:
+                    type: string
+                    example: Multi-Protocol Scout Engine
+                  version:
+                    type: string
+                    example: "0.1.0"
+                  endpoints:
+                    type: object
+
+components:
+  schemas:
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        price:
+          type: number
+          format: float
+        currency:
+          type: string
+          default: USD
+        capabilities:
+          type: array
+          items:
+            type: string
+
+    DiscoverResponse:
+      type: object
+      required:
+        - data
+        - machine_readable
+        - adaptive_card
+        - metadata
+      properties:
+        data:
+          type: object
+          required:
+            - products
+            - count
+          properties:
+            products:
+              type: array
+              items:
+                $ref: "#/components/schemas/Product"
+            count:
+              type: integer
+        machine_readable:
+          type: object
+          description: JSON-LD ItemList (schema.org) for AI agents
+          properties:
+            "@context":
+              type: string
+              example: "https://schema.org"
+            "@type":
+              type: string
+              example: ItemList
+            numberOfItems:
+              type: integer
+            itemListElement:
+              type: array
+              items:
+                type: object
+        adaptive_card:
+          type: object
+          description: Adaptive Card for Gemini/ChatGPT rendering
+          properties:
+            type:
+              type: string
+              example: AdaptiveCard
+            $schema:
+              type: string
+              example: "http://adaptivecards.io/schemas/adaptive-card.json"
+            version:
+              type: string
+              example: "1.5"
+            body:
+              type: array
+        metadata:
+          type: object
+          properties:
+            api_version:
+              type: string
+              example: v1
+            timestamp:
+              type: string
+              format: date-time
+            request_id:
+              type: string
+              format: uuid
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy]
+        service:
+          type: string
+        version:
+          type: string
+
+    DependencyCheck:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [healthy, unhealthy, degraded, unknown]
+        message:
+          type: string
+          nullable: true
+        latency_ms:
+          type: number
+          nullable: true
+
+    ReadinessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy, degraded]
+        service:
+          type: string
+        version:
+          type: string
+        dependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyCheck"
+
+    ErrorDetail:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Error code (e.g. MODULE_01)
+        message:
+          type: string
+        category:
+          type: string
+          enum: [transient, permanent, user, system]
+        details:
+          type: object
+          nullable: true
+        request_id:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        machine_readable:
+          type: object
+          nullable: true
+          description: JSON-LD error for AI agents

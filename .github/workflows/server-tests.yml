@@ -1,0 +1,50 @@
+# Server-based tests: run against deployed discovery service
+# Requires DISCOVERY_SERVICE_URL secret (e.g. https://discovery-staging.example.com)
+
+name: Server Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Override discovery service URL (optional)"
+        required: false
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: "0 6 * * *"
+  push:
+    branches: [main, develop]
+    paths:
+      - "services/discovery-service/**"
+      - "packages/shared/**"
+      - "tests/**"
+      - ".github/workflows/server-tests.yml"
+
+jobs:
+  server-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run server tests
+        env:
+          DISCOVERY_SERVICE_URL: ${{ github.event.inputs.url || secrets.DISCOVERY_SERVICE_URL }}
+        run: |
+          if [ -z "$DISCOVERY_SERVICE_URL" ]; then
+            echo "DISCOVERY_SERVICE_URL not set. Skipping server tests."
+            echo "Configure repository secret DISCOVERY_SERVICE_URL for CI, or run locally with:"
+            echo "  export DISCOVERY_SERVICE_URL=http://localhost:8000"
+            echo "  pytest tests/ -v -m server"
+            exit 0
+          fi
+          pytest tests/ -v -m server --tb=short
