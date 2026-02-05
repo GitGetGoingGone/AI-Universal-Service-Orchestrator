@@ -1,0 +1,5 @@
+# Azure Durable Functions - Python v2
+# Month 0: The Brain - Base orchestrator template
+
+azure-functions>=1.17.0
+azure-functions-durable>=1.4.0

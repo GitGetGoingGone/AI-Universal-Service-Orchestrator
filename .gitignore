@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+local.settings.json
 
 # Python
 .venv/

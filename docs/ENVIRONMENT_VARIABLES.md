@@ -80,7 +80,8 @@ cp .env.example .env
 | `ENVIRONMENT` | No | `development`, `staging`, `production` (default: development) |
 | `LOG_LEVEL` | No | `DEBUG`, `INFO`, `WARNING`, `ERROR` (default: INFO) |
 | `API_BASE_URL` | No | Base URL for API (e.g., `http://localhost:8000`) |
-| `DISCOVERY_SERVICE_URL` | For server tests | URL for discovery service (staging/production). Falls back to `API_BASE_URL`. |
+| `DISCOVERY_SERVICE_URL` | For server tests, orchestrator | Discovery service URL (default: `http://localhost:8000`) |
+| `INTENT_SERVICE_URL` | For orchestrator | Intent service URL (default: `http://localhost:8001`) |
 
 ## Local vs Production
 

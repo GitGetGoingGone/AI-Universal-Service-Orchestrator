@@ -1,0 +1,118 @@
+openapi: 3.1.0
+info:
+  title: Intent Service API
+  description: |
+    Module 4: Intent Resolver - Natural language to structured intent.
+    Uses Azure OpenAI when configured; fallback heuristics otherwise.
+    Chat-First: JSON-LD for AI agents.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8001
+    description: Intent service (default port 8001)
+  - url: "{API_BASE_URL}"
+    description: Environment-specific
+
+tags:
+  - name: Intent
+    description: Intent resolution
+  - name: Health
+    description: Health probes
+
+paths:
+  /api/v1/resolve:
+    post:
+      operationId: resolveIntent
+      summary: Resolve intent from natural language
+      description: |
+        Extracts structured intent (type, entities, search_query) from user message.
+        Persists to database when persist=true and Supabase is configured.
+      tags:
+        - Intent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveRequest"
+      responses:
+        "200":
+          description: Intent resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveResponse"
+        "422":
+          description: Validation error
+
+  /health:
+    get:
+      operationId: health
+      summary: Liveness probe
+      tags: [Health]
+      responses:
+        "200":
+          description: Service is alive
+
+  /ready:
+    get:
+      operationId: ready
+      summary: Readiness probe
+      tags: [Health]
+      responses:
+        "200":
+          description: Service is ready
+
+components:
+  schemas:
+    ResolveRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: User message to resolve
+        user_id:
+          type: string
+          format: uuid
+          nullable: true
+        persist:
+          type: boolean
+          default: true
+
+    ResolveResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            intent_id:
+              type: string
+              format: uuid
+              nullable: true
+            intent_type:
+              type: string
+              enum: [discover, add_to_bundle, checkout, track_status, support, customize, unknown]
+            search_query:
+              type: string
+            entities:
+              type: array
+              items:
+                type: object
+                properties:
+                  type: { type: string }
+                  value: {}
+                  confidence: { type: number }
+            confidence_score:
+              type: number
+        machine_readable:
+          type: object
+          description: JSON-LD ResolveAction for AI agents
+        metadata:
+          type: object
+          properties:
+            api_version: { type: string }
+            timestamp: { type: string }
+            request_id: { type: string }

@@ -56,7 +56,9 @@ async def search_products(
         )
 
         if query:
-            q = q.ilike("name", f"%{query}%")
+            # Search in name or description (case-insensitive)
+            pattern = f"%{query}%"
+            q = q.or_(f"name.ilike.{pattern},description.ilike.{pattern}")
         if partner_id:
             q = q.eq("partner_id", partner_id)
 

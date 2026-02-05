@@ -1,0 +1,12 @@
+# Azure Functions ignore file
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.git/
+.gitignore
+.pytest_cache/
+.coverage
+htmlcov/
+*.md
+!README.md

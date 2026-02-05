@@ -8,19 +8,39 @@ This document describes the API contract strategy for the AI Universal Service O
 - Specs live in `docs/api/` and are the source of truth for consumers and generators.
 - FastAPI auto-generates OpenAPI from code; we maintain hand-authored specs for documentation and contract-first workflows.
 
-## Discovery Service
+## Discovery Service (Module 1)
 
 | Spec | Path | Description |
 |------|------|-------------|
 | Discovery Service | `docs/api/discovery-service.openapi.yaml` | Module 1: Product discovery, health probes |
 
-### Endpoints
-
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/discover` | Discover products by intent (Chat-First: JSON-LD + Adaptive Card) |
 | GET | `/health` | Liveness probe |
-| GET | `/ready` | Readiness probe (dependency checks) |
+| GET | `/ready` | Readiness probe |
+| GET | `/` | Service info |
+
+## Orchestrator Service
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/chat` | Chat-First: resolve intent + discover products (when discover) |
+| GET | `/health` | Liveness probe |
+| GET | `/ready` | Readiness probe (checks Intent + Discovery) |
+| GET | `/` | Service info |
+
+## Intent Service (Module 4)
+
+| Spec | Path | Description |
+|------|------|-------------|
+| Intent Service | `docs/api/intent-service.openapi.yaml` | Module 4: Natural language to structured intent |
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/resolve` | Resolve intent from user message (Azure OpenAI or fallback) |
+| GET | `/health` | Liveness probe |
+| GET | `/ready` | Readiness probe |
 | GET | `/` | Service info |
 
 ### Example Request

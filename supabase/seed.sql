@@ -48,7 +48,7 @@ INSERT INTO partners (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- Sample product
+-- Sample product (description includes "flowers" for search matching)
 INSERT INTO products (
   id,
   partner_id,
@@ -63,11 +63,13 @@ INSERT INTO products (
   'c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33',
   'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
   'Red Roses Bouquet',
-  'A dozen fresh red roses',
+  'A dozen fresh red roses - flowers for any occasion',
   49.99,
   'USD',
   '["flowers"]'::jsonb,
   NOW(),
   NOW()
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  description = EXCLUDED.description,
+  updated_at = NOW();

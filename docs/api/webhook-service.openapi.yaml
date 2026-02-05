@@ -1,0 +1,61 @@
+openapi: 3.1.0
+info:
+  title: Webhook Push Notification Bridge API
+  description: Push updates to ChatGPT, Gemini, WhatsApp chat threads
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8003
+    description: Local development
+
+paths:
+  /api/v1/webhooks/chat/{platform}/{thread_id}:
+    post:
+      operationId: pushToChat
+      summary: Push update to chat thread
+      parameters:
+        - name: platform
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [chatgpt, gemini, whatsapp]
+        - name: thread_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                narrative: { type: string }
+                adaptive_card: { type: object }
+                metadata: { type: object }
+      responses:
+        "200":
+          description: Delivered
+        "502":
+          description: Delivery failed
+
+  /api/v1/webhooks/push:
+    post:
+      operationId: push
+      summary: Push (alternative endpoint)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform, thread_id]
+              properties:
+                platform: { type: string, enum: [chatgpt, gemini, whatsapp] }
+                thread_id: { type: string }
+                narrative: { type: string }
+                adaptive_card: { type: object }
+                metadata: { type: object }
+      responses:
+        "200":
+          description: Delivered

@@ -1,0 +1,130 @@
+openapi: 3.1.0
+info:
+  title: Orchestrator Service API
+  description: |
+    Agentic AI + AI Agents Chat Entry Point. Single chat endpoint for ChatGPT/Gemini.
+    Resolves intent from natural language, discovers products when intent is "discover".
+    Uses LLM-based planning when agentic=true (default).
+  version: 0.2.0
+
+servers:
+  - url: http://localhost:8002
+    description: Orchestrator (default port 8002)
+
+tags:
+  - name: Chat
+    description: Orchestrated chat flow
+
+paths:
+  /api/v1/chat:
+    post:
+      operationId: chat
+      summary: Chat - Agentic AI (intent + discovery)
+      description: |
+        AI Agents Chat Entry Point. Sends user message → agent plans → resolves intent → discovers products.
+        When agentic=true (default): LLM-based planning. Falls back to direct flow when disabled.
+      tags:
+        - Chat
+      parameters:
+        - name: agentic
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+          description: Use agentic AI planning (LLM-based)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                user_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 20
+      responses:
+        "200":
+          description: Intent + products (when discover)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      intent:
+                        type: object
+                        properties:
+                          intent_type: { type: string }
+                          search_query: { type: string }
+                          entities: { type: array }
+                      products:
+                        type: object
+                        nullable: true
+                        properties:
+                          products: { type: array }
+                          count: { type: integer }
+                  machine_readable:
+                    type: object
+                  adaptive_card:
+                    type: object
+                    nullable: true
+                  agent_reasoning:
+                    type: array
+                    items: { type: string }
+                    description: Agent's reasoning steps (when agentic=true)
+                  metadata:
+                    type: object
+
+  /api/v1/agentic-consent:
+    get:
+      operationId: agenticConsent
+      summary: Agentic consent and agency boundaries
+      description: Returns what the agent is allowed to do on behalf of the user.
+      tags:
+        - Chat
+      responses:
+        "200":
+          description: Consent config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scope: { type: string }
+                  allowed_actions: { type: array, items: { type: string } }
+                  requires_confirmation: { type: array, items: { type: string } }
+
+  /api/v1/agentic-handoff:
+    get:
+      operationId: agenticHandoff
+      summary: Agentic handoff config (SSO 2.0)
+      description: |
+        Returns config for seamless handoff from ChatGPT/Gemini to custom UI.
+        Requires Clerk (or equivalent) to be configured.
+      tags:
+        - Chat
+      responses:
+        "200":
+          description: Handoff config (Clerk publishable key, redirect URL)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configured: { type: boolean }
+                  publishable_key: { type: string, nullable: true }
+                  sign_in_url: { type: string, nullable: true }

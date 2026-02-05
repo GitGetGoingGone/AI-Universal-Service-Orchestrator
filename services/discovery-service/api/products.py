@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request
 
 from db import search_products
-from adaptive_cards.product_card import generate_product_card
+from packages.shared.adaptive_cards import generate_product_card
 
 router = APIRouter(prefix="/api/v1", tags=["Discover"])
 

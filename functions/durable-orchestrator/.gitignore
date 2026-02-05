@@ -1,0 +1,7 @@
+# Azure Functions
+local.settings.json
+.venv/
+venv/
+__pycache__/
+.python_packages/
+azurite-data/

@@ -10,10 +10,17 @@ Instructions for creating a staging environment so server-based tests and pre-pr
 | **Staging** | Deployed copy for testing, CI, and QA before production |
 | **Production** | Live users |
 
-Staging needs:
-1. **Database** – Supabase project (separate from production)
-2. **Discovery service** – Deployed and reachable via URL
-3. **CI secret** – `DISCOVERY_SERVICE_URL` for server tests
+### Full Stack (E2E Testing)
+
+For end-to-end testing, deploy all services:
+
+| Service | Port (local) | Purpose |
+|---------|--------------|---------|
+| Discovery | 8000 | Product discovery |
+| Intent | 8001 | Intent resolution |
+| Orchestrator | 8002 | Agentic AI, Chat Entry Point |
+| Webhook | 8003 | Push updates to ChatGPT/Gemini/WhatsApp |
+| Durable Orchestrator | 7071 | Long-running workflows (Azure Functions) |
 
 ---
 
@@ -79,14 +86,9 @@ Railway sets `PORT` automatically.
 
 ### Option B: Render
 
-1. Go to [render.com](https://render.com) → New → Web Service
-2. Connect GitHub repo
-3. Settings:
-   - **Root Directory**: (leave empty = repo root)
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `cd services/discovery-service && uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. Add environment variables
-5. Deploy → get URL (e.g. `https://discovery-service-xxx.onrender.com`)
+See **[RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md)** for full stack deployment.
+
+Quick: [render.com](https://render.com) → New → Web Service → connect repo → Root Directory: *(empty)* → Build: `pip install -r requirements.txt` → Start: `cd services/discovery-service && uvicorn main:app --host 0.0.0.0 --port $PORT` → add env vars.
 
 ### Option C: Fly.io
 
@@ -187,6 +189,76 @@ Actions → Server Tests → Run workflow → optionally enter a different URL.
 
 ---
 
+## Step 6: Full Stack Deployment (E2E)
+
+Deploy all services for end-to-end testing. Use the same Supabase staging project for all.
+
+### 6.1 Service URLs
+
+After deploying each service, note the URLs:
+
+| Service | Env Var | Example |
+|---------|---------|---------|
+| Discovery | `DISCOVERY_SERVICE_URL` | `https://uso-discovery-staging.railway.app` |
+| Intent | `INTENT_SERVICE_URL` | `https://uso-intent-staging.railway.app` |
+| Orchestrator | `ORCHESTRATOR_SERVICE_URL` | `https://uso-orchestrator-staging.railway.app` |
+| Webhook | `WEBHOOK_SERVICE_URL` | `https://uso-webhook-staging.railway.app` |
+
+### 6.2 Deploy Each Service (Railway example)
+
+Create 4 Railway services from the same repo, each with different start commands:
+
+| Service | Start Command |
+|---------|---------------|
+| Discovery | `cd services/discovery-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Intent | `cd services/intent-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Orchestrator | `cd services/orchestrator-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Webhook | `cd services/webhook-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+
+### 6.3 Orchestrator Environment Variables
+
+```
+INTENT_SERVICE_URL=https://uso-intent-staging.railway.app
+DISCOVERY_SERVICE_URL=https://uso-discovery-staging.railway.app
+DURABLE_ORCHESTRATOR_URL=https://uso-durable.azurewebsites.net
+```
+
+### 6.4 Webhook Service Environment Variables
+
+```
+SUPABASE_URL=<staging>
+SUPABASE_SECRET_KEY=<staging>
+CHATGPT_WEBHOOK_URL=  # Optional: OpenAI webhook for push
+GEMINI_WEBHOOK_URL=   # Optional: Gemini webhook for push
+TWILIO_ACCOUNT_SID=   # Optional: for WhatsApp push
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_NUMBER=
+```
+
+### 6.5 Durable Functions (Azure)
+
+1. Deploy to Azure Functions (see [functions/durable-orchestrator/README.md](../functions/durable-orchestrator/README.md))
+2. Set `WEBHOOK_SERVICE_URL` in Application Settings to your webhook service URL
+
+### 6.6 E2E Verification
+
+```bash
+# 1. Chat flow (Orchestrator → Intent → Discovery)
+curl -X POST https://ORCHESTRATOR_URL/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"text": "find cakes"}'
+
+# 2. Webhook push (simulate Status Narrator)
+curl -X POST https://WEBHOOK_URL/api/v1/webhooks/chat/chatgpt/test-thread-123 \
+  -H "Content-Type: application/json" \
+  -d '{"narrative": "Order status updated", "adaptive_card": null}'
+
+# 3. Discovery
+curl "https://DISCOVERY_URL/api/v1/discover?intent=flowers"
+```
+
+---
+
 ## Checklist
 
 - [ ] Supabase staging project created
@@ -197,6 +269,9 @@ Actions → Server Tests → Run workflow → optionally enter a different URL.
 - [ ] `/health`, `/ready`, `/discover` return expected responses
 - [ ] `DISCOVERY_SERVICE_URL` added as GitHub secret
 - [ ] Server tests pass: `pytest tests/ -v -m server` (with URL set)
+- [ ] **Full stack**: Discovery, Intent, Orchestrator, Webhook deployed
+- [ ] **Full stack**: `ORCHESTRATOR_SERVICE_URL` set for E2E tests
+- [ ] **Full stack**: Durable Functions deployed with `WEBHOOK_SERVICE_URL`
 
 ---
 
