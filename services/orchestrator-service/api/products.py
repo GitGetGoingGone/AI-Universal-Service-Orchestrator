@@ -6,7 +6,11 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from clients import get_product_details, add_to_bundle as add_to_bundle_client
+from clients import (
+    get_product_details,
+    get_bundle_details,
+    add_to_bundle as add_to_bundle_client,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["Products"])
 
@@ -19,6 +23,32 @@ async def get_product(product_id: str):
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
+
+
+@router.get("/bundles/{bundle_id}")
+async def get_bundle(bundle_id: str):
+    """Get bundle by ID. For View Bundle action."""
+    try:
+        return await get_bundle_details(bundle_id)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Bundle not found")
+        raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
+
+
+@router.get("/bundles/{bundle_id}")
+async def get_bundle(bundle_id: str):
+    """Get bundle by ID. For View Bundle action."""
+    try:
+        return await get_bundle_details(bundle_id)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Bundle not found")
         raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")

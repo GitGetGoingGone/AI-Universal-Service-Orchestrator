@@ -50,6 +50,15 @@ async def get_product_details(product_id: str) -> Dict[str, Any]:
         return r.json()
 
 
+async def get_bundle_details(bundle_id: str) -> Dict[str, Any]:
+    """Call Discovery service to get bundle by ID (View Bundle)."""
+    url = f"{settings.discovery_service_url}/api/v1/bundles/{bundle_id}"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        return r.json()
+
+
 async def add_to_bundle(
     product_id: str,
     user_id: Optional[str] = None,

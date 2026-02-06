@@ -180,3 +180,65 @@ async def add_product_to_bundle(
             }
     except Exception:
         return None
+
+
+async def get_bundle_by_id(bundle_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get bundle by ID with items (legs joined to products).
+    Returns bundle dict with items array for Adaptive Card.
+    """
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        bundle_result = (
+            client.table("bundles")
+            .select("id, user_id, bundle_name, total_price, currency, status, created_at")
+            .eq("id", bundle_id)
+            .single()
+            .execute()
+        )
+        if not bundle_result.data:
+            return None
+        bundle = dict(bundle_result.data)
+
+        legs_result = (
+            client.table("bundle_legs")
+            .select("id, leg_sequence, product_id, price")
+            .eq("bundle_id", bundle_id)
+            .order("leg_sequence")
+            .execute()
+        )
+        legs = legs_result.data or []
+
+        product_ids = [leg["product_id"] for leg in legs if leg.get("product_id")]
+        product_names = {}
+        if product_ids:
+            products_result = (
+                client.table("products")
+                .select("id, name, currency")
+                .in_("id", product_ids)
+                .execute()
+            )
+            for p in products_result.data or []:
+                product_names[str(p["id"])] = p
+
+        currency = bundle.get("currency", "USD")
+        items = []
+        for leg in legs:
+            pid = str(leg.get("product_id", ""))
+            p = product_names.get(pid, {})
+            items.append({
+                "id": str(leg.get("id", "")),
+                "product_id": pid,
+                "name": p.get("name", "Unknown"),
+                "price": float(leg.get("price", 0)),
+                "currency": p.get("currency", currency),
+            })
+
+        bundle["items"] = items
+        bundle["item_count"] = len(items)
+        bundle["name"] = bundle.get("bundle_name") or "Your Bundle"
+        return bundle
+    except Exception:
+        return None

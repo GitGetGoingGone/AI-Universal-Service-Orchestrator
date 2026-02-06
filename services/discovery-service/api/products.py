@@ -8,8 +8,9 @@ from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from db import search_products, get_product_by_id, add_product_to_bundle
-from packages.shared.adaptive_cards import generate_product_card
+from db import search_products, get_product_by_id, add_product_to_bundle, get_bundle_by_id
+from packages.shared.adaptive_cards import generate_product_card, generate_bundle_card
+from packages.shared.adaptive_cards.base import create_card, text_block
 
 router = APIRouter(prefix="/api/v1", tags=["Discover"])
 
@@ -108,6 +109,44 @@ async def get_product(
     }
 
 
+@router.get("/bundles/{bundle_id}")
+async def get_bundle(request: Request, bundle_id: str):
+    """Get bundle by ID with items. For View Bundle action."""
+    bundle = await get_bundle_by_id(bundle_id)
+    if not bundle:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    items = bundle.get("items", [])
+    item_list = [
+        {
+            "@type": "Product",
+            "name": item.get("name"),
+            "offers": {"@type": "Offer", "price": item.get("price"), "priceCurrency": item.get("currency", "USD")},
+        }
+        for item in items
+    ]
+    return {
+        "data": bundle,
+        "machine_readable": {
+            "@context": "https://schema.org",
+            "@type": "Order",
+            "orderNumber": str(bundle.get("id")),
+            "name": bundle.get("name"),
+            "totalPrice": float(bundle.get("total_price", 0)),
+            "priceCurrency": bundle.get("currency", "USD"),
+            "orderItemCount": len(items),
+            "orderedItem": item_list,
+        },
+        "adaptive_card": generate_bundle_card(bundle),
+        "summary": f"Bundle: {bundle.get('name', 'Your Bundle')} — {len(items)} item(s), {bundle.get('currency', 'USD')} {float(bundle.get('total_price', 0)):.2f}",
+        "metadata": {
+            "api_version": "v1",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "request_id": request_id,
+        },
+    }
+
+
 @router.post("/bundle/add")
 async def add_to_bundle(request: Request, body: AddToBundleBody):
     """Add product to bundle. For Add to Bundle action."""
@@ -119,9 +158,18 @@ async def add_to_bundle(request: Request, body: AddToBundleBody):
     if not result:
         raise HTTPException(status_code=400, detail="Failed to add to bundle (product not found or error)")
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    summary = f"Added {result.get('product_added', 'product')} to bundle. Total: {result.get('currency', 'USD')} {float(result.get('total_price', 0)):.2f}"
+    bundle_id = result.get("bundle_id")
+    adaptive_card = create_card(
+        body=[text_block(summary)],
+        actions=[
+            {"type": "Action.Submit", "title": "View Bundle", "data": {"action": "view_bundle", "bundle_id": str(bundle_id)}},
+        ],
+    ) if bundle_id else None
     return {
         "data": result,
-        "summary": f"Added {result.get('product_added', 'product')} to bundle. Total: {result.get('currency', 'USD')} {float(result.get('total_price', 0)):.2f}",
+        "summary": summary,
+        "adaptive_card": adaptive_card,
         "metadata": {
             "api_version": "v1",
             "timestamp": datetime.utcnow().isoformat() + "Z",

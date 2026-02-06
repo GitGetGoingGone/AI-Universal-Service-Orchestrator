@@ -101,6 +101,7 @@ async def root():
         "endpoints": {
             "chat": "POST /api/v1/chat",
             "products": "GET /api/v1/products/{id}",
+            "bundles": "GET /api/v1/bundles/{id}",
             "bundle_add": "POST /api/v1/bundle/add",
             "agentic_consent": "GET /api/v1/agentic-consent",
             "agentic_handoff": "GET /api/v1/agentic-handoff",
