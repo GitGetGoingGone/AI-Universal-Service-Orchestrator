@@ -1,17 +1,46 @@
 """HTTP clients for Intent and Discovery services."""
 
+import logging
 from typing import Any, Dict, Optional
 
 import httpx
 
 from config import settings
+from packages.shared.discovery import fallback_search_query
+
+logger = logging.getLogger(__name__)
 
 # Render cold starts can take 30-60s; use 60s timeout for staging
 HTTP_TIMEOUT = 60.0
 
 
+async def resolve_intent_with_fallback(text: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Resolve intent via Intent service. On 502/timeout/unavailable, use local fallback
+    so chat still returns products (Intent service outage resilience).
+    """
+    try:
+        return await resolve_intent(text, user_id)
+    except (httpx.HTTPStatusError, httpx.RequestError) as e:
+        logger.warning("Intent service unavailable (%s), using local fallback", e)
+        query = fallback_search_query(text)
+        return {
+            "data": {
+                "intent_id": None,
+                "intent_type": "discover",
+                "search_query": query,
+                "entities": [],
+                "confidence_score": 0.5,
+            },
+            "metadata": {"fallback": True, "reason": str(e)},
+        }
+
+
 async def resolve_intent(text: str, user_id: Optional[str] = None) -> Dict[str, Any]:
-    """Call Intent service to resolve intent from natural language."""
+    """
+    Call Intent service to resolve intent from natural language.
+    Raises on 4xx/5xx. Callers should catch and use local fallback when Intent is unavailable.
+    """
     url = f"{settings.intent_service_url}/api/v1/resolve"
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         r = await client.post(

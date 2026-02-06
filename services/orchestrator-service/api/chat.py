@@ -7,7 +7,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-from clients import resolve_intent, discover_products, start_orchestration, register_thread_mapping
+from clients import resolve_intent_with_fallback, discover_products, start_orchestration, register_thread_mapping
 from agentic.loop import run_agentic_loop
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
@@ -49,9 +49,9 @@ async def chat(
             user_id=body.user_id,
         )
 
-    # Resolve intent with user_id captured
+    # Resolve intent with user_id captured; uses local fallback when Intent service unavailable
     async def _resolve(text: str):
-        return await resolve_intent(text, body.user_id)
+        return await resolve_intent_with_fallback(text, body.user_id)
 
     async def _discover(query: str, limit: int = 20, location: Optional[str] = None):
         return await discover_products(
