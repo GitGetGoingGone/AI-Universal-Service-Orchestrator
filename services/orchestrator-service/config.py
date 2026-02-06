@@ -29,6 +29,11 @@ class Settings:
         get_env("DURABLE_ORCHESTRATOR_URL") or "http://localhost:7071"
     ).rstrip("/")
 
+    # Webhook service (for thread mapping, push updates)
+    webhook_service_url: str = (
+        get_env("WEBHOOK_SERVICE_URL") or "http://localhost:8003"
+    ).rstrip("/")
+
     # Azure OpenAI (for Agentic AI planner - optional)
     azure_openai_endpoint: str = get_env("AZURE_OPENAI_ENDPOINT") or ""
     azure_openai_api_key: str = get_env("AZURE_OPENAI_API_KEY") or ""

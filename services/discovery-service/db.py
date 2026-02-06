@@ -66,3 +66,117 @@ async def search_products(
         return result.data or []
     except Exception:
         return []
+
+
+async def get_product_by_id(product_id: str) -> Optional[Dict[str, Any]]:
+    """Get a single product by ID."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("products")
+            .select("id, name, description, price, currency, capabilities, metadata, partner_id")
+            .eq("id", product_id)
+            .is_("deleted_at", "null")
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception:
+        return None
+
+
+async def add_product_to_bundle(
+    product_id: str,
+    user_id: Optional[str] = None,
+    bundle_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Add product to bundle. Creates new draft bundle if bundle_id not provided.
+    Returns bundle with updated info.
+    """
+    client = get_supabase()
+    if not client:
+        return None
+
+    product = await get_product_by_id(product_id)
+    if not product:
+        return None
+
+    price = float(product.get("price", 0))
+    partner_id = product.get("partner_id")
+
+    try:
+        if bundle_id:
+            # Add to existing bundle
+            seq_result = (
+                client.table("bundle_legs")
+                .select("leg_sequence")
+                .eq("bundle_id", bundle_id)
+                .order("leg_sequence", desc=True)
+                .limit(1)
+                .execute()
+            )
+            next_seq = (seq_result.data[0]["leg_sequence"] + 1) if seq_result.data else 1
+
+            bundle = (
+                client.table("bundles")
+                .select("*")
+                .eq("id", bundle_id)
+                .single()
+                .execute()
+            )
+            if not bundle.data:
+                return None
+            bundle_row = bundle.data
+            total = float(bundle_row.get("total_price", 0)) + price
+
+            client.table("bundle_legs").insert({
+                "bundle_id": bundle_id,
+                "leg_sequence": next_seq,
+                "product_id": product_id,
+                "partner_id": partner_id,
+                "leg_type": "product",
+                "price": price,
+            }).execute()
+
+            client.table("bundles").update({"total_price": total}).eq("id", bundle_id).execute()
+
+            return {
+                "bundle_id": bundle_id,
+                "product_added": product.get("name"),
+                "total_price": total,
+                "currency": bundle_row.get("currency", "USD"),
+            }
+        else:
+            # Create new draft bundle
+            bundle_row = {
+                "user_id": user_id,
+                "bundle_name": "Chat Bundle",
+                "total_price": price,
+                "currency": product.get("currency", "USD"),
+                "status": "draft",
+            }
+            bundle_result = client.table("bundles").insert(bundle_row).execute()
+            if not bundle_result.data:
+                return None
+            new_bundle_id = bundle_result.data[0]["id"]
+
+            client.table("bundle_legs").insert({
+                "bundle_id": new_bundle_id,
+                "leg_sequence": 1,
+                "product_id": product_id,
+                "partner_id": partner_id,
+                "leg_type": "product",
+                "price": price,
+            }).execute()
+
+            return {
+                "bundle_id": new_bundle_id,
+                "product_added": product.get("name"),
+                "total_price": price,
+                "currency": product.get("currency", "USD"),
+            }
+    except Exception:
+        return None

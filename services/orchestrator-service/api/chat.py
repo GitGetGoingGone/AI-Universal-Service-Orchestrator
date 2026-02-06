@@ -7,7 +7,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-from clients import resolve_intent, discover_products, start_orchestration
+from clients import resolve_intent, discover_products, start_orchestration, register_thread_mapping
 from agentic.loop import run_agentic_loop
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
@@ -40,6 +40,14 @@ async def chat(
     When agentic=False or LLM unavailable: direct intent→discover flow.
     """
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+
+    # Register thread mapping when ChatGPT/Gemini pass thread_id + platform (enables webhook push)
+    if body.thread_id and body.platform:
+        await register_thread_mapping(
+            platform=body.platform,
+            thread_id=body.thread_id,
+            user_id=body.user_id,
+        )
 
     # Resolve intent with user_id captured
     async def _resolve(text: str):

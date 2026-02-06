@@ -77,3 +77,81 @@ paths:
                   machine_readable:
                     type: object
                     description: JSON-LD for LLM consumption
+  /api/v1/products/{product_id}:
+    get:
+      operationId: getProductDetails
+      summary: Get product details by ID
+      description: |
+        Fetch full product details for View Details action.
+        Use when user clicks "View Details" on a product card.
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Product UUID
+      responses:
+        "200":
+          description: Product details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+                      description: { type: string }
+                      price: { type: number }
+                      currency: { type: string }
+        "404":
+          description: Product not found
+  /api/v1/bundle/add:
+    post:
+      operationId: addToBundle
+      summary: Add product to bundle
+      description: |
+        Add a product to the user's bundle (cart).
+        Use when user clicks "Add to Bundle" on a product card.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id]
+              properties:
+                product_id:
+                  type: string
+                  description: Product UUID from product card
+                user_id:
+                  type: string
+                  nullable: true
+                  description: Optional user ID
+                bundle_id:
+                  type: string
+                  nullable: true
+                  description: Existing bundle ID to add to (creates new if omitted)
+      responses:
+        "200":
+          description: Product added to bundle
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: string
+                    description: Human-readable confirmation
+                  data:
+                    type: object
+                    properties:
+                      bundle_id: { type: string }
+                      product_added: { type: string }
+                      total_price: { type: number }
+                      currency: { type: string }
+        "400":
+          description: Failed to add (product not found or error)

@@ -83,9 +83,11 @@ paths:
 
 ---
 
-## Priority 2: Accept `thread_id` and `platform` in Chat
+## Priority 2: Thread Mapping (Implemented ✅)
 
-**Goal**: When ChatGPT/Gemini call our API, they pass `thread_id` so we can push status updates back into the same chat.
+**Goal**: When ChatGPT/Gemini call our API with `thread_id` and `platform`, register the mapping so Durable can push status updates to the same chat.
+
+**Implementation**: When both are provided, the orchestrator calls `POST /api/v1/webhooks/mappings` to upsert into `chat_thread_mappings`. ChatGPT may not expose `thread_id`; include it in the schema for when it becomes available or for Gemini.
 
 ### Implementation
 

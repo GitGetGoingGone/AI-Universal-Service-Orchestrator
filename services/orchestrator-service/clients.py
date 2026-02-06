@@ -41,6 +41,35 @@ async def discover_products(
         return r.json()
 
 
+async def get_product_details(product_id: str) -> Dict[str, Any]:
+    """Call Discovery service to get product by ID (View Details)."""
+    url = f"{settings.discovery_service_url}/api/v1/products/{product_id}"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        return r.json()
+
+
+async def add_to_bundle(
+    product_id: str,
+    user_id: Optional[str] = None,
+    bundle_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Call Discovery service to add product to bundle."""
+    url = f"{settings.discovery_service_url}/api/v1/bundle/add"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(
+            url,
+            json={
+                "product_id": product_id,
+                "user_id": user_id,
+                "bundle_id": bundle_id,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 async def start_orchestration(
     message: str = "Hello from orchestrator",
     wait_event_name: str = "WakeUp",
@@ -61,3 +90,27 @@ async def start_orchestration(
             "statusQueryGetUri": None,
             "message": "Orchestration could not be started. Ensure Durable Functions is running.",
         }
+
+
+async def register_thread_mapping(
+    platform: str,
+    thread_id: str,
+    user_id: Optional[str] = None,
+    platform_user_id: Optional[str] = None,
+) -> bool:
+    """Register chat thread mapping for webhook push. Returns True if successful."""
+    url = f"{settings.webhook_service_url}/api/v1/webhooks/mappings"
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.post(
+                url,
+                json={
+                    "platform": platform,
+                    "thread_id": thread_id,
+                    "user_id": user_id,
+                    "platform_user_id": platform_user_id,
+                },
+            )
+            return r.status_code == 200
+    except Exception:
+        return False

@@ -98,3 +98,36 @@ def get_chat_thread_mapping(platform: str, thread_id: str) -> Optional[Dict[str,
         return result.data[0] if result.data else None
     except Exception:
         return None
+
+
+def upsert_chat_thread_mapping(
+    platform: str,
+    thread_id: str,
+    user_id: Optional[str] = None,
+    platform_user_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Register or update chat thread mapping. Used when ChatGPT/Gemini call chat with thread_id.
+    Enables webhook push to the same thread later (e.g. from Durable Status Narrator).
+    """
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        row = {
+            "platform": platform,
+            "thread_id": thread_id,
+            "is_active": True,
+        }
+        if user_id:
+            row["user_id"] = user_id
+        if platform_user_id:
+            row["platform_user_id"] = platform_user_id
+        result = (
+            client.table("chat_thread_mappings")
+            .upsert(row, on_conflict="platform,thread_id")
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception:
+        return None

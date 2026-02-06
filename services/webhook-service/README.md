@@ -7,6 +7,7 @@ Pushes status updates to ChatGPT, Gemini, and WhatsApp chat threads. Used by Dur
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/v1/webhooks/chat/{platform}/{thread_id}` | Push update to chat thread |
+| POST | `/api/v1/webhooks/mappings` | Register thread mapping (platform + thread_id) |
 | POST | `/api/v1/webhooks/push` | Push (alternative, JSON body) |
 | GET | `/health` | Liveness |
 | GET | `/ready` | Readiness (database) |

@@ -9,12 +9,21 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from handlers import send_chatgpt_webhook, send_gemini_webhook, send_whatsapp_webhook
-from db import log_webhook_delivery, update_webhook_delivery
+from db import log_webhook_delivery, update_webhook_delivery, upsert_chat_thread_mapping
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["Webhooks"])
 logger = logging.getLogger(__name__)
 
 Platform = Literal["chatgpt", "gemini", "whatsapp"]
+
+
+class MappingRequest(BaseModel):
+    """Request to register a chat thread mapping."""
+
+    platform: Platform = Field(..., description="Platform (chatgpt, gemini, whatsapp)")
+    thread_id: str = Field(..., description="Platform-specific thread ID")
+    user_id: Optional[str] = Field(None, description="Optional user ID")
+    platform_user_id: Optional[str] = Field(None, description="Optional platform user ID")
 
 
 class PushPayload(BaseModel):
@@ -108,3 +117,29 @@ async def push(
             "metadata": body.metadata,
         },
     )
+
+
+@router.post("/mappings")
+async def register_mapping(body: MappingRequest):
+    """
+    Register chat thread mapping. Called by orchestrator when ChatGPT/Gemini
+    send thread_id and platform in the chat request. Enables webhook push
+    to the same thread later (e.g. from Durable Status Narrator).
+    """
+    mapping = upsert_chat_thread_mapping(
+        platform=body.platform,
+        thread_id=body.thread_id,
+        user_id=body.user_id,
+        platform_user_id=body.platform_user_id,
+    )
+    if not mapping:
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to register mapping (Supabase unavailable)",
+        )
+    return {
+        "status": "registered",
+        "platform": body.platform,
+        "thread_id": body.thread_id,
+        "id": mapping.get("id"),
+    }

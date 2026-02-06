@@ -59,3 +59,27 @@ paths:
       responses:
         "200":
           description: Delivered
+
+  /api/v1/webhooks/mappings:
+    post:
+      operationId: registerMapping
+      summary: Register chat thread mapping
+      description: |
+        Register platform + thread_id for webhook push. Called by orchestrator
+        when ChatGPT/Gemini pass thread_id in chat request.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform, thread_id]
+              properties:
+                platform: { type: string, enum: [chatgpt, gemini, whatsapp] }
+                thread_id: { type: string }
+                user_id: { type: string, nullable: true }
+                platform_user_id: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Mapping registered
+        "503":
+          description: Supabase unavailable
