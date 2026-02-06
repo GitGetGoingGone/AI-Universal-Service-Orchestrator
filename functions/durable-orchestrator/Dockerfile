@@ -8,11 +8,12 @@ ENV AzureFunctionsJobHost__Logging__Console__IsEnabled=true
 # Render uses port 10000 for Docker; Azure Functions reads WEBSITES_PORT
 ENV WEBSITES_PORT=10000
 
-# Install Azure Functions Core Tools via npm (base image lacks 'func' CLI)
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
-    && npm install -g azure-functions-core-tools@4 --unsafe-perm true \
-    && apt-get remove -y npm && apt-get autoremove -y \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /root/.npm
+# Install Azure Functions Core Tools via apt (base image lacks 'func' CLI)
+RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates \
+    && wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/microsoft-debian-bullseye-prod bullseye main" > /etc/apt/sources.list.d/microsoft.list \
+    && apt-get update && apt-get install -y --no-install-recommends azure-functions-core-tools-4 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy and install dependencies
 COPY requirements.txt /home/site/wwwroot/
