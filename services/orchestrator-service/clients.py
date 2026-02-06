@@ -6,11 +6,14 @@ import httpx
 
 from config import settings
 
+# Render cold starts can take 30-60s; use 60s timeout for staging
+HTTP_TIMEOUT = 60.0
+
 
 async def resolve_intent(text: str, user_id: Optional[str] = None) -> Dict[str, Any]:
     """Call Intent service to resolve intent from natural language."""
     url = f"{settings.intent_service_url}/api/v1/resolve"
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         r = await client.post(
             url,
             json={"text": text, "user_id": user_id, "persist": True},
@@ -32,7 +35,7 @@ async def discover_products(
         params["location"] = location
     if partner_id:
         params["partner_id"] = partner_id
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         r = await client.get(url, params=params)
         r.raise_for_status()
         return r.json()
@@ -45,7 +48,7 @@ async def start_orchestration(
     """Start a Durable Functions orchestration instance. Returns error dict if Durable is unavailable."""
     url = f"{settings.durable_orchestrator_url}/api/orchestrators/base_orchestrator"
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
             r = await client.post(
                 url,
                 json={"message": message, "wait_event_name": wait_event_name},

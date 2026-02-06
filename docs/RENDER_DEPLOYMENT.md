@@ -198,6 +198,7 @@ curl $WEBHOOK/health
 curl "$DURABLE/api/orchestrators/base_orchestrator" -X POST -H "Content-Type: application/json" -d '{}'
 
 # Chat flow (main E2E)
+# Tip: On free tier, warm up Discovery and Intent first (curl their /health) to avoid cold-start timeouts
 curl -X POST $ORCHESTRATOR/api/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"text": "find cakes"}'
@@ -217,6 +218,7 @@ curl -X POST $WEBHOOK/api/v1/webhooks/chat/chatgpt/test-123 \
 - Services spin down after ~15 minutes of inactivity
 - First request after spin-down can take 30–60 seconds
 - Free tier has limited hours per month
+- **Chat flow**: If you get "All connection attempts failed", warm up Discovery and Intent first: `curl $DISCOVERY/health && curl $INTENT/health`, then retry the chat. The orchestrator uses a 60s timeout to tolerate cold starts.
 
 ### Port
 
