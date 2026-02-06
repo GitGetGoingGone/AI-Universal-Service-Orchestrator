@@ -1,5 +1,6 @@
 """Supabase database client for discovery service."""
 
+import uuid as uuid_module
 from typing import Any, Dict, List, Optional
 
 from supabase import create_client, Client
@@ -151,13 +152,22 @@ async def add_product_to_bundle(
             }
         else:
             # Create new draft bundle
+            # user_id must be a valid UUID referencing users(id); omit if not (e.g. "test-user")
+            bundle_user_id = None
+            if user_id:
+                try:
+                    uid = uuid_module.UUID(str(user_id))
+                    bundle_user_id = str(uid)
+                except (ValueError, TypeError):
+                    pass
             bundle_row = {
-                "user_id": user_id,
                 "bundle_name": "Chat Bundle",
                 "total_price": price,
                 "currency": product.get("currency", "USD"),
                 "status": "draft",
             }
+            if bundle_user_id:
+                bundle_row["user_id"] = bundle_user_id
             bundle_result = client.table("bundles").insert(bundle_row).execute()
             if not bundle_result.data:
                 return None
