@@ -90,7 +90,9 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | **Region** | Same as other services |
 | **Environment** / **Language** | **Docker** |
 | **Root Directory** | `functions/durable-orchestrator` |
-| **Start Command** | *(leave empty – the Docker image starts automatically)* |
+| **Start Command** | *(leave empty – the image CMD starts the host)* |
+
+**Important:** If you set a custom Start Command earlier, **remove it** so the image uses its default CMD. If Render requires a Start Command, use: `func host start`
 
 **Dockerfile Path:** When Root Directory is `functions/durable-orchestrator`, the Dockerfile is at the root of that folder. Render usually auto-detects it. If you see a **Dockerfile Path** field (sometimes under **Advanced** or **Build & Deploy**), leave it empty or set to `Dockerfile`.
 
