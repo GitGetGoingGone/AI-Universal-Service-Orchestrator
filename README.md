@@ -73,6 +73,8 @@ curl -X POST http://localhost:8002/api/v1/chat -H "Content-Type: application/jso
 
 **Deploy to staging**: See [Render Deployment](docs/RENDER_DEPLOYMENT.md) or [Staging Setup](docs/STAGING_SETUP.md)
 
+**ChatGPT/Gemini demo**: See [ChatGPT & Gemini End-to-End Demo](docs/CHATGPT_GEMINI_DEMO.md)
+
 ## Project Structure
 
 ```

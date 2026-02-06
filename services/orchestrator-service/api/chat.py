@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
@@ -19,6 +19,8 @@ class ChatRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000, description="User message")
     user_id: Optional[str] = Field(None, description="Optional user ID")
     limit: int = Field(20, ge=1, le=100, description="Max products when discover")
+    thread_id: Optional[str] = Field(None, description="Chat thread ID for webhook push (ChatGPT/Gemini)")
+    platform: Optional[Literal["chatgpt", "gemini"]] = Field(None, description="Platform for webhook push")
 
 
 @router.post("/chat")
@@ -63,6 +65,7 @@ async def chat(
     except Exception as e:
         return {
             "data": {"intent": None, "products": None, "error": str(e)},
+            "summary": f"Sorry, I couldn't complete your request: {e}",
             "machine_readable": {"@type": "Error", "description": str(e)},
             "metadata": {
                 "api_version": "v1",
@@ -74,6 +77,7 @@ async def chat(
     if "error" in result:
         return {
             "data": {"intent": None, "products": None, "error": result["error"]},
+            "summary": f"Sorry, I couldn't complete your request: {result['error']}",
             "machine_readable": {"@type": "Error", "description": result["error"]},
             "metadata": {
                 "api_version": "v1",
@@ -88,8 +92,8 @@ async def chat(
     if adaptive_card and agent_reasoning:
         reasoning_text = " • ".join(r for r in agent_reasoning if r)
         if reasoning_text:
-            body = list(adaptive_card.get("body", []))
-            body.insert(
+            card_body = list(adaptive_card.get("body", []))
+            card_body.insert(
                 0,
                 {
                     "type": "Container",
@@ -100,10 +104,14 @@ async def chat(
                     ],
                 },
             )
-            adaptive_card = {**adaptive_card, "body": body}
+            adaptive_card = {**adaptive_card, "body": card_body}
+
+    # Human-readable summary for ChatGPT/Gemini chat UIs
+    summary = _build_summary(result)
 
     return {
         "data": result.get("data", {}),
+        "summary": summary,
         "machine_readable": result.get("machine_readable", {}),
         "adaptive_card": adaptive_card,
         "agent_reasoning": result.get("agent_reasoning", []),
@@ -113,6 +121,34 @@ async def chat(
             "request_id": request_id,
         },
     }
+
+
+def _build_summary(result: dict) -> str:
+    """Build human-readable summary for ChatGPT/Gemini display."""
+    if result.get("error"):
+        return f"Sorry, I couldn't complete your request: {result['error']}"
+
+    products = result.get("data", {}).get("products") or {}
+    product_list = products.get("products") or []
+    count = products.get("count", len(product_list))
+
+    if count == 0:
+        intent = result.get("data", {}).get("intent") or {}
+        query = intent.get("search_query", "your search")
+        return f"No products found for '{query}'."
+
+    parts = []
+    for p in product_list[:5]:
+        name = p.get("name", "Product")
+        price = p.get("price")
+        currency = p.get("currency", "USD")
+        if price is not None:
+            parts.append(f"{name} ({currency} {price:.2f})")
+        else:
+            parts.append(name)
+    if count > 5:
+        parts.append(f"... and {count - 5} more")
+    return f"Found {count} product(s): " + ", ".join(parts)
 
 
 @router.get("/agentic-consent")

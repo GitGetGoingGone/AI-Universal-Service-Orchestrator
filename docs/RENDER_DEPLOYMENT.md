@@ -201,7 +201,7 @@ curl "$DURABLE/api/orchestrators/base_orchestrator" -X POST -H "Content-Type: ap
 # Tip: On free tier, warm up Discovery and Intent first (curl their /health) to avoid cold-start timeouts
 curl -X POST $ORCHESTRATOR/api/v1/chat \
   -H "Content-Type: application/json" \
-  -d '{"text": "find cakes"}'
+  -d '{"text": "find flowers"}'
 
 # Webhook push
 curl -X POST $WEBHOOK/api/v1/webhooks/chat/chatgpt/test-123 \

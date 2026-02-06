@@ -1,0 +1,79 @@
+# OpenAPI 3.1 schema for ChatGPT Custom GPT Actions
+# Import this when creating a Custom GPT at platform.openai.com
+# ChatGPT requires openapi: 3.1.0 or 3.1.1
+openapi: 3.1.0
+info:
+  title: USO Product Discovery
+  description: Discover products from natural language. For ChatGPT Custom GPT.
+  version: 1.0.0
+servers:
+  - url: https://uso-orchestrator.onrender.com
+    description: Render staging
+paths:
+  /api/v1/chat:
+    post:
+      operationId: chat
+      summary: Discover products from natural language
+      description: |
+        Send user message (e.g. "find flowers", "I want cakes") and get intent + products.
+        Returns a human-readable summary and product details.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  description: User message (e.g. "find flowers", "I want cakes for a party")
+                user_id:
+                  type: string
+                  nullable: true
+                  description: Optional user ID
+                limit:
+                  type: integer
+                  default: 20
+                  minimum: 1
+                  maximum: 100
+                  description: Max products to return
+                thread_id:
+                  type: string
+                  nullable: true
+                  description: Chat thread ID for status updates (optional)
+                platform:
+                  type: string
+                  enum: [chatgpt, gemini]
+                  nullable: true
+                  description: Platform for webhook push (optional)
+      responses:
+        "200":
+          description: Intent and products with human-readable summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: string
+                    description: Human-readable summary for chat display
+                  data:
+                    type: object
+                    properties:
+                      intent:
+                        type: object
+                        properties:
+                          intent_type: { type: string }
+                          search_query: { type: string }
+                      products:
+                        type: object
+                        properties:
+                          products: { type: array }
+                          count: { type: integer }
+                  adaptive_card:
+                    type: object
+                    description: Adaptive Card for rich UI
+                  machine_readable:
+                    type: object
+                    description: JSON-LD for LLM consumption
