@@ -15,6 +15,11 @@ Intent types: discover, add_to_bundle, checkout, track_status, support, customiz
 
 Entities to extract when present: product_type, location, quantity, price_range, date, partner_name
 
+For discover intent, search_query must be a product category or keyword (flowers, chocolates, gifts, cakes, etc.).
+- If the user asks for "sample products", "demo", "show me some", "brief summary", "anything", or similar without a specific product: use "browse" as search_query (Discovery will return sample products).
+- Never use filler words (please, hi, hello) as search_query; use "browse" for generic requests.
+- Normalize to a product category: "send flowers to mom" -> "flowers", "I want something sweet" -> "chocolates".
+
 Respond with valid JSON only, no markdown or extra text. Format:
 {
   "intent_type": "<one of the intent types>",
@@ -22,7 +27,7 @@ Respond with valid JSON only, no markdown or extra text. Format:
     {"type": "<entity_type>", "value": "<extracted_value>", "confidence": 0.0-1.0}
   ],
   "confidence_score": 0.0-1.0,
-  "search_query": "<normalized search query for discover intent, e.g. flowers, chocolates>"
+  "search_query": "<product category or 'browse' for sample/demo>"
 }"""
 
 
@@ -73,11 +78,17 @@ def _parse_llm_response(content: str, original_text: str) -> Dict[str, Any]:
         content = re.sub(r"\s*```$", "", content)
     try:
         data = json.loads(content)
+        raw_query = (data.get("search_query") or "").strip()
+        # If LLM returned a generic word, use fallback extraction; "browse" passes through
+        if raw_query.lower() in _GENERIC_QUERY_WORDS or (len(raw_query) < 4 and raw_query.lower() != "browse"):
+            raw_query = _extract_search_query(original_text)
+        else:
+            raw_query = raw_query or _extract_search_query(original_text)
         return {
             "intent_type": data.get("intent_type", "discover"),
             "entities": data.get("entities", []),
             "confidence_score": float(data.get("confidence_score", 0.8)),
-            "search_query": data.get("search_query") or original_text.strip()[:100],
+            "search_query": raw_query or "browse",
         }
     except json.JSONDecodeError:
         return _fallback_resolve(original_text)
@@ -89,11 +100,17 @@ _PRODUCT_KEYWORDS = [
     "bouquet", "plants", "candy", "candies", "wine", "spa", "massage",
 ]
 
+# Generic words → Discovery treats as browse (returns sample products)
+_GENERIC_QUERY_WORDS = {"please", "hi", "hello", "hey", "sample", "demo", "anything", "something", "show", "return", "brief", "small", "set", "browse"}
+
 def _extract_search_query(text: str) -> str:
     """Extract product keyword from text for discovery search."""
     text_lower = text.strip().lower()
     if not text_lower:
-        return "general"
+        return "browse"
+    # Sample/demo requests → browse (Discovery returns products without filter)
+    if any(w in text_lower for w in ["sample", "demo", "show me some", "brief", "anything", "something"]):
+        return "browse"
     # Check for known product keywords
     for kw in _PRODUCT_KEYWORDS:
         if kw in text_lower:
@@ -103,15 +120,17 @@ def _extract_search_query(text: str) -> str:
         if prep in text_lower:
             parts = text_lower.split(prep, 1)
             words = parts[0].split()
-            # Take last content word (skip "I", "want", "send", "looking", etc.)
             skip = {"i", "want", "send", "looking", "find", "get", "need", "a", "an", "the"}
             for w in reversed(words):
                 clean = re.sub(r"[^\w]", "", w)
-                if len(clean) > 2 and clean not in skip:
+                if len(clean) > 2 and clean not in skip and clean not in _GENERIC_QUERY_WORDS:
                     return clean
-    # Fallback: first word longer than 3 chars
+    # Fallback: first content word longer than 3 chars
     words = re.findall(r"\b\w{4,}\b", text_lower)
-    return words[0] if words else text_lower[:50]
+    for w in (words or []):
+        if w not in _GENERIC_QUERY_WORDS:
+            return w
+    return "browse"
 
 
 def _fallback_resolve(text: str) -> Dict[str, Any]:
@@ -135,5 +154,5 @@ def _fallback_resolve(text: str) -> Dict[str, Any]:
         "intent_type": intent_type,
         "entities": [],
         "confidence_score": 0.6,
-        "search_query": search_query or "general",
+        "search_query": search_query or "browse",
     }

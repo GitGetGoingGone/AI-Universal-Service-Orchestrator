@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from supabase import create_client, Client
 
 from config import settings
+from packages.shared.discovery import is_browse_query
 
 
 _client: Optional[Client] = None
@@ -56,8 +57,9 @@ async def search_products(
             .is_("deleted_at", "null")
         )
 
-        if query:
+        if query and not is_browse_query(query):
             # Search in name or description (case-insensitive)
+            # Browse queries (sample, demo, please, etc.) return products without filter
             pattern = f"%{query}%"
             q = q.or_(f"name.ilike.{pattern},description.ilike.{pattern}")
         if partner_id:

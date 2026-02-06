@@ -61,12 +61,13 @@ async def run_agentic_loop(
             state["agent_reasoning"].append(plan.get("reasoning", ""))
 
             # Inject limit and location from intent entities for discover_products
-            if tool_name == "discover_products" and intent_data:
+            if tool_name == "discover_products":
                 tool_args = dict(tool_args)
                 tool_args.setdefault("limit", limit)
-                loc = _extract_location(intent_data)
-                if loc:
-                    tool_args.setdefault("location", loc)
+                if intent_data:
+                    loc = _extract_location(intent_data)
+                    if loc:
+                        tool_args.setdefault("location", loc)
 
             result = await execute_tool(
                 tool_name,
@@ -120,13 +121,14 @@ async def _direct_flow(
     intent_response = await resolve_intent_fn(user_message)
     intent_data = intent_response.get("data", intent_response)
     intent_type = intent_data.get("intent_type", "unknown")
-    search_query = intent_data.get("search_query") or user_message[:100]
+    # Empty/generic → "browse" (Discovery returns sample products)
+    search_query = intent_data.get("search_query") or "browse"
 
     products_data = None
     adaptive_card = None
     machine_readable = None
 
-    if intent_type == "discover" and search_query:
+    if intent_type == "discover":
         location = _extract_location(intent_data)
         discovery_response = await discover_products_fn(
             query=search_query,
