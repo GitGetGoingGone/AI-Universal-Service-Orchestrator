@@ -7,6 +7,7 @@ Step-by-step instructions to deploy the AI Universal Service Orchestrator full s
 - [Render](https://render.com) account
 - [Supabase](https://supabase.com) staging project (see [STAGING_SETUP.md](STAGING_SETUP.md) Step 1)
 - [Azure Storage](https://portal.azure.com) account (for Durable Orchestrator state)
+- [Stripe](https://stripe.com) account (for Payment service; optional for core chat flow)
 - GitHub repo connected to Render
 
 ---
@@ -123,7 +124,7 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | **Build Command** | `pip install -r requirements.txt` |
 | **Start Command** | `cd services/orchestrator-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
-4. **Environment** (use URLs from Steps 1–3):
+4. **Environment** (use URLs from Steps 1–5 and 6a–6d):
 
 | Key | Value |
 |-----|-------|
@@ -131,6 +132,9 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | `DISCOVERY_SERVICE_URL` | `https://uso-discovery.onrender.com` |
 | `DURABLE_ORCHESTRATOR_URL` | `https://uso-durable.onrender.com` |
 | `WEBHOOK_SERVICE_URL` | `https://uso-webhook.onrender.com` *(add after Step 5)* |
+| `PAYMENT_SERVICE_URL` | `https://uso-payment.onrender.com` *(add after Step 6d)* |
+| `OMNICHANNEL_BROKER_URL` | `https://uso-omnichannel-broker.onrender.com` *(add after Step 6b)* |
+| `RE_SOURCING_SERVICE_URL` | `https://uso-resourcing.onrender.com` *(add after Step 6c)* |
 | `AZURE_OPENAI_ENDPOINT` | *(optional)* For agentic planner |
 | `AZURE_OPENAI_API_KEY` | *(optional)* |
 | `AZURE_OPENAI_DEPLOYMENT_NAME` | `gpt-4o` |
@@ -170,16 +174,147 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 
 ---
 
-## Step 6: Update Orchestrator and Durable with Webhook URL
+## Step 6: Create Full Implementation Services (Partner Portal, Omnichannel Broker, Re-Sourcing, Payment)
 
-After Webhook is deployed:
+Deploy these services for the full production flow (no simulator).
 
-1. **uso-orchestrator** → Environment → set `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com` (if not already set)
-2. **uso-durable** → Environment → set `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
+### Step 6a: Partner Portal
+
+1. **New** → **Web Service**
+2. Same repo
+3. Configure:
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `uso-partner-portal` |
+| **Root Directory** | *(empty)* |
+| **Build Command** | `pip install -r requirements.txt` |
+| **Start Command** | `cd services/partner-portal && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+
+4. **Environment**:
+
+| Key | Value |
+|-----|-------|
+| `SUPABASE_URL` | Same as Discovery |
+| `SUPABASE_SECRET_KEY` | Same as Discovery |
+| `ENVIRONMENT` | `staging` |
+
+5. Create and note the URL (e.g. `https://uso-partner-portal.onrender.com`).
+
+### Step 6b: Omnichannel Broker
+
+1. **New** → **Web Service**
+2. Same repo
+3. Configure:
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `uso-omnichannel-broker` |
+| **Root Directory** | *(empty)* |
+| **Build Command** | `pip install -r requirements.txt` |
+| **Start Command** | `cd services/omnichannel-broker-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+
+4. **Environment**:
+
+| Key | Value |
+|-----|-------|
+| `SUPABASE_URL` | Same as Discovery |
+| `SUPABASE_SECRET_KEY` | Same as Discovery |
+| `RE_SOURCING_SERVICE_URL` | `https://uso-resourcing.onrender.com` *(add after Step 6c)* |
+| `ENVIRONMENT` | `staging` |
+
+5. Create and note the URL.
+
+### Step 6c: Re-Sourcing Service
+
+1. **New** → **Web Service**
+2. Same repo
+3. Configure:
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `uso-resourcing` |
+| **Root Directory** | *(empty)* |
+| **Build Command** | `pip install -r requirements.txt` |
+| **Start Command** | `cd services/re-sourcing-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+
+4. **Environment**:
+
+| Key | Value |
+|-----|-------|
+| `SUPABASE_URL` | Same as Discovery |
+| `SUPABASE_SECRET_KEY` | Same as Discovery |
+| `DISCOVERY_SERVICE_URL` | `https://uso-discovery.onrender.com` |
+| `ENVIRONMENT` | `staging` |
+
+5. Create and note the URL.
+
+### Step 6d: Payment Service
+
+1. **New** → **Web Service**
+2. Same repo
+3. Configure:
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `uso-payment` |
+| **Root Directory** | *(empty)* |
+| **Build Command** | `pip install -r requirements.txt` |
+| **Start Command** | `cd services/payment-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+
+4. **Environment**:
+
+| Key | Value |
+|-----|-------|
+| `SUPABASE_URL` | Same as Discovery |
+| `SUPABASE_SECRET_KEY` | Same as Discovery |
+| `STRIPE_SECRET_KEY` | Stripe secret key (sk_test_... or sk_live_...) – from Dashboard → API keys |
+| `ENVIRONMENT` | `staging` |
+
+**Note:** Stripe provides **Publishable key** (pk_...) and **Secret key** (sk_...) in Dashboard → API keys. Use the Secret key for `STRIPE_SECRET_KEY`.
+
+**Optional – webhook verification:** To receive and verify Stripe webhook events (payment success/failure), add a webhook endpoint in Stripe Dashboard → Developers → Webhooks with URL `https://uso-payment.onrender.com/webhooks/stripe` and events `payment_intent.succeeded`, `payment_intent.payment_failed`. Stripe then shows a **Signing secret** (whsec_...) for that endpoint – set it as `STRIPE_WEBHOOK_SECRET`. Without it, the service still creates PaymentIntents but will not verify incoming webhook requests.
 
 ---
 
-## Step 7: Verify Deployment
+## Step 7: Update Service URLs (after all services deployed)
+
+1. **uso-orchestrator** → Environment → add/update:
+   - `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
+   - `PAYMENT_SERVICE_URL` = `https://uso-payment.onrender.com`
+   - `OMNICHANNEL_BROKER_URL` = `https://uso-omnichannel-broker.onrender.com`
+   - `RE_SOURCING_SERVICE_URL` = `https://uso-resourcing.onrender.com`
+2. **uso-durable** → Environment → `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
+3. **uso-omnichannel-broker** → Environment → `RE_SOURCING_SERVICE_URL` = `https://uso-resourcing.onrender.com`
+
+---
+
+## Step 8: Verify Deployment
+
+### Option A: Health and warmup script (recommended)
+
+Run the script to check health and warm up services (avoids cold-start timeouts on free tier):
+
+```bash
+# Health checks + warmup (Discovery, Intent, Orchestrator)
+./scripts/health-and-warmup.sh
+
+# With chat E2E
+./scripts/health-and-warmup.sh --e2e
+
+# With chat E2E and webhook test
+./scripts/health-and-warmup.sh --e2e --webhook
+```
+
+Override URLs via env if different from defaults:
+
+```bash
+DISCOVERY_URL=https://... INTENT_URL=https://... ./scripts/health-and-warmup.sh --e2e
+```
+
+The script warms and checks all services (core + full implementation). Full implementation services (Partner Portal, Omnichannel Broker, Re-Sourcing, Payment) are optional – if not deployed, they show ✗ [optional] but the script still succeeds.
+
+### Option B: Manual curl commands
 
 ```bash
 # Replace with your Render URLs
@@ -188,12 +323,23 @@ INTENT="https://uso-intent.onrender.com"
 DURABLE="https://uso-durable.onrender.com"
 ORCHESTRATOR="https://uso-orchestrator.onrender.com"
 WEBHOOK="https://uso-webhook.onrender.com"
+PARTNER_PORTAL="https://uso-partner-portal.onrender.com"
+OMNICHANNEL="https://uso-omnichannel-broker.onrender.com"
+RESOURCING="https://uso-resourcing.onrender.com"
+PAYMENT="https://uso-payment.onrender.com"
 
-# Health checks
+# Health checks (core)
 curl $DISCOVERY/health
 curl $INTENT/health
 curl $ORCHESTRATOR/health
 curl $WEBHOOK/health
+
+# Health checks (full implementation)
+curl $PARTNER_PORTAL/health
+curl $OMNICHANNEL/health
+curl $RESOURCING/health
+curl $PAYMENT/health
+
 # Durable: Azure Functions uses /api/ prefix
 curl "$DURABLE/api/orchestrators/base_orchestrator" -X POST -H "Content-Type: application/json" -d '{}'
 
@@ -207,6 +353,9 @@ curl -X POST $ORCHESTRATOR/api/v1/chat \
 curl -X POST $WEBHOOK/api/v1/webhooks/chat/chatgpt/test-123 \
   -H "Content-Type: application/json" \
   -d '{"narrative": "Test update"}'
+
+# Partner Portal (onboarding page)
+curl -s $PARTNER_PORTAL/api/v1/onboard | head -5
 ```
 
 ---
@@ -218,7 +367,7 @@ curl -X POST $WEBHOOK/api/v1/webhooks/chat/chatgpt/test-123 \
 - Services spin down after ~15 minutes of inactivity
 - First request after spin-down can take 30–60 seconds
 - Free tier has limited hours per month
-- **Chat flow**: If you get "All connection attempts failed", warm up Discovery and Intent first: `curl $DISCOVERY/health && curl $INTENT/health`, then retry the chat. The orchestrator uses a 60s timeout to tolerate cold starts.
+- **Chat flow**: If you get "All connection attempts failed", run `./scripts/health-and-warmup.sh` first to warm up services, then retry the chat. The orchestrator uses a 60s timeout to tolerate cold starts.
 
 ### Port
 
@@ -246,3 +395,7 @@ curl -X POST $WEBHOOK/api/v1/webhooks/chat/chatgpt/test-123 \
 | Durable Orchestrator | Docker | Root: `functions/durable-orchestrator` · No Start Command (image starts automatically) |
 | Orchestrator | Python | Same build · Start: `cd services/orchestrator-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Webhook | Python | Same build · Start: `cd services/webhook-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Partner Portal | Python | Same build · Start: `cd services/partner-portal && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Omnichannel Broker | Python | Same build · Start: `cd services/omnichannel-broker-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Re-Sourcing | Python | Same build · Start: `cd services/re-sourcing-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Payment | Python | Same build · Start: `cd services/payment-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webhook Settings - {{ partner.business_name }}</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 560px; margin: 2rem auto; padding: 0 1rem; }
+        h1 { font-size: 1.5rem; }
+        a { color: #2563eb; }
+        label { display: block; margin-top: 1rem; font-weight: 500; }
+        input { width: 100%; padding: 0.5rem; margin-top: 0.25rem; box-sizing: border-box; }
+        button { margin-top: 1rem; padding: 0.5rem 1.5rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
+        .error { color: #dc2626; margin-top: 0.5rem; }
+        .success { color: #16a34a; margin-top: 0.5rem; }
+        .hint { font-size: 0.875rem; color: #6b7280; margin-top: 0.25rem; }
+    </style>
+</head>
+<body>
+    <h1>{{ partner.business_name }} - Webhook Settings</h1>
+    <p><a href="/api/v1/partners/{{ partner.id }}/products">Manage products</a></p>
+    <p>Configure the URL where we will POST change requests (e.g. product changes). Your system should respond to these requests and call our webhook to accept or reject.</p>
+    <form id="form">
+        <label for="webhook_url">Webhook URL *</label>
+        <input type="url" id="webhook_url" value="{{ webhook_url }}" placeholder="https://your-server.com/webhook" required>
+        <p class="hint">We will POST change requests to this URL. You must respond via POST to our /webhooks/partner endpoint.</p>
+        <button type="submit">Save Webhook URL</button>
+    </form>
+    <div id="message"></div>
+    <script>
+        const partnerId = '{{ partner.id }}';
+        document.getElementById('form').onsubmit = async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById('message');
+            msg.className = '';
+            msg.textContent = '';
+            try {
+                const res = await fetch(`/api/v1/partners/${partnerId}/webhook`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        webhook_url: document.getElementById('webhook_url').value.trim(),
+                    }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    msg.className = 'success';
+                    msg.textContent = 'Webhook URL saved.';
+                } else {
+                    msg.className = 'error';
+                    msg.textContent = data.detail || 'Failed to save';
+                }
+            } catch (err) {
+                msg.className = 'error';
+                msg.textContent = err.message || 'Request failed';
+            }
+        };
+    </script>
+</body>
+</html>

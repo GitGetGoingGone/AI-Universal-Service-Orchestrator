@@ -101,7 +101,7 @@ _PRODUCT_KEYWORDS = [
 ]
 
 # Generic words → Discovery treats as browse (returns sample products)
-_GENERIC_QUERY_WORDS = {"please", "hi", "hello", "hey", "sample", "demo", "anything", "something", "show", "return", "brief", "small", "set", "browse"}
+_GENERIC_QUERY_WORDS = {"please", "hi", "hello", "hey", "sample", "demo", "anything", "something", "show", "return", "brief", "small", "set", "browse", "intent", "example", "examples"}
 
 def _extract_search_query(text: str) -> str:
     """Extract product keyword from text for discovery search."""
@@ -109,7 +109,7 @@ def _extract_search_query(text: str) -> str:
     if not text_lower:
         return "browse"
     # Sample/demo requests → browse (Discovery returns products without filter)
-    if any(w in text_lower for w in ["sample", "demo", "show me some", "brief", "anything", "something"]):
+    if any(w in text_lower for w in ["sample", "demo", "show me some", "brief", "anything", "something", "example", "examples"]):
         return "browse"
     # Check for known product keywords
     for kw in _PRODUCT_KEYWORDS:

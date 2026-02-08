@@ -11,6 +11,7 @@ rather than a specific product search.
 BROWSE_QUERIES = frozenset({
     "please", "hi", "hello", "hey", "sample", "demo", "general", "anything",
     "something", "browse", "show", "return", "brief", "small", "set",
+    "intent", "example", "examples",
 })
 
 

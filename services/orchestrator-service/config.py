@@ -34,6 +34,16 @@ class Settings:
         get_env("WEBHOOK_SERVICE_URL") or "http://localhost:8003"
     ).rstrip("/")
 
+    # Payment service (Module 15)
+    payment_service_url: str = (
+        get_env("PAYMENT_SERVICE_URL") or "http://localhost:8006"
+    ).rstrip("/")
+
+    # Omnichannel Broker (Module 24)
+    omnichannel_broker_url: str = (
+        get_env("OMNICHANNEL_BROKER_URL") or "http://localhost:8004"
+    ).rstrip("/")
+
     # Azure OpenAI (for Agentic AI planner - optional)
     azure_openai_endpoint: str = get_env("AZURE_OPENAI_ENDPOINT") or ""
     azure_openai_api_key: str = get_env("AZURE_OPENAI_API_KEY") or ""

@@ -103,6 +103,8 @@ async def root():
             "products": "GET /api/v1/products/{id}",
             "bundles": "GET /api/v1/bundles/{id}",
             "bundle_add": "POST /api/v1/bundle/add",
+            "bundle_remove": "POST /api/v1/bundle/remove",
+            "checkout": "POST /api/v1/checkout",
             "agentic_consent": "GET /api/v1/agentic-consent",
             "agentic_handoff": "GET /api/v1/agentic-handoff",
             "health": "GET /health",

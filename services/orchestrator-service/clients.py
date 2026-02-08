@@ -108,6 +108,59 @@ async def add_to_bundle(
         return r.json()
 
 
+async def remove_from_bundle(item_id: str) -> Dict[str, Any]:
+    """Call Discovery service to remove item from bundle."""
+    url = f"{settings.discovery_service_url}/api/v1/bundle/remove"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(url, json={"item_id": item_id})
+        r.raise_for_status()
+        return r.json()
+
+
+async def proceed_to_checkout(bundle_id: str) -> Dict[str, Any]:
+    """Call Discovery service to proceed to checkout with bundle. Creates order, returns order_id."""
+    url = f"{settings.discovery_service_url}/api/v1/checkout"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(url, json={"bundle_id": bundle_id})
+        r.raise_for_status()
+        return r.json()
+
+
+async def create_payment_intent(order_id: str) -> Dict[str, Any]:
+    """Call Payment service to create Stripe PaymentIntent for order."""
+    url = f"{settings.payment_service_url}/api/v1/payment/create"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(url, json={"order_id": order_id})
+        r.raise_for_status()
+        return r.json()
+
+
+async def create_change_request(
+    order_id: str,
+    order_leg_id: str,
+    partner_id: str,
+    original_item: Dict[str, Any],
+    requested_change: Dict[str, Any],
+    respond_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Call Omnichannel Broker to create change request and notify partner."""
+    url = f"{settings.omnichannel_broker_url}/api/v1/change-request"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(
+            url,
+            json={
+                "order_id": order_id,
+                "order_leg_id": order_leg_id,
+                "partner_id": partner_id,
+                "original_item": original_item,
+                "requested_change": requested_change,
+                "respond_by": respond_by,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 async def start_orchestration(
     message: str = "Hello from orchestrator",
     wait_event_name: str = "WakeUp",
