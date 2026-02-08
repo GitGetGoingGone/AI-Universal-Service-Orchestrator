@@ -15,10 +15,11 @@ Intent types: discover, add_to_bundle, checkout, track_status, support, customiz
 
 Entities to extract when present: product_type, location, quantity, price_range, date, partner_name
 
-For discover intent, search_query must be a product category or keyword (flowers, chocolates, gifts, cakes, etc.).
+For discover intent, search_query must be a product category or keyword (flowers, chocolates, limo, gifts, cakes, etc.).
+- Extract the product/service the user wants, not the action verb. "find limo service" -> "limo", "get flowers" -> "flowers".
 - If the user asks for "sample products", "demo", "show me some", "brief summary", "anything", or similar without a specific product: use "browse" as search_query (Discovery will return sample products).
-- Never use filler words (please, hi, hello) as search_query; use "browse" for generic requests.
-- Normalize to a product category: "send flowers to mom" -> "flowers", "I want something sweet" -> "chocolates".
+- Never use filler words or verbs (please, hi, hello, find, get, search) as search_query; use "browse" for generic requests.
+- Normalize to a product category: "send flowers to mom" -> "flowers", "I want something sweet" -> "chocolates", "find limo service" -> "limo".
 
 Respond with valid JSON only, no markdown or extra text. Format:
 {
@@ -79,8 +80,8 @@ def _parse_llm_response(content: str, original_text: str) -> Dict[str, Any]:
     try:
         data = json.loads(content)
         raw_query = (data.get("search_query") or "").strip()
-        # If LLM returned a generic word, use fallback extraction; "browse" passes through
-        if raw_query.lower() in _GENERIC_QUERY_WORDS or (len(raw_query) < 4 and raw_query.lower() != "browse"):
+        # If LLM returned a generic or action word, use fallback extraction; "browse" passes through
+        if raw_query.lower() in _GENERIC_QUERY_WORDS or raw_query.lower() in _ACTION_SKIP or (len(raw_query) < 4 and raw_query.lower() != "browse"):
             raw_query = _extract_search_query(original_text)
         else:
             raw_query = raw_query or _extract_search_query(original_text)
@@ -102,6 +103,9 @@ _PRODUCT_KEYWORDS = [
 
 # Generic words → Discovery treats as browse (returns sample products)
 _GENERIC_QUERY_WORDS = {"please", "hi", "hello", "hey", "sample", "demo", "anything", "something", "show", "return", "brief", "small", "set", "browse", "intent", "example", "examples"}
+
+# Action verbs to skip when extracting product (e.g. "find limo service" -> "limo")
+_ACTION_SKIP = {"find", "search", "get", "need", "looking", "show", "want", "send"}
 
 def _extract_search_query(text: str) -> str:
     """Extract product keyword from text for discovery search."""
@@ -125,10 +129,10 @@ def _extract_search_query(text: str) -> str:
                 clean = re.sub(r"[^\w]", "", w)
                 if len(clean) > 2 and clean not in skip and clean not in _GENERIC_QUERY_WORDS:
                     return clean
-    # Fallback: first content word longer than 3 chars
+    # Fallback: first content word longer than 3 chars (skip action verbs)
     words = re.findall(r"\b\w{4,}\b", text_lower)
     for w in (words or []):
-        if w not in _GENERIC_QUERY_WORDS:
+        if w not in _GENERIC_QUERY_WORDS and w not in _ACTION_SKIP:
             return w
     return "browse"
 

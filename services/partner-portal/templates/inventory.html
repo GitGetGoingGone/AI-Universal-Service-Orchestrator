@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Inventory - {{ partner.business_name }}{% endblock %}
+
+{% block content %}
+<h1>{{ partner.business_name }} - Inventory</h1>
+<p>Stock levels and out-of-stock toggles.</p>
+
+<table style="width:100%;border-collapse:collapse;margin-top:var(--spacing-md);">
+    <thead>
+        <tr>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Product</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Quantity</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Low stock</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Available</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in inv_data %}
+        <tr>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ item.product.name }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ item.inventory.quantity if item.inventory else 0 }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ item.inventory.low_stock_threshold if item.inventory else 5 }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ 'Yes' if item.product.is_available else 'No' }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">
+                <input type="number" class="qty-input" data-product-id="{{ item.product.id }}" value="{{ item.inventory.quantity if item.inventory else 0 }}" min="0" style="width:60px;">
+                <button type="button" class="btn-update" data-product-id="{{ item.product.id }}">Update</button>
+                <button type="button" class="btn-toggle" data-product-id="{{ item.product.id }}" data-available="{{ item.product.is_available|lower }}">Toggle</button>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" style="padding:var(--spacing-md);color:var(--color-text-secondary);">No products. Add products first.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const partnerId = '{{ partner.id }}';
+    document.querySelectorAll('.btn-update').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const productId = btn.dataset.productId;
+            const qty = parseInt(btn.closest('td').querySelector('.qty-input').value) || 0;
+            try {
+                const res = await fetch(`/api/v1/partners/${partnerId}/products/${productId}/inventory`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ quantity: qty, low_stock_threshold: 5, auto_unlist_when_zero: true }),
+                });
+                if (res.ok) location.reload();
+            } catch (e) { alert(e.message); }
+        });
+    });
+    document.querySelectorAll('.btn-toggle').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const productId = btn.dataset.productId;
+            const available = btn.dataset.available === 'true';
+            try {
+                const res = await fetch(`/api/v1/partners/${partnerId}/products/${productId}/availability`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_available: !available }),
+                });
+                if (res.ok) location.reload();
+            } catch (e) { alert(e.message); }
+        });
+    });
+</script>
+{% endblock %}

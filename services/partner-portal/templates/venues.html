@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Venues - {{ partner.business_name }}{% endblock %}
+
+{% block content %}
+<h1>{{ partner.business_name }} - Venues & Operations</h1>
+<p>Multi-location and service areas.</p>
+
+<h2>Venues</h2>
+<table style="width:100%;border-collapse:collapse;margin-top:var(--spacing-md);">
+    <thead>
+        <tr>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Name</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Timezone</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for v in venues %}
+        <tr>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ v.name }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ v.timezone or 'UTC' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="2" style="padding:var(--spacing-md);color:var(--color-text-secondary);">No venues yet.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

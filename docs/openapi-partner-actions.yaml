@@ -1,0 +1,68 @@
+# OpenAPI 3.1 schema for Partner Portal - ChatGPT / Gemini actions
+# Partners: Import this when creating a Custom GPT or Gemini extension
+# Base URL: Your Partner Portal URL (e.g. https://uso-partner-portal.onrender.com)
+openapi: 3.1.0
+info:
+  title: USO Partner Portal - Change Requests
+  description: |
+    Receive and respond to change requests (e.g. customer wants different color).
+    Use in Custom GPT or Gemini to manage change requests via chat.
+  version: 1.0.0
+servers:
+  - url: https://uso-partner-portal.onrender.com
+    description: Partner Portal (Render staging)
+paths:
+  /api/v1/partners/{partner_id}/pending-negotiations:
+    get:
+      operationId: getPendingNegotiations
+      summary: List pending change requests
+      description: Returns change requests awaiting your response. Use Accept/Reject via respond.
+      parameters:
+        - name: partner_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: Your partner ID (from Partner Portal settings)
+      responses:
+        "200":
+          description: Pending negotiations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  negotiations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        order_id: { type: string }
+                        original_request: { type: object }
+                        created_at: { type: string }
+  /api/v1/partners/{partner_id}/respond:
+    post:
+      operationId: respondToNegotiation
+      summary: Accept or reject a change request
+      description: Submit your response. On reject, system will find alternatives.
+      parameters:
+        - name: partner_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [negotiation_id, response]
+              properties:
+                negotiation_id: { type: string }
+                response: { type: string, enum: [accept, reject] }
+                rejection_reason: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Response recorded
+        "404":
+          description: Negotiation not found

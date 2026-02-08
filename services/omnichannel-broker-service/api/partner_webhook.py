@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from db import (
     get_partner_webhook,
+    get_partner_channel,
     create_negotiation,
     get_negotiation,
     update_negotiation_status,
@@ -86,15 +87,13 @@ async def partner_response(body: PartnerResponseBody):
 @router.post("/api/v1/change-request")
 async def create_change_request(body: CreateChangeRequestBody):
     """
-    Create a change request and notify partner via webhook.
-    Called by Orchestrator when user requests a change.
+    Create a change request and notify partner via their configured channel.
+    - api: POST to partner webhook
+    - demo_chat, chatgpt, gemini, whatsapp: create negotiation only; partner uses demo chat or their AI agent
     """
-    webhook_url = await get_partner_webhook(body.partner_id)
-    if not webhook_url:
-        raise HTTPException(
-            status_code=400,
-            detail="Partner has no webhook URL configured. Configure in Partner Portal.",
-        )
+    prefs = await get_partner_channel(body.partner_id)
+    channel = prefs.get("channel", "api") if prefs else "api"
+    webhook_url = prefs.get("channel_identifier") if prefs and channel == "api" else None
 
     original_request = {
         "original_item": body.original_item,
@@ -108,27 +107,34 @@ async def create_change_request(body: CreateChangeRequestBody):
         partner_id=body.partner_id,
         negotiation_type="product_change",
         original_request=original_request,
+        channel=channel,
     )
     if not negotiation:
         raise HTTPException(status_code=500, detail="Failed to create negotiation")
 
-    payload = {
-        "negotiation_id": str(negotiation["id"]),
-        "order_id": body.order_id,
-        "order_leg_id": body.order_leg_id,
-        "request_type": "product_change",
-        "original_item": body.original_item,
-        "requested_change": body.requested_change,
-        "respond_by": body.respond_by or datetime.now(timezone.utc).isoformat(),
-    }
-
-    ok, err = await notify_partner(webhook_url, payload)
-    if not ok:
-        await update_negotiation_status(str(negotiation["id"]), "escalated")
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to notify partner: {err}",
-        )
+    if channel == "api":
+        if not webhook_url:
+            raise HTTPException(
+                status_code=400,
+                detail="Partner has no webhook URL configured. Configure in Partner Portal.",
+            )
+        payload = {
+            "negotiation_id": str(negotiation["id"]),
+            "order_id": body.order_id,
+            "order_leg_id": body.order_leg_id,
+            "request_type": "product_change",
+            "original_item": body.original_item,
+            "requested_change": body.requested_change,
+            "respond_by": body.respond_by or datetime.now(timezone.utc).isoformat(),
+        }
+        ok, err = await notify_partner(webhook_url, payload)
+        if not ok:
+            await update_negotiation_status(str(negotiation["id"]), "escalated")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to notify partner: {err}",
+            )
+    # demo_chat, chatgpt, gemini, whatsapp: no outbound; partner fetches via API or demo chat
 
     return {
         "negotiation_id": str(negotiation["id"]),

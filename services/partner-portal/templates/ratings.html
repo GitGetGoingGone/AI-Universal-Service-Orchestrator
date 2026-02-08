@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Ratings - {{ partner.business_name }}{% endblock %}
+
+{% block content %}
+<h1>{{ partner.business_name }} - Ratings</h1>
+<p>Average rating: <strong>{{ rating.avg_rating if rating else '-' }}</strong> ({{ rating.total_reviews if rating else 0 }} reviews)</p>
+
+<h2>Reviews</h2>
+{% for r in reviews %}
+<div style="margin:var(--spacing-md) 0;padding:var(--spacing-md);border:1px solid var(--color-border);border-radius:var(--radius-lg);">
+    <div>Rating: {{ r.rating }}/5</div>
+    <div>{{ r.comment or 'No comment' }}</div>
+    {% if r.partner_response %}
+    <div style="margin-top:8px;padding:8px;background:var(--color-surface);"><strong>Your response:</strong> {{ r.partner_response }}</div>
+    {% else %}
+    <form class="respond-form" data-review-id="{{ r.id }}" style="margin-top:8px;">
+        <input type="text" id="resp-{{ r.id }}" placeholder="Your response">
+        <button type="submit">Respond</button>
+    </form>
+    {% endif %}
+</div>
+{% else %}
+<p style="color:var(--color-text-secondary);">No reviews yet.</p>
+{% endfor %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const partnerId = '{{ partner.id }}';
+    document.querySelectorAll('.respond-form').forEach(form => {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const reviewId = form.dataset.reviewId;
+            const response = form.querySelector('input').value;
+            if (!response) return;
+            try {
+                const res = await fetch(`/api/v1/partners/${partnerId}/reviews/${reviewId}/respond`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ partner_response: response }),
+                });
+                if (res.ok) location.reload();
+            } catch (e) { alert(e.message); }
+        });
+    });
+</script>
+{% endblock %}

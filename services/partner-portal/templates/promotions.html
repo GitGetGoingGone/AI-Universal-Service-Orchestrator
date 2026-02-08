@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Promotions - {{ partner.business_name }}{% endblock %}
+
+{% block content %}
+<h1>{{ partner.business_name }} - Promotions</h1>
+<p>Manage discounts and deals.</p>
+
+<h2>Add Promotion</h2>
+<form id="add-form">
+    <label>Name</label>
+    <input type="text" id="name" required>
+    <label>Type</label>
+    <select id="promo_type">
+        <option value="percent_off">Percent off</option>
+        <option value="fixed_off">Fixed off</option>
+        <option value="bogo">BOGO</option>
+        <option value="free_delivery">Free delivery</option>
+    </select>
+    <label>Value</label>
+    <input type="number" id="value" step="0.01" placeholder="e.g. 10 for 10%">
+    <label>Start (datetime)</label>
+    <input type="datetime-local" id="start_at" required>
+    <label>End (datetime)</label>
+    <input type="datetime-local" id="end_at" required>
+    <button type="submit">Add Promotion</button>
+</form>
+<div id="message"></div>
+
+<h2>Active Promotions</h2>
+<table style="width:100%;border-collapse:collapse;margin-top:var(--spacing-md);">
+    <thead>
+        <tr>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Name</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Type</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Value</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Period</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in promotions %}
+        <tr>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ p.name }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ p.promo_type }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ p.value or '-' }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ p.start_at[:10] if p.start_at else '-' }} - {{ p.end_at[:10] if p.end_at else '-' }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">
+                <button type="button" class="btn-delete" data-id="{{ p.id }}">Delete</button>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" style="padding:var(--spacing-md);color:var(--color-text-secondary);">No promotions yet.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const partnerId = '{{ partner.id }}';
+    document.getElementById('add-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('message');
+        msg.className = '';
+        msg.textContent = '';
+        try {
+            const res = await fetch(`/api/v1/partners/${partnerId}/promotions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: document.getElementById('name').value,
+                    promo_type: document.getElementById('promo_type').value,
+                    value: parseFloat(document.getElementById('value').value) || null,
+                    start_at: document.getElementById('start_at').value + ':00',
+                    end_at: document.getElementById('end_at').value + ':00',
+                    is_active: true,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                msg.className = 'success';
+                msg.textContent = 'Promotion added!';
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                msg.className = 'error';
+                msg.textContent = data.detail || 'Failed';
+            }
+        } catch (err) {
+            msg.className = 'error';
+            msg.textContent = err.message || 'Request failed';
+        }
+    };
+    document.querySelectorAll('.btn-delete').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Delete this promotion?')) return;
+            const id = btn.dataset.id;
+            const res = await fetch(`/api/v1/partners/${partnerId}/promotions/${id}`, { method: 'DELETE' });
+            if (res.ok) location.reload();
+        });
+    });
+</script>
+{% endblock %}

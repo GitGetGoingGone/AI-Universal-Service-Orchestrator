@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Schedule - {{ partner.business_name }}{% endblock %}
+
+{% block content %}
+<h1>{{ partner.business_name }} - Business Hours</h1>
+<p>Configure weekly business hours. Times are in your selected timezone.</p>
+
+<form id="schedule-form">
+    <div class="schedule-grid">
+        <div class="schedule-header">Day</div>
+        <div class="schedule-header">Start</div>
+        <div class="schedule-header">End</div>
+        <div class="schedule-header">Open</div>
+        {% for day in range(7) %}
+        {% set day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
+        <div class="schedule-day">{{ day_names[day] }}</div>
+        <input type="time" name="start_{{ day }}" id="start_{{ day }}" class="schedule-time">
+        <input type="time" name="end_{{ day }}" id="end_{{ day }}" class="schedule-time">
+        <input type="checkbox" name="open_{{ day }}" id="open_{{ day }}" class="schedule-open">
+        {% endfor %}
+    </div>
+    <div style="margin-top: var(--spacing-md);">
+        <label for="timezone">Timezone</label>
+        <select id="timezone" name="timezone">
+            <option value="UTC">UTC</option>
+            <option value="America/New_York">America/New_York</option>
+            <option value="America/Los_Angeles">America/Los_Angeles</option>
+            <option value="Europe/London">Europe/London</option>
+            <option value="Asia/Kolkata">Asia/Kolkata</option>
+        </select>
+    </div>
+    <button type="submit" style="margin-top: var(--spacing-md);">Save Schedule</button>
+</form>
+<div id="message"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const partnerId = '{{ partner.id }}';
+    const schedules = {{ schedules | tojson }};
+
+    // Populate from saved schedules
+    function loadSchedules() {
+        schedules.forEach(s => {
+            const day = s.day_of_week;
+            const startEl = document.getElementById('start_' + day);
+            const endEl = document.getElementById('end_' + day);
+            const openEl = document.getElementById('open_' + day);
+            if (startEl && endEl && openEl) {
+                startEl.value = (s.start_time || '').substring(0, 5);
+                endEl.value = (s.end_time || '').substring(0, 5);
+                openEl.checked = true;
+            }
+        });
+    }
+    loadSchedules();
+
+    document.getElementById('schedule-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('message');
+        msg.className = '';
+        msg.textContent = '';
+        const tz = document.getElementById('timezone').value;
+        const scheduleSlots = [];
+        for (let day = 0; day < 7; day++) {
+            const openEl = document.getElementById('open_' + day);
+            if (openEl && openEl.checked) {
+                const start = document.getElementById('start_' + day).value;
+                const end = document.getElementById('end_' + day).value;
+                if (start && end) {
+                    scheduleSlots.push({
+                        day_of_week: day,
+                        start_time: start + ':00',
+                        end_time: end + ':00',
+                        timezone: tz
+                    });
+                }
+            }
+        }
+        try {
+            const res = await fetch(`/api/v1/partners/${partnerId}/schedule`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ schedules: scheduleSlots }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                msg.className = 'success';
+                msg.textContent = 'Schedule saved!';
+            } else {
+                msg.className = 'error';
+                msg.textContent = data.detail || 'Failed to save';
+            }
+        } catch (err) {
+            msg.className = 'error';
+            msg.textContent = err.message || 'Request failed';
+        }
+    };
+</script>
+<style>
+.schedule-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: var(--spacing-sm); align-items: center; max-width: 500px; }
+.schedule-header { font-weight: 600; padding: var(--spacing-sm); }
+.schedule-day { padding: var(--spacing-sm); }
+.schedule-time { padding: var(--spacing-sm); }
+.schedule-open { width: auto; }
+</style>
+{% endblock %}

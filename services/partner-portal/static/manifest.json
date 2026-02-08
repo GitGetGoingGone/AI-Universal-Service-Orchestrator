@@ -1,0 +1,10 @@
+{
+  "name": "Partner Portal",
+  "short_name": "Partner Portal",
+  "description": "Production-grade partner onboarding and management",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#2563eb",
+  "icons": []
+}

@@ -37,6 +37,9 @@ jinja2>=3.1.0
 # Payment (Module 15)
 stripe>=8.0.0
 
+# Auth (Partner Portal - Clerk JWT)
+PyJWT>=2.8.0
+
 # Testing (server-based)
 pytest>=7.4.0
 pytest-asyncio>=0.23.0

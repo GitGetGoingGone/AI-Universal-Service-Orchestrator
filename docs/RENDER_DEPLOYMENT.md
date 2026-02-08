@@ -197,9 +197,16 @@ Deploy these services for the full production flow (no simulator).
 |-----|-------|
 | `SUPABASE_URL` | Same as Discovery |
 | `SUPABASE_SECRET_KEY` | Same as Discovery |
+| `OMNICHANNEL_BROKER_URL` | `https://uso-omnichannel-broker.onrender.com` *(add after Step 6b)* |
 | `ENVIRONMENT` | `staging` |
+| `DEFAULT_THEME` | *(optional)* `light` \| `dark` \| `ocean` \| `forest` \| `slate` |
+| `DEFAULT_LAYOUT` | *(optional)* `centered` \| `sidebar` \| `top-nav` \| `compact` |
 
 5. Create and note the URL (e.g. `https://uso-partner-portal.onrender.com`).
+
+**Partner Portal UI:** Theme and layout can be customized via env vars or the in-app switcher (persisted in localStorage). Themes: light, dark, ocean, forest, slate. Layouts: centered, sidebar, top-nav, compact.
+
+**Partner Portal channels:** Partners can configure API webhook, demo chat, WhatsApp, ChatGPT, or Gemini. For demo chat, they open `/api/v1/partners/{id}/demo-chat`. For ChatGPT/Gemini, they import the OpenAPI spec from `/docs/openapi-partner-actions.yaml`.
 
 ### Step 6b: Omnichannel Broker
 
@@ -279,13 +286,17 @@ Deploy these services for the full production flow (no simulator).
 
 ## Step 7: Update Service URLs (after all services deployed)
 
-1. **uso-orchestrator** → Environment → add/update:
+1. **uso-partner-portal** → Environment → add:
+   - `OMNICHANNEL_BROKER_URL` = `https://uso-omnichannel-broker.onrender.com` *(required for demo chat respond)*
+2. **uso-orchestrator** → Environment → add/update:
    - `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
-   - `PAYMENT_SERVICE_URL` = `https://uso-payment.onrender.com`
+   - `PAYMENT_SERVICE_URL` = `https://uso-payment.onrender.com` *(required for checkout)*
    - `OMNICHANNEL_BROKER_URL` = `https://uso-omnichannel-broker.onrender.com`
    - `RE_SOURCING_SERVICE_URL` = `https://uso-resourcing.onrender.com`
-2. **uso-durable** → Environment → `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
-3. **uso-omnichannel-broker** → Environment → `RE_SOURCING_SERVICE_URL` = `https://uso-resourcing.onrender.com`
+
+**Important:** Without `PAYMENT_SERVICE_URL`, createPaymentIntent returns 502 "All connection attempts failed" because the Orchestrator defaults to `http://localhost:8006` which does not exist on Render.
+3. **uso-durable** → Environment → `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
+4. **uso-omnichannel-broker** → Environment → `RE_SOURCING_SERVICE_URL` = `https://uso-resourcing.onrender.com`
 
 ---
 
@@ -383,6 +394,14 @@ curl -s $PARTNER_PORTAL/api/v1/onboard | head -5
 
 - Render deploys on push to the connected branch (default: `main`)
 - Disable in **Settings** → **Build & Deploy** if needed
+
+### Troubleshooting: "Payment service error: All connection attempts failed"
+
+The Orchestrator calls the Payment service at `PAYMENT_SERVICE_URL`. If that env var is not set, it defaults to `http://localhost:8006`, which does not exist on Render. **Fix:** Add `PAYMENT_SERVICE_URL=https://uso-payment.onrender.com` to **uso-orchestrator** → Environment, then redeploy.
+
+### Troubleshooting: "d: command not found"
+
+If you see `bash: line 1: d: command not found`, the Start Command is missing `c` from `cd`. Fix: In Render Dashboard → Your Service → **Settings** → **Build & Deploy** → **Start Command**, ensure it begins with `cd` (not `d`). Copy-paste from the Quick Reference table below.
 
 ---
 

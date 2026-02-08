@@ -21,22 +21,29 @@ def get_supabase() -> Optional[Client]:
 
 
 async def get_partner_webhook(partner_id: str) -> Optional[str]:
-    """Get partner webhook URL from communication_preferences."""
+    """Get partner webhook URL from communication_preferences (channel=api only)."""
+    prefs = await get_partner_channel(partner_id)
+    if prefs and prefs.get("channel") == "api":
+        return prefs.get("channel_identifier")
+    return None
+
+
+async def get_partner_channel(partner_id: str) -> Optional[Dict[str, Any]]:
+    """Get partner's preferred channel (channel, channel_identifier)."""
     client = get_supabase()
     if not client:
         return None
     try:
         result = (
             client.table("communication_preferences")
-            .select("channel_identifier")
+            .select("channel, channel_identifier")
             .eq("partner_id", partner_id)
-            .eq("channel", "api")
             .eq("is_active", True)
             .limit(1)
             .execute()
         )
         if result.data:
-            return result.data[0].get("channel_identifier")
+            return result.data[0]
         return None
     except Exception:
         return None

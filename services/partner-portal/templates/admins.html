@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Admins - {{ partner.business_name }}{% endblock %}
+
+{% block content %}
+<h1>{{ partner.business_name }} - Admin Management</h1>
+<p>Manage partner admins. Only owners can promote or revoke.</p>
+
+<h2>Admins</h2>
+<table style="width:100%;border-collapse:collapse;margin-top:var(--spacing-md);">
+    <thead>
+        <tr>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Name</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Email</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Role</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for a in admins %}
+        <tr>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ a.display_name or '-' }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ a.email }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ a.role }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">
+                {% if a.role == 'admin' %}
+                <button type="button" class="btn-revoke" data-id="{{ a.id }}">Revoke Admin</button>
+                {% else %}
+                <em>Owner</em>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" style="padding:var(--spacing-md);color:var(--color-text-secondary);">No admins yet.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h2>Promote to Admin</h2>
+{% if promotable %}
+<form id="promote-form">
+    <select id="member_id" required>
+        <option value="">Select member...</option>
+        {% for m in promotable %}
+        <option value="{{ m.id }}">{{ m.display_name or m.email }} ({{ m.email }})</option>
+        {% endfor %}
+    </select>
+    <button type="submit">Promote to Admin</button>
+</form>
+{% else %}
+<p>No members available to promote. Add team members first.</p>
+{% endif %}
+<div id="message"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const partnerId = '{{ partner.id }}';
+
+    document.getElementById('promote-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const memberId = document.getElementById('member_id').value;
+        if (!memberId) return;
+        const msg = document.getElementById('message');
+        msg.className = '';
+        msg.textContent = '';
+        try {
+            const res = await fetch(`/api/v1/partners/${partnerId}/admins`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ member_id: memberId }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                msg.className = 'success';
+                msg.textContent = 'Promoted!';
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                msg.className = 'error';
+                msg.textContent = data.detail || 'Failed';
+            }
+        } catch (err) {
+            msg.className = 'error';
+            msg.textContent = err.message || 'Request failed';
+        }
+    });
+
+    document.querySelectorAll('.btn-revoke').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Revoke admin access?')) return;
+            const id = btn.dataset.id;
+            try {
+                const res = await fetch(`/api/v1/partners/${partnerId}/admins/${id}`, { method: 'DELETE' });
+                if (res.ok) location.reload();
+                else alert((await res.json()).detail || 'Failed');
+            } catch (e) { alert(e.message); }
+        });
+    });
+</script>
+{% endblock %}

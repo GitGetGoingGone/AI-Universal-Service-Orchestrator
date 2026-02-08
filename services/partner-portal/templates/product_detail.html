@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}{{ product.name }} - {{ partner.business_name }}{% endblock %}
+
+{% block content %}
+<h1>{{ product.name }}</h1>
+<p><a href="/api/v1/partners/{{ partner.id }}/products">← Back to Products</a></p>
+<p>Price: {{ product.currency }} {{ product.price }}{% if product.price_min or product.price_max %} (min: {{ product.price_min or '-' }}, max: {{ product.price_max or '-' }}){% endif %}</p>
+<p>Available: {{ 'Yes' if product.is_available else 'No' }}</p>
+
+<h2>Availability Slots</h2>
+<p>Booking modes: <span class="badge auto-book">Auto book</span> <span class="badge check-before">Check before</span> <span class="badge not-available">Not available</span></p>
+<div id="scheduling-calendar" class="scheduling-container"></div>
+<form id="add-slot-form" class="slot-form">
+    <h3>Add Slot</h3>
+    <label>Start (datetime)</label>
+    <input type="datetime-local" id="start_at" required>
+    <label>End (datetime)</label>
+    <input type="datetime-local" id="end_at" required>
+    <label>Booking mode</label>
+    <select id="booking_mode">
+        <option value="auto_book">Auto book</option>
+        <option value="check_before_book">Check before book</option>
+        <option value="not_available">Not available</option>
+    </select>
+    <button type="submit">Add Slot</button>
+</form>
+<div id="slot-message"></div>
+
+<h2>Assigned Team</h2>
+<form id="assign-form">
+    <select id="member_id">
+        <option value="">Select member...</option>
+        {% for m in members %}
+        <option value="{{ m.id }}">{{ m.display_name or m.email }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit">Assign</button>
+</form>
+<ul>
+    {% for a in assignments %}
+    <li>{{ (a.partner_members or {}).display_name or (a.partner_members or {}).email or 'Member' }} ({{ a.role }}) <button class="btn-unassign" data-member-id="{{ a.partner_member_id }}">Remove</button></li>
+    {% else %}
+    <li>No assignments</li>
+    {% endfor %}
+</ul>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/scheduling.js"></script>
+<script>
+    const partnerId = '{{ partner.id }}';
+    const productId = '{{ product.id }}';
+    const availability = {{ availability | tojson }};
+
+    if (typeof initScheduling === 'function') {
+        initScheduling({
+            container: '#scheduling-calendar',
+            availability,
+            partnerId,
+            productId,
+            onDelete: (slotId) => fetch(`/api/v1/partners/${partnerId}/products/${productId}/availability/${slotId}`, { method: 'DELETE' }).then(() => location.reload()),
+        });
+    }
+
+    document.getElementById('add-slot-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const start = document.getElementById('start_at').value;
+        const end = document.getElementById('end_at').value;
+        const msg = document.getElementById('slot-message');
+        msg.className = '';
+        msg.textContent = '';
+        try {
+            const res = await fetch(`/api/v1/partners/${partnerId}/products/${productId}/availability`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    slot_type: 'date_range',
+                    start_at: start + ':00',
+                    end_at: end + ':00',
+                    booking_mode: document.getElementById('booking_mode').value,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                msg.className = 'success';
+                msg.textContent = 'Slot added!';
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                msg.className = 'error';
+                msg.textContent = data.detail || 'Failed';
+            }
+        } catch (err) {
+            msg.className = 'error';
+            msg.textContent = err.message || 'Request failed';
+        }
+    };
+
+    document.getElementById('assign-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const memberId = document.getElementById('member_id').value;
+        if (!memberId) return;
+        try {
+            const res = await fetch(`/api/v1/partners/${partnerId}/products/${productId}/assignments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ partner_member_id: memberId }),
+            });
+            if (res.ok) location.reload();
+        } catch (e) { alert(e.message); }
+    };
+
+    document.querySelectorAll('.btn-unassign').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const memberId = btn.dataset.memberId;
+            const res = await fetch(`/api/v1/partners/${partnerId}/products/${productId}/assignments/${memberId}`, { method: 'DELETE' });
+            if (res.ok) location.reload();
+        });
+    });
+</script>
+<style>
+.badge { padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
+.badge.auto-book { background: #bbf7d0; color: #166534; }
+.badge.check-before { background: #fef08a; color: #854d0e; }
+.badge.not-available { background: #e5e7eb; color: #4b5563; }
+.scheduling-container { min-height: 200px; margin: var(--spacing-md) 0; }
+.slot-form { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); align-items: flex-end; margin-top: var(--spacing-md); }
+.slot-form label { display: block; margin-right: 0.5rem; }
+</style>
+{% endblock %}

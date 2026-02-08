@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Team - {{ partner.business_name }}{% endblock %}
+
+{% block content %}
+<h1>{{ partner.business_name }} - Team</h1>
+<p>Manage team members and their roles.</p>
+
+<h2>Add Member</h2>
+<form id="add-form">
+    <label for="email">Email *</label>
+    <input type="email" id="email" required>
+    <label for="display_name">Display Name</label>
+    <input type="text" id="display_name" placeholder="Optional">
+    <label for="role">Role</label>
+    <select id="role">
+        <option value="member">Member</option>
+        <option value="manager">Manager</option>
+        <option value="admin">Admin</option>
+        <option value="owner">Owner</option>
+    </select>
+    <button type="submit">Add Member</button>
+</form>
+<div id="add-message"></div>
+
+<h2>Team Members</h2>
+<table style="width:100%;border-collapse:collapse;margin-top:var(--spacing-md);">
+    <thead>
+        <tr>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Name</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Email</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Role</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Status</th>
+            <th style="padding:var(--spacing-sm);text-align:left;border-bottom:1px solid var(--color-border);">Actions</th>
+        </tr>
+    </thead>
+    <tbody id="members-tbody">
+        {% for m in members %}
+        <tr data-member-id="{{ m.id }}">
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ m.display_name or '-' }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ m.email }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ m.role }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">{{ 'Active' if m.is_active else 'Inactive' }}</td>
+            <td style="padding:var(--spacing-sm);border-bottom:1px solid var(--color-border);">
+                <button type="button" class="btn-deactivate" data-id="{{ m.id }}">Deactivate</button>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" style="padding:var(--spacing-md);color:var(--color-text-secondary);">No team members yet.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const partnerId = '{{ partner.id }}';
+
+    document.getElementById('add-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('add-message');
+        msg.className = '';
+        msg.textContent = '';
+        try {
+            const res = await fetch(`/api/v1/partners/${partnerId}/team`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: document.getElementById('email').value,
+                    display_name: document.getElementById('display_name').value || null,
+                    role: document.getElementById('role').value,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                msg.className = 'success';
+                msg.textContent = 'Member added!';
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                msg.className = 'error';
+                msg.textContent = (data.detail && data.detail.msg) ? data.detail.msg : (data.detail || 'Failed to add');
+            }
+        } catch (err) {
+            msg.className = 'error';
+            msg.textContent = err.message || 'Request failed';
+        }
+    };
+
+    document.querySelectorAll('.btn-deactivate').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Deactivate this member?')) return;
+            const id = btn.dataset.id;
+            try {
+                const res = await fetch(`/api/v1/partners/${partnerId}/team/${id}`, { method: 'DELETE' });
+                if (res.ok) location.reload();
+                else alert((await res.json()).detail || 'Failed');
+            } catch (e) { alert(e.message); }
+        });
+    });
+</script>
+{% endblock %}

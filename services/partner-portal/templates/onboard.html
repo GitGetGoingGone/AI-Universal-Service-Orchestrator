@@ -1,70 +1,61 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Partner Onboarding</title>
-    <style>
-        body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
-        h1 { font-size: 1.5rem; }
-        label { display: block; margin-top: 1rem; font-weight: 500; }
-        input { width: 100%; padding: 0.5rem; margin-top: 0.25rem; box-sizing: border-box; }
-        button { margin-top: 1.5rem; padding: 0.5rem 1.5rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
-        button:hover { background: #1d4ed8; }
-        .error { color: #dc2626; margin-top: 0.5rem; }
-        .success { color: #16a34a; margin-top: 1rem; }
-        a { color: #2563eb; }
-    </style>
-</head>
-<body>
-    <h1>Partner Onboarding</h1>
-    <p>Register your business to sell products on the platform.</p>
-    <form id="form">
-        <label for="business_name">Business Name *</label>
-        <input type="text" id="business_name" name="business_name" required>
+{% extends "base.html" %}
+{% block title %}Partner Onboarding{% endblock %}
 
-        <label for="contact_email">Contact Email *</label>
-        <input type="email" id="contact_email" name="contact_email" required>
+{% block nav_links %}
+<a href="/api/v1/onboard">Onboard</a>
+{% endblock %}
 
-        <label for="business_type">Business Type</label>
-        <input type="text" id="business_type" name="business_type" placeholder="e.g. retail, florist">
+{% block content %}
+<h1>Partner Onboarding</h1>
+<p>Register your business to sell products on the platform.</p>
+<form id="form">
+    <label for="business_name">Business Name *</label>
+    <input type="text" id="business_name" name="business_name" required>
 
-        <label for="contact_phone">Contact Phone</label>
-        <input type="tel" id="contact_phone" name="contact_phone">
+    <label for="contact_email">Contact Email *</label>
+    <input type="email" id="contact_email" name="contact_email" required>
 
-        <button type="submit">Create Partner Account</button>
-    </form>
-    <div id="message"></div>
-    <script>
-        document.getElementById('form').onsubmit = async (e) => {
-            e.preventDefault();
-            const msg = document.getElementById('message');
-            msg.className = '';
-            msg.textContent = '';
-            try {
-                const res = await fetch('/api/v1/onboard', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        business_name: document.getElementById('business_name').value,
-                        contact_email: document.getElementById('contact_email').value,
-                        business_type: document.getElementById('business_type').value || null,
-                        contact_phone: document.getElementById('contact_phone').value || null,
-                    }),
-                });
-                const data = await res.json();
-                if (res.ok) {
-                    msg.className = 'success';
-                    msg.innerHTML = `Partner created! <a href="/api/v1/partners/${data.partner_id}/products">Add products</a> | <a href="/api/v1/partners/${data.partner_id}/settings">Configure webhook</a>`;
-                } else {
-                    msg.className = 'error';
-                    msg.textContent = data.detail || 'Failed to create partner';
-                }
-            } catch (err) {
+    <label for="business_type">Business Type</label>
+    <input type="text" id="business_type" name="business_type" placeholder="e.g. retail, florist">
+
+    <label for="contact_phone">Contact Phone</label>
+    <input type="tel" id="contact_phone" name="contact_phone">
+
+    <button type="submit">Create Partner Account</button>
+</form>
+<div id="message"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.getElementById('form').onsubmit = async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('message');
+        msg.className = '';
+        msg.textContent = '';
+        try {
+            const res = await fetch('/api/v1/onboard', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    business_name: document.getElementById('business_name').value,
+                    contact_email: document.getElementById('contact_email').value,
+                    business_type: document.getElementById('business_type').value || null,
+                    contact_phone: document.getElementById('contact_phone').value || null,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                msg.className = 'success';
+                msg.innerHTML = `Partner created! <a href="/api/v1/partners/${data.partner_id}/products">Add products</a> | <a href="/api/v1/partners/${data.partner_id}/settings">Configure webhook</a>`;
+            } else {
                 msg.className = 'error';
-                msg.textContent = err.message || 'Request failed';
+                msg.textContent = data.detail || 'Failed to create partner';
             }
-        };
-    </script>
-</body>
-</html>
+        } catch (err) {
+            msg.className = 'error';
+            msg.textContent = err.message || 'Request failed';
+        }
+    };
+</script>
+{% endblock %}

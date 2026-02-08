@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Platform Admin{% endblock %}
+
+{% block nav_links %}
+<a href="/api/v1/onboard">Onboard</a>
+<a href="/api/v1/platform">Platform Admin</a>
+{% endblock %}
+
+{% block content %}
+<h1>Platform Admin</h1>
+<p>Manage all partners and platform admins. Requires platform admin authentication.</p>
+
+<h2>Partners</h2>
+<p><a href="/api/v1/platform/partners">GET /api/v1/platform/partners</a> (JSON)</p>
+<div id="partners-list"></div>
+
+<h2>Platform Admins</h2>
+<form id="add-admin-form">
+    <input type="text" id="user_id" placeholder="User ID (Clerk sub)" required>
+    <button type="submit">Add Platform Admin</button>
+</form>
+<div id="message"></div>
+<p><a href="/api/v1/platform/admins">GET /api/v1/platform/admins</a> (JSON)</p>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.getElementById('add-admin-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const userId = document.getElementById('user_id').value;
+        const msg = document.getElementById('message');
+        msg.className = '';
+        msg.textContent = '';
+        try {
+            const res = await fetch('/api/v1/platform/admins', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, scope: 'all' }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                msg.className = 'success';
+                msg.textContent = 'Platform admin added!';
+            } else {
+                msg.className = 'error';
+                msg.textContent = data.detail || 'Failed';
+            }
+        } catch (err) {
+            msg.className = 'error';
+            msg.textContent = err.message || 'Request failed';
+        }
+    });
+</script>
+{% endblock %}
