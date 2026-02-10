@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { scope?: string; product_id?: string; targets?: string[] };
+  let body: { scope?: string; product_id?: string; product_ids?: string[]; targets?: string[] };
   try {
     body = await request.json();
   } catch {
@@ -25,6 +25,7 @@ export async function POST(request: Request) {
 
   const scope = body.scope ?? "all";
   const product_id = body.product_id ?? undefined;
+  const product_ids = Array.isArray(body.product_ids) ? body.product_ids : undefined;
   const targets = Array.isArray(body.targets) ? body.targets : [];
 
   const base = DISCOVERY_SERVICE_URL.replace(/\/$/, "");
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         scope,
         product_id,
+        product_ids,
         targets,
         partner_id: partnerId,
       }),

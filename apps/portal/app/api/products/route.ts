@@ -9,7 +9,7 @@ export async function GET() {
   }
 
   const supabase = createSupabaseServerClient();
-  const { data, error } = await supabase
+  const { data: products, error } = await supabase
     .from("products")
     .select("id, name, description, price, currency, product_type, unit, is_available, image_url, created_at, last_acp_push_at, last_acp_push_success")
     .eq("partner_id", partnerId)
@@ -20,7 +20,28 @@ export async function GET() {
     return NextResponse.json({ detail: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ products: data ?? [] });
+  const list = products ?? [];
+  const productIds = list.map((p: { id: string }) => p.id);
+  let withInventory = list;
+  if (productIds.length > 0) {
+    const { data: inv } = await supabase
+      .from("product_inventory")
+      .select("product_id, quantity, low_stock_threshold")
+      .in("product_id", productIds);
+    const invByProduct = new Map(
+      (inv ?? []).map((i: { product_id: string; quantity?: number; low_stock_threshold?: number }) => [i.product_id, i])
+    );
+    withInventory = list.map((p: Record<string, unknown>) => {
+      const row = invByProduct.get(p.id as string);
+      return {
+        ...p,
+        quantity: row?.quantity ?? 0,
+        low_stock_threshold: row?.low_stock_threshold ?? 5,
+      };
+    });
+  }
+
+  return NextResponse.json({ products: withInventory });
 }
 
 export async function POST(request: Request) {

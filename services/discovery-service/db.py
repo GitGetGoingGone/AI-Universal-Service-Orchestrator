@@ -160,6 +160,7 @@ async def update_products_last_acp_push(product_ids: List[str], success: bool) -
 async def get_products_for_acp_export(
     partner_id: Optional[str] = None,
     product_id: Optional[str] = None,
+    product_ids: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Get products with partner seller fields joined for ACP feed building.
@@ -181,6 +182,8 @@ async def get_products_for_acp_export(
             q = q.eq("partner_id", partner_id)
         if product_id:
             q = q.eq("id", product_id)
+        elif product_ids:
+            q = q.in_("id", product_ids)
         result = q.execute()
         products = result.data or []
         if not products:

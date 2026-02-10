@@ -23,6 +23,32 @@ export async function PATCH(
   if (body.end_at != null) updates.end_at = body.end_at;
   if (body.is_active != null) updates.is_active = Boolean(body.is_active);
 
+  if (body.add_product_ids != null && Array.isArray(body.add_product_ids)) {
+    const { data: row } = await supabase
+      .from("partner_promotions")
+      .select("product_ids")
+      .eq("id", id)
+      .eq("partner_id", partnerId)
+      .single();
+    const current = (row?.product_ids ?? []) as string[];
+    const merged = [...new Set([...current, ...body.add_product_ids])];
+    updates.product_ids = merged;
+  }
+  if (body.remove_product_ids != null && Array.isArray(body.remove_product_ids)) {
+    const { data: row } = await supabase
+      .from("partner_promotions")
+      .select("product_ids")
+      .eq("id", id)
+      .eq("partner_id", partnerId)
+      .single();
+    const current = (row?.product_ids ?? []) as string[];
+    const toRemove = new Set(body.remove_product_ids);
+    updates.product_ids = current.filter((pid: string) => !toRemove.has(pid));
+  }
+  if (body.product_ids != null && Array.isArray(body.product_ids)) {
+    updates.product_ids = body.product_ids;
+  }
+
   const { data, error } = await supabase
     .from("partner_promotions")
     .update(updates)

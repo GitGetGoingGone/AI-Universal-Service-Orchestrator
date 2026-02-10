@@ -55,9 +55,12 @@ def _product_to_acp_row(product: Dict[str, Any]) -> Dict[str, Any]:
 async def _build_acp_rows(
     partner_id: Optional[str] = None,
     product_id: Optional[str] = None,
+    product_ids: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Load products with partner join, build ACP rows, filter to compliant only."""
-    products = await get_products_for_acp_export(partner_id=partner_id, product_id=product_id)
+    products = await get_products_for_acp_export(
+        partner_id=partner_id, product_id=product_id, product_ids=product_ids
+    )
     rows = [_product_to_acp_row(p) for p in products]
     require_checkout = any(r.get("is_eligible_checkout") for r in rows)
     compliant, _ = filter_acp_compliant_products(rows, require_checkout_fields=require_checkout, strict=True)
@@ -108,8 +111,9 @@ async def push_status(
 
 
 class PushBody(BaseModel):
-    scope: str  # "single" | "all"
+    scope: str  # "single" | "all" | "selected"
     product_id: Optional[str] = None
+    product_ids: Optional[List[str]] = None  # required when scope=selected
     targets: List[str]  # ["chatgpt"] | ["gemini"] | ["chatgpt", "gemini"]
     partner_id: str
 
@@ -118,16 +122,20 @@ class PushBody(BaseModel):
 async def push_feed(body: PushBody):
     """
     Push catalog to ChatGPT and/or Gemini.
-    scope: single (one product) | all (full catalog for partner).
+    scope: single (one product) | all (full catalog) | selected (product_ids list).
     product_id: required when scope=single.
+    product_ids: required when scope=selected.
     targets: chatgpt and/or gemini.
     ChatGPT: 15-minute throttle per partner; generates ACP feed and updates last_acp_push_at.
     Gemini: runs UCP validation and returns summary (no rate limit).
     """
-    if body.scope not in ("single", "all"):
-        raise HTTPException(status_code=400, detail="scope must be 'single' or 'all'")
+    if body.scope not in ("single", "all", "selected"):
+        raise HTTPException(status_code=400, detail="scope must be 'single', 'all', or 'selected'")
     if body.scope == "single" and not body.product_id:
         raise HTTPException(status_code=400, detail="product_id required when scope is 'single'")
+    if body.scope == "selected":
+        if not body.product_ids or not isinstance(body.product_ids, list):
+            raise HTTPException(status_code=400, detail="product_ids (array) required when scope is 'selected'")
     if not body.targets:
         raise HTTPException(status_code=400, detail="targets required")
     valid_targets = {"chatgpt", "gemini"}
@@ -167,10 +175,16 @@ async def push_feed(body: PushBody):
         rows = await _build_acp_rows(
             partner_id=partner_id,
             product_id=body.product_id if body.scope == "single" else None,
+            product_ids=body.product_ids if body.scope == "selected" else None,
         )
         await update_partner_last_acp_push(partner_id)
-        product_ids = [body.product_id] if body.scope == "single" and body.product_id else [r.get("item_id") for r in rows if r.get("item_id")]
-        await update_products_last_acp_push(product_ids, success=True)
+        pushed_product_ids = (
+            [body.product_id] if body.scope == "single" and body.product_id
+            else body.product_ids if body.scope == "selected"
+            else [r.get("item_id") for r in rows if r.get("item_id")]
+        )
+        if pushed_product_ids:
+            await update_products_last_acp_push(pushed_product_ids, success=True)
         next_allowed = now + timedelta(minutes=ACP_PUSH_THROTTLE_MINUTES)
         result["chatgpt"] = "pushed"
         result["next_acp_push_allowed_at"] = next_allowed.isoformat()
@@ -181,6 +195,7 @@ async def push_feed(body: PushBody):
         products = await get_products_for_acp_export(
             partner_id=partner_id,
             product_id=body.product_id if body.scope == "single" else None,
+            product_ids=body.product_ids if body.scope == "selected" else None,
         )
         compliant = 0
         non_compliant = 0

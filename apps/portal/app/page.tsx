@@ -2,7 +2,6 @@ import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { ThemeSwitcher } from "@/components/theme-switcher";
 
 export default async function HomePage() {
   const { userId } = await auth();
@@ -15,7 +14,6 @@ export default async function HomePage() {
     <div className="min-h-screen bg-[rgb(var(--color-background))] text-[rgb(var(--color-text))]">
       <header className="border-b border-[rgb(var(--color-border))] px-6 py-4 flex justify-between items-center">
         <h1 className="text-xl font-semibold">USO</h1>
-        <ThemeSwitcher />
       </header>
 
       <main className="max-w-[var(--content-max-width)] mx-auto px-6 py-16">

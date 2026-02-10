@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ProductEditForm } from "./product-edit-form";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { ProductDiscoveryPush } from "./product-discovery-push";
+import { ProductInventorySection } from "./product-inventory-section";
 
 export default async function ProductDetailPage({
   params,
@@ -22,6 +23,7 @@ export default async function ProductDetailPage({
         </Link>
         <h1 className="text-2xl font-bold mb-6">Edit Product</h1>
         <ProductEditForm productId={id} />
+        <ProductInventorySection productId={id} />
         <ProductDiscoveryPush productId={id} />
         <h2 className="text-lg font-semibold mt-8 mb-2">Availability</h2>
         <AvailabilityCalendar productId={id} />
