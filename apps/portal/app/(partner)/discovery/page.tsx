@@ -15,8 +15,8 @@ export default function DiscoveryPage() {
 
   function fetchPushStatus() {
     fetch("/api/feeds/push-status")
-      .then((res) => (res.ok ? res.json() : {}))
-      .then((data) => setPushStatus(data))
+      .then((res) => (res.ok ? res.json() : { next_acp_push_allowed_at: null }))
+      .then((data: { next_acp_push_allowed_at: string | null }) => setPushStatus(data))
       .catch(() => setPushStatus({ next_acp_push_allowed_at: null }));
   }
 
