@@ -8,6 +8,12 @@ const inputClass =
 
 type Props = { productId: string };
 
+type InventoryData = {
+  quantity?: number;
+  low_stock_threshold?: number;
+  auto_unlist_when_zero?: boolean;
+};
+
 export function ProductInventorySection({ productId }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -17,8 +23,8 @@ export function ProductInventorySection({ productId }: Props) {
 
   useEffect(() => {
     fetch(`/api/inventory/${productId}`)
-      .then((res) => (res.ok ? res.json() : {}))
-      .then((data) => {
+      .then((res) => (res.ok ? res.json() : Promise.resolve({} as InventoryData)))
+      .then((data: InventoryData) => {
         setQuantity(data.quantity ?? 0);
         setLowStockThreshold(data.low_stock_threshold ?? 5);
         setAutoUnlistWhenZero(data.auto_unlist_when_zero !== false);
