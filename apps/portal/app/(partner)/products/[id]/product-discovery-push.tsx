@@ -20,7 +20,7 @@ export function ProductDiscoveryPush({ productId }: Props) {
 
   const nextAt = pushStatus?.next_acp_push_allowed_at;
   const nextAtDate = nextAt ? new Date(nextAt) : null;
-  const chatgptDisabled = nextAtDate && new Date() < nextAtDate;
+  const chatgptDisabled = !!(nextAtDate && new Date() < nextAtDate);
 
   async function push(targets: ("chatgpt" | "gemini")[]) {
     setPushing(true);
