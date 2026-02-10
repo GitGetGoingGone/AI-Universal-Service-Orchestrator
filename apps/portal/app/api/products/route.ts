@@ -21,8 +21,8 @@ export async function GET() {
   }
 
   const list = products ?? [];
-  const productIds = list.map((p: { id: string }) => p.id);
-  let withInventory = list;
+  const productIds = list.map((p) => p.id);
+  let withInventory: typeof list = list;
   if (productIds.length > 0) {
     const { data: inv } = await supabase
       .from("product_inventory")
@@ -31,8 +31,8 @@ export async function GET() {
     const invByProduct = new Map(
       (inv ?? []).map((i: { product_id: string; quantity?: number; low_stock_threshold?: number }) => [i.product_id, i])
     );
-    withInventory = list.map((p: Record<string, unknown>) => {
-      const row = invByProduct.get(p.id as string);
+    withInventory = list.map((p) => {
+      const row = invByProduct.get(p.id);
       return {
         ...p,
         quantity: row?.quantity ?? 0,
