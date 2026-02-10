@@ -34,6 +34,10 @@ class Settings:
         get_env("WEBHOOK_SERVICE_URL") or "http://localhost:8003"
     ).rstrip("/")
 
+    # Supabase (for Link Account: users, account_links)
+    supabase_url: str = get_env("SUPABASE_URL") or ""
+    supabase_key: str = get_env("SUPABASE_SERVICE_KEY") or get_env("SUPABASE_SECRET_KEY") or ""
+
     # Payment service (Module 15)
     payment_service_url: str = (
         get_env("PAYMENT_SERVICE_URL") or "http://localhost:8006"
@@ -55,6 +59,9 @@ class Settings:
     # Agentic handoff (Clerk SSO 2.0 - optional)
     clerk_publishable_key: str = get_env("CLERK_PUBLISHABLE_KEY") or ""
     clerk_secret_key: str = get_env("CLERK_SECRET_KEY") or ""
+
+    # Link Account - Google OAuth (verify id_token)
+    google_oauth_client_id: str = get_env("GOOGLE_OAUTH_CLIENT_ID") or ""
 
     environment: str = get_env("ENVIRONMENT", "development")
     log_level: str = get_env("LOG_LEVEL", "INFO")

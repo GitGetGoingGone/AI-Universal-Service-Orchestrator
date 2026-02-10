@@ -66,6 +66,10 @@ todos: []
 
 **Technology**: Azure Container Apps (FastAPI) + Supabase pgvector
 
+**Status**: Implemented. Scout engine, pgvector semantic search, UCP/ACP adapters, manifest cache, inventory webhook.
+
+**Schema & discovery tracking**: ACP/UCP schema requirements (partners seller fields, products ACP fields), ACP feed export, feed URL, UCP `/.well-known/ucp` and catalog API, and merchant attribution are tracked in **05-implementation.md** under "Schema & Discovery Requirements (ACP / UCP)" and in the implementation todos (e.g. `schema-partners-seller-fields`, `discovery-acp-feed-export`, `discovery-ucp-well-known`). Reference: `docs/COMMERCE_FEED_SCHEMA_REQUIREMENTS.md`, `docs/AI_PLATFORM_PRODUCT_DISCOVERY.md`.
+
 **Implementation**:
 
 - `discovery-service/` - Main service (FastAPI on Container Apps)

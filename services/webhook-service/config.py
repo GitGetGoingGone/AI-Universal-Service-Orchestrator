@@ -42,5 +42,15 @@ class Settings:
     def twilio_configured(self) -> bool:
         return bool(self.twilio_account_sid and self.twilio_auth_token)
 
+    def push_configured_for(self, platform: str) -> bool:
+        """Return True if outbound push is configured for the given platform (no stubs)."""
+        if platform == "chatgpt":
+            return bool(self.chatgpt_webhook_url)
+        if platform == "gemini":
+            return bool(self.gemini_webhook_url)
+        if platform == "whatsapp":
+            return self.twilio_configured
+        return False
+
 
 settings = Settings()

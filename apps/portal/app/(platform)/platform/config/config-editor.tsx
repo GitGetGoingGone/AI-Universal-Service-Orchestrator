@@ -1,0 +1,127 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+
+type Config = {
+  id?: string;
+  commission_rate_pct?: number;
+  discovery_relevance_threshold?: number;
+  enable_self_registration?: boolean;
+  enable_chatgpt?: boolean;
+  feature_flags?: Record<string, boolean>;
+};
+
+export function ConfigEditor() {
+  const [config, setConfig] = useState<Config>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/platform/config")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.detail) return;
+        setConfig({
+          commission_rate_pct: data.commission_rate_pct ?? 10,
+          discovery_relevance_threshold: data.discovery_relevance_threshold ?? 0.7,
+          enable_self_registration: data.enable_self_registration ?? true,
+          enable_chatgpt: data.enable_chatgpt ?? true,
+          feature_flags: data.feature_flags ?? {},
+        });
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function onSave() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/platform/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          commission_rate_pct: config.commission_rate_pct,
+          discovery_relevance_threshold: config.discovery_relevance_threshold,
+          enable_self_registration: config.enable_self_registration,
+          enable_chatgpt: config.enable_chatgpt,
+          feature_flags: config.feature_flags,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+    } catch {
+      alert("Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <p className="text-[rgb(var(--color-text-secondary))]">Loading...</p>;
+
+  return (
+    <div className="space-y-6 max-w-xl">
+      <div>
+        <label className="block text-sm font-medium mb-1">Commission Rate (%)</label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          max="100"
+          value={config.commission_rate_pct ?? 10}
+          onChange={(e) =>
+            setConfig((c) => ({ ...c, commission_rate_pct: Number(e.target.value) }))
+          }
+          className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium mb-1">
+          Discovery Relevance Threshold (0–1)
+        </label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          max="1"
+          value={config.discovery_relevance_threshold ?? 0.7}
+          onChange={(e) =>
+            setConfig((c) => ({
+              ...c,
+              discovery_relevance_threshold: Number(e.target.value),
+            }))
+          }
+          className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id="self_reg"
+          checked={config.enable_self_registration ?? true}
+          onChange={(e) =>
+            setConfig((c) => ({ ...c, enable_self_registration: e.target.checked }))
+          }
+        />
+        <label htmlFor="self_reg">Enable self-registration</label>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id="chatgpt"
+          checked={config.enable_chatgpt ?? true}
+          onChange={(e) =>
+            setConfig((c) => ({ ...c, enable_chatgpt: e.target.checked }))
+          }
+        />
+        <label htmlFor="chatgpt">Enable ChatGPT integration</label>
+      </div>
+
+      <Button onClick={onSave} disabled={saving}>
+        {saving ? "Saving..." : "Save"}
+      </Button>
+    </div>
+  );
+}

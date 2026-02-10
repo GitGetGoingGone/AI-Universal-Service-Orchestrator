@@ -1,10 +1,52 @@
 ---
 name: AI Universal Service Orchestrator Platform - Implementation
 overview: Implementation Phases, Month 0, Critical Pillars
-todos: []
+todos:
+  - id: partner-earnings
+    content: Partner Portal - Earnings: Payout dashboard, commission breakdown, invoice management
+    status: pending
+  - id: partner-analytics
+    content: Partner Portal - Analytics: Sales, peak hours, popular items, CSV export
+    status: pending
+  - id: partner-ratings
+    content: Partner Portal - Ratings: Review dashboard, respond to reviews
+    status: pending
+  - id: partner-team
+    content: Partner Portal - Team: Team members, roles, assignments (partner_members)
+    status: pending
+  - id: partner-admins
+    content: Partner Portal - Admins: Partner admins (owner promotes/revokes)
+    status: pending
+  - id: partner-integrations
+    content: Partner Portal - Integrations: Webhook, API poll, OAuth availability
+    status: pending
+  - id: partner-settings-general
+    content: Partner Portal - Settings General: Channel, pause orders, capacity, notifications
+    status: pending
+  # Schema & discovery (ACP/UCP) – see "Schema & Discovery Requirements" section
+  - id: schema-partners-seller-fields
+    content: Schema - Partners: Add seller_name, seller_url, return_policy, privacy_policy, terms_url, store_country (for ACP feed attribution)
+    status: pending
+  - id: schema-products-acp-fields
+    content: Schema - Products: Add ACP fields (url, brand, is_eligible_search, is_eligible_checkout, target_countries) or metadata mapping
+    status: pending
+  - id: discovery-acp-feed-export
+    content: Discovery - ACP feed export: Pipeline DB → ACP jsonl.gz/csv.gz with partner join for seller_* per product
+    status: pending
+  - id: discovery-acp-feed-url
+    content: Discovery - ACP feed URL: Public feed endpoint or per-partner feed (e.g. ?partner_id=) and OpenAI registration
+    status: pending
+  - id: discovery-ucp-well-known
+    content: Discovery - UCP: Implement /.well-known/ucp and catalog API (UCP Item shape) for AI platform discovery
+    status: pending
+  - id: discovery-merchant-attribution
+    content: Discovery - Merchant attribution: Feed and catalog responses use partner as seller (not platform); bundling unchanged
+    status: pending
 ---
 
 # Implementation
+
+**Single view of all planned tasks and latest status:** see [08-task-register.md](./08-task-register.md). Update status there; details remain in this file and [03-modules-all.md](./03-modules-all.md).
 
 ## Month 0: The Integration Hub (Pre-Implementation Foundation)
 
@@ -896,6 +938,46 @@ Before Phase 1 begins, ensure:
 - [ ] **Month 0 Integration Hub**: Durable Orchestrator shell built, Agentic AI configured, Adaptive Card Generator templates created, integration testing complete
 
 **Timeline**: All pillars must be completed in **Month 0** (pre-implementation phase)
+
+### Schema & Discovery Requirements (ACP / UCP)
+
+Trackable requirements for commerce feed schema and AI platform discovery. Reference: `docs/COMMERCE_FEED_SCHEMA_REQUIREMENTS.md`, `docs/ACP_COMPLIANCE.md`, `docs/AI_PLATFORM_PRODUCT_DISCOVERY.md`.
+
+#### Schema requirements
+
+- [ ] **Partners table (seller attribution)**  
+  Add or expose partner-level fields for ACP feed and UCP catalog: `seller_name` (e.g. `business_name`), `seller_url`, `return_policy_url`, `privacy_policy_url`, `terms_url`, `store_country`, optional `target_countries`. Used so "merchant on record" is the actual partner, not the platform.
+- [ ] **Products table (ACP)**  
+  Add or map ACP-required fields: `url`, `brand`, `is_eligible_search`, `is_eligible_checkout`, `target_countries`, `store_country` (or equivalent in `metadata` / partner). Map `is_available` → availability enum. Ensure validation uses `acp_compliance` before export.
+- [ ] **Products (UCP)**  
+  Ensure price can be expressed in **minor units (cents)** when returning UCP Item shape; no new columns required beyond existing id, name, price, image_url.
+
+#### Discovery – ACP (push feed for ChatGPT)
+
+- [ ] **Feed export pipeline**  
+  Build export: `products` JOIN `partners` → ACP-shaped rows (jsonl.gz or csv.gz). Populate every row with partner’s `seller_name`, `seller_url`, `return_policy`, and when checkout-eligible `seller_privacy_policy`, `seller_tos`. Run ACP validation before export.
+- [ ] **Feed URL or delivery**  
+  Expose feed at a stable public URL (e.g. `GET /api/v1/feeds/acp` or per-partner `?partner_id=...`) or implement OpenAI’s SFTP/upload delivery. Document for OpenAI merchant/feed registration.
+- [ ] **Registration**  
+  Complete OpenAI merchant/feed onboarding and point to our feed URL or use their upload flow.
+
+#### Discovery – UCP (expose API for Google AI Mode / Gemini)
+
+- [ ] **`/.well-known/ucp`**  
+  Implement well-known endpoint (or static file) with UCP profile: version, capabilities, REST/MCP schema URLs, base URL. Make discoverable (crawlable, optional directory registration).
+- [ ] **Catalog API**  
+  Implement catalog/search endpoint that returns UCP Item shape: `id`, `title`, `price` (integer cents), optional `image_url`. Can wrap existing discovery service and map responses. Include seller/merchant per item where schema allows.
+- [ ] **Checkout/order APIs (optional)**  
+  If full UCP checkout desired: create/update/complete checkout, order confirmation, webhooks. Not required for discovery-only.
+
+#### Merchant attribution & bundling
+
+- [ ] **Merchant on record**  
+  In ACP feed and UCP catalog/checkout responses: never use platform as seller for partner products; always source seller_* and policy URLs from the partner record. Product URL should point to partner page or our detail page showing "Sold by {partner}".
+- [ ] **Bundling**  
+  No change: feed lists individual products with correct seller; cross-partner bundling and checkout remain in our orchestrator (bundle add/remove, order with multiple order_items/order_legs per partner). Document that feed is discovery-only; bundling is runtime.
+
+**Timeline**: Schema and discovery work can run in parallel with Phase 1; ACP feed export and UCP endpoints unlock native ChatGPT/Google discovery when ready.
 
 ### Pillar 6: Chat-First / Headless Foundation
 

@@ -8,6 +8,7 @@ from typing import Any, Dict, Literal, Optional
 from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from config import settings
 from handlers import send_chatgpt_webhook, send_gemini_webhook, send_whatsapp_webhook
 from db import log_webhook_delivery, update_webhook_delivery, upsert_chat_thread_mapping
 
@@ -57,6 +58,12 @@ async def push_to_chat(
     Called by Durable Functions Status Narrator or other services.
     Logs delivery to webhook_deliveries table.
     """
+    if not settings.push_configured_for(platform):
+        raise HTTPException(
+            status_code=503,
+            detail=f"Push not configured for platform '{platform}'. Configure the corresponding webhook URL or Twilio for WhatsApp.",
+        )
+
     payload = body.model_dump() if body else {"narrative": "", "adaptive_card": None, "metadata": {}}
 
     # Build update data

@@ -1,7 +1,5 @@
 """Chat endpoint - Agentic AI with Intent → Discovery orchestration."""
 
-import uuid
-from datetime import datetime
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Query, Request
@@ -9,6 +7,8 @@ from pydantic import BaseModel, Field
 
 from clients import resolve_intent_with_fallback, discover_products, start_orchestration, register_thread_mapping
 from agentic.loop import run_agentic_loop
+from packages.shared.utils.api_response import chat_first_response, request_id_from_request
+from packages.shared.json_ld.error import error_ld
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
 
@@ -17,7 +17,8 @@ class ChatRequest(BaseModel):
     """Request body for chat (natural language)."""
 
     text: str = Field(..., min_length=1, max_length=2000, description="User message")
-    user_id: Optional[str] = Field(None, description="Optional user ID")
+    user_id: Optional[str] = Field(None, description="Optional platform user UUID (or resolved from platform_user_id when linked)")
+    platform_user_id: Optional[str] = Field(None, description="Platform identity (e.g. ChatGPT/Gemini user id); resolved to user_id via account_links")
     limit: int = Field(20, ge=1, le=100, description="Max products when discover")
     thread_id: Optional[str] = Field(None, description="Chat thread ID for webhook push (ChatGPT/Gemini)")
     platform: Optional[Literal["chatgpt", "gemini"]] = Field(None, description="Platform for webhook push")
@@ -39,19 +40,29 @@ async def chat(
     When agentic=True (default): uses LLM to plan and execute (resolve_intent → discover_products).
     When agentic=False or LLM unavailable: direct intent→discover flow.
     """
-    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    request_id = request_id_from_request(request)
+
+    # Resolve user_id: use body.user_id, or resolve from account_links when platform_user_id + platform sent
+    user_id = body.user_id
+    if not user_id and body.platform_user_id and body.platform:
+        try:
+            from db import get_user_id_by_platform_user
+            user_id = get_user_id_by_platform_user(body.platform, body.platform_user_id)
+        except Exception:
+            pass
 
     # Register thread mapping when ChatGPT/Gemini pass thread_id + platform (enables webhook push)
     if body.thread_id and body.platform:
         await register_thread_mapping(
             platform=body.platform,
             thread_id=body.thread_id,
-            user_id=body.user_id,
+            user_id=user_id,
+            platform_user_id=body.platform_user_id,
         )
 
     # Resolve intent with user_id captured; uses local fallback when Intent service unavailable
     async def _resolve(text: str):
-        return await resolve_intent_with_fallback(text, body.user_id)
+        return await resolve_intent_with_fallback(text, user_id)
 
     async def _discover(query: str, limit: int = 20, location: Optional[str] = None):
         return await discover_products(
@@ -63,7 +74,7 @@ async def chat(
     try:
         result = await run_agentic_loop(
             body.text,
-            user_id=body.user_id,
+            user_id=user_id,
             limit=body.limit,
             resolve_intent_fn=_resolve,
             discover_products_fn=_discover,
@@ -71,28 +82,20 @@ async def chat(
             use_agentic=agentic,
         )
     except Exception as e:
-        return {
-            "data": {"intent": None, "products": None, "error": str(e)},
-            "summary": f"Sorry, I couldn't complete your request: {e}",
-            "machine_readable": {"@type": "Error", "description": str(e)},
-            "metadata": {
-                "api_version": "v1",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "request_id": request_id,
-            },
-        }
+        return chat_first_response(
+            data={"intent": None, "products": None, "error": str(e)},
+            machine_readable=error_ld(str(e)),
+            request_id=request_id,
+            summary=f"Sorry, I couldn't complete your request: {e}",
+        )
 
     if "error" in result:
-        return {
-            "data": {"intent": None, "products": None, "error": result["error"]},
-            "summary": f"Sorry, I couldn't complete your request: {result['error']}",
-            "machine_readable": {"@type": "Error", "description": result["error"]},
-            "metadata": {
-                "api_version": "v1",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "request_id": request_id,
-            },
-        }
+        return chat_first_response(
+            data={"intent": None, "products": None, "error": result["error"]},
+            machine_readable=error_ld(result["error"]),
+            request_id=request_id,
+            summary=f"Sorry, I couldn't complete your request: {result['error']}",
+        )
 
     # Enrich adaptive card with agent reasoning when present
     adaptive_card = result.get("adaptive_card")
@@ -114,21 +117,15 @@ async def chat(
             )
             adaptive_card = {**adaptive_card, "body": card_body}
 
-    # Human-readable summary for ChatGPT/Gemini chat UIs
     summary = _build_summary(result)
-
-    return {
-        "data": result.get("data", {}),
-        "summary": summary,
-        "machine_readable": result.get("machine_readable", {}),
-        "adaptive_card": adaptive_card,
-        "agent_reasoning": result.get("agent_reasoning", []),
-        "metadata": {
-            "api_version": "v1",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "request_id": request_id,
-        },
-    }
+    return chat_first_response(
+        data=result.get("data", {}),
+        machine_readable=result.get("machine_readable", {}),
+        adaptive_card=adaptive_card,
+        request_id=request_id,
+        summary=summary,
+        agent_reasoning=result.get("agent_reasoning", []),
+    )
 
 
 def _build_summary(result: dict) -> str:

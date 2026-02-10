@@ -1,0 +1,10 @@
+{
+  "/api/products/route": "app/api/products/route.js",
+  "/manifest.webmanifest/route": "app/manifest.webmanifest/route.js",
+  "/api/partners/me/route": "app/api/partners/me/route.js",
+  "/api/schedule/route": "app/api/schedule/route.js",
+  "/(partner)/venues/page": "app/(partner)/venues/page.js",
+  "/(partner)/products/page": "app/(partner)/products/page.js",
+  "/(partner)/schedule/page": "app/(partner)/schedule/page.js",
+  "/(partner)/dashboard/page": "app/(partner)/dashboard/page.js"
+}

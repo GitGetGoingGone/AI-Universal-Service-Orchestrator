@@ -23,6 +23,11 @@ class Settings:
     supabase_url: str = get_env("SUPABASE_URL") or ""
     supabase_key: str = get_env("SUPABASE_SECRET_KEY") or get_env("SUPABASE_SERVICE_KEY") or ""
 
+    # Azure OpenAI (for embeddings - semantic search)
+    azure_openai_endpoint: str = get_env("AZURE_OPENAI_ENDPOINT") or ""
+    azure_openai_api_key: str = get_env("AZURE_OPENAI_API_KEY") or ""
+    embedding_deployment: str = get_env("EMBEDDING_DEPLOYMENT") or get_env("AZURE_OPENAI_EMBEDDING_DEPLOYMENT") or "text-embedding-ada-002"
+
     # Service
     environment: str = get_env("ENVIRONMENT", "development")
     log_level: str = get_env("LOG_LEVEL", "INFO")
@@ -31,6 +36,11 @@ class Settings:
     def supabase_configured(self) -> bool:
         """Check if Supabase is configured."""
         return bool(self.supabase_url and self.supabase_key)
+
+    @property
+    def embedding_configured(self) -> bool:
+        """Check if embeddings (Azure OpenAI) are configured for semantic search."""
+        return bool(self.azure_openai_endpoint and self.azure_openai_api_key)
 
 
 settings = Settings()

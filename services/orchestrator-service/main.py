@@ -21,6 +21,7 @@ from packages.shared.monitoring.health import DependencyCheck, DependencyStatus
 from config import settings
 from api.chat import router as chat_router
 from api.products import router as products_router
+from api.link_account import router as link_account_router
 
 app = FastAPI(
     title="Orchestrator Service",
@@ -42,6 +43,7 @@ app.add_exception_handler(Exception, generic_exception_handler)
 
 app.include_router(chat_router)
 app.include_router(products_router)
+app.include_router(link_account_router)
 
 health_checker = HealthChecker("orchestrator-service", "0.1.0")
 
@@ -107,6 +109,8 @@ async def root():
             "checkout": "POST /api/v1/checkout",
             "agentic_consent": "GET /api/v1/agentic-consent",
             "agentic_handoff": "GET /api/v1/agentic-handoff",
+            "link_account": "POST /api/v1/link-account",
+            "link_account_status": "GET /api/v1/link-account/status",
             "health": "GET /health",
             "ready": "GET /ready",
         },

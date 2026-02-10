@@ -1,1 +1,0 @@
-"""Partner Portal API routes."""

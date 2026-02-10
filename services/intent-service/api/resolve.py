@@ -1,8 +1,6 @@
-"""Intent resolution API - Module 4."""
+"""Intent resolution API - Module 4. Chat-First with JSON-LD."""
 
 import asyncio
-import uuid
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Request
@@ -10,6 +8,8 @@ from pydantic import BaseModel, Field
 
 from llm import resolve_intent
 from db import create_intent, get_supabase
+from packages.shared.utils.api_response import chat_first_response, request_id_from_request
+from packages.shared.json_ld.intent import resolve_action_ld
 
 router = APIRouter(prefix="/api/v1", tags=["Intent"])
 
@@ -57,34 +57,22 @@ async def resolve(
         except Exception:
             pass  # Non-fatal; still return resolved intent
 
-    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-
-    # JSON-LD for AI agents
-    machine_readable = {
-        "@context": "https://schema.org",
-        "@type": "ResolveAction",
-        "result": {
-            "@type": "Intent",
-            "intentType": resolved["intent_type"],
-            "searchQuery": resolved.get("search_query"),
-            "confidenceScore": resolved.get("confidence_score"),
-            "entities": resolved.get("entities", []),
-        },
-        "identifier": intent_id,
-    }
-
-    return {
-        "data": {
+    request_id = request_id_from_request(request)
+    machine_readable = resolve_action_ld(
+        intent_type=resolved["intent_type"],
+        search_query=resolved.get("search_query"),
+        confidence_score=resolved.get("confidence_score"),
+        entities=resolved.get("entities", []),
+        intent_id=intent_id,
+    )
+    return chat_first_response(
+        data={
             "intent_id": intent_id,
             "intent_type": resolved["intent_type"],
             "search_query": resolved.get("search_query"),
             "entities": resolved.get("entities", []),
             "confidence_score": resolved.get("confidence_score"),
         },
-        "machine_readable": machine_readable,
-        "metadata": {
-            "api_version": "v1",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "request_id": request_id,
-        },
-    }
+        machine_readable=machine_readable,
+        request_id=request_id,
+    )

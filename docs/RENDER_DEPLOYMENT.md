@@ -135,6 +135,9 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | `PAYMENT_SERVICE_URL` | `https://uso-payment.onrender.com` *(add after Step 6d)* |
 | `OMNICHANNEL_BROKER_URL` | `https://uso-omnichannel-broker.onrender.com` *(add after Step 6b)* |
 | `RE_SOURCING_SERVICE_URL` | `https://uso-resourcing.onrender.com` *(add after Step 6c)* |
+| `SUPABASE_URL` | Same as Discovery *(required for Link Account)* |
+| `SUPABASE_SERVICE_KEY` | Same as `SUPABASE_SECRET_KEY` *(for Link Account)* |
+| `GOOGLE_OAUTH_CLIENT_ID` | *(optional)* For Link Account with Google; from Google Cloud Console |
 | `AZURE_OPENAI_ENDPOINT` | *(optional)* For agentic planner |
 | `AZURE_OPENAI_API_KEY` | *(optional)* |
 | `AZURE_OPENAI_DEPLOYMENT_NAME` | `gpt-4o` |
@@ -164,9 +167,9 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | `SUPABASE_URL` | Same as Discovery |
 | `SUPABASE_SECRET_KEY` | Same as Discovery |
 | `ENVIRONMENT` | `staging` |
-| `CHATGPT_WEBHOOK_URL` | *(optional)* |
-| `GEMINI_WEBHOOK_URL` | *(optional)* |
-| `TWILIO_ACCOUNT_SID` | *(optional)* For WhatsApp |
+| `CHATGPT_WEBHOOK_URL` | *(optional)* If unset, push to ChatGPT returns 503 (no stub). |
+| `GEMINI_WEBHOOK_URL` | *(optional)* If unset, push to Gemini returns 503. |
+| `TWILIO_ACCOUNT_SID` | *(optional)* For WhatsApp push |
 | `TWILIO_AUTH_TOKEN` | *(optional)* |
 | `TWILIO_WHATSAPP_NUMBER` | *(optional)* |
 
@@ -174,41 +177,13 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 
 ---
 
-## Step 6: Create Full Implementation Services (Partner Portal, Omnichannel Broker, Re-Sourcing, Payment)
+## Step 6: Create Full Implementation Services (Omnichannel Broker, Re-Sourcing, Payment)
 
 Deploy these services for the full production flow (no simulator).
 
-### Step 6a: Partner Portal
+**Note:** Partner Portal is now a Next.js app deployed on **Vercel** (see `apps/portal`). It is not deployed on Render.
 
-1. **New** → **Web Service**
-2. Same repo
-3. Configure:
-
-| Setting | Value |
-|---------|-------|
-| **Name** | `uso-partner-portal` |
-| **Root Directory** | *(empty)* |
-| **Build Command** | `pip install -r requirements.txt` |
-| **Start Command** | `cd services/partner-portal && uvicorn main:app --host 0.0.0.0 --port $PORT` |
-
-4. **Environment**:
-
-| Key | Value |
-|-----|-------|
-| `SUPABASE_URL` | Same as Discovery |
-| `SUPABASE_SECRET_KEY` | Same as Discovery |
-| `OMNICHANNEL_BROKER_URL` | `https://uso-omnichannel-broker.onrender.com` *(add after Step 6b)* |
-| `ENVIRONMENT` | `staging` |
-| `DEFAULT_THEME` | *(optional)* `light` \| `dark` \| `ocean` \| `forest` \| `slate` |
-| `DEFAULT_LAYOUT` | *(optional)* `centered` \| `sidebar` \| `top-nav` \| `compact` |
-
-5. Create and note the URL (e.g. `https://uso-partner-portal.onrender.com`).
-
-**Partner Portal UI:** Theme and layout can be customized via env vars or the in-app switcher (persisted in localStorage). Themes: light, dark, ocean, forest, slate. Layouts: centered, sidebar, top-nav, compact.
-
-**Partner Portal channels:** Partners can configure API webhook, demo chat, WhatsApp, ChatGPT, or Gemini. For demo chat, they open `/api/v1/partners/{id}/demo-chat`. For ChatGPT/Gemini, they import the OpenAPI spec from `/docs/openapi-partner-actions.yaml`.
-
-### Step 6b: Omnichannel Broker
+### Step 6a: Omnichannel Broker
 
 1. **New** → **Web Service**
 2. Same repo
@@ -232,7 +207,7 @@ Deploy these services for the full production flow (no simulator).
 
 5. Create and note the URL.
 
-### Step 6c: Re-Sourcing Service
+### Step 6b: Re-Sourcing Service
 
 1. **New** → **Web Service**
 2. Same repo
@@ -256,7 +231,7 @@ Deploy these services for the full production flow (no simulator).
 
 5. Create and note the URL.
 
-### Step 6d: Payment Service
+### Step 6c: Payment Service
 
 1. **New** → **Web Service**
 2. Same repo
@@ -286,9 +261,7 @@ Deploy these services for the full production flow (no simulator).
 
 ## Step 7: Update Service URLs (after all services deployed)
 
-1. **uso-partner-portal** → Environment → add:
-   - `OMNICHANNEL_BROKER_URL` = `https://uso-omnichannel-broker.onrender.com` *(required for demo chat respond)*
-2. **uso-orchestrator** → Environment → add/update:
+1. **uso-orchestrator** → Environment → add/update:
    - `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
    - `PAYMENT_SERVICE_URL` = `https://uso-payment.onrender.com` *(required for checkout)*
    - `OMNICHANNEL_BROKER_URL` = `https://uso-omnichannel-broker.onrender.com`
@@ -301,6 +274,8 @@ Deploy these services for the full production flow (no simulator).
 ---
 
 ## Step 8: Verify Deployment
+
+**Full testing steps (Chat-First, Link Account, Webhook, Portal):** see [TESTING_RENDER_AND_PORTAL.md](./TESTING_RENDER_AND_PORTAL.md) for curl examples and a checklist.
 
 ### Option A: Health and warmup script (recommended)
 
@@ -323,7 +298,7 @@ Override URLs via env if different from defaults:
 DISCOVERY_URL=https://... INTENT_URL=https://... ./scripts/health-and-warmup.sh --e2e
 ```
 
-The script warms and checks all services (core + full implementation). Full implementation services (Partner Portal, Omnichannel Broker, Re-Sourcing, Payment) are optional – if not deployed, they show ✗ [optional] but the script still succeeds.
+The script warms and checks all services (core + full implementation). Full implementation services (Omnichannel Broker, Re-Sourcing, Payment) are optional – if not deployed, they show ✗ [optional] but the script still succeeds. Partner Portal is deployed on Vercel (see `apps/portal`).
 
 ### Option B: Manual curl commands
 
@@ -334,7 +309,6 @@ INTENT="https://uso-intent.onrender.com"
 DURABLE="https://uso-durable.onrender.com"
 ORCHESTRATOR="https://uso-orchestrator.onrender.com"
 WEBHOOK="https://uso-webhook.onrender.com"
-PARTNER_PORTAL="https://uso-partner-portal.onrender.com"
 OMNICHANNEL="https://uso-omnichannel-broker.onrender.com"
 RESOURCING="https://uso-resourcing.onrender.com"
 PAYMENT="https://uso-payment.onrender.com"
@@ -346,7 +320,6 @@ curl $ORCHESTRATOR/health
 curl $WEBHOOK/health
 
 # Health checks (full implementation)
-curl $PARTNER_PORTAL/health
 curl $OMNICHANNEL/health
 curl $RESOURCING/health
 curl $PAYMENT/health
@@ -365,8 +338,7 @@ curl -X POST $WEBHOOK/api/v1/webhooks/chat/chatgpt/test-123 \
   -H "Content-Type: application/json" \
   -d '{"narrative": "Test update"}'
 
-# Partner Portal (onboarding page)
-curl -s $PARTNER_PORTAL/api/v1/onboard | head -5
+# Partner Portal: deployed on Vercel (see apps/portal)
 ```
 
 ---
@@ -414,7 +386,32 @@ If you see `bash: line 1: d: command not found`, the Start Command is missing `c
 | Durable Orchestrator | Docker | Root: `functions/durable-orchestrator` · No Start Command (image starts automatically) |
 | Orchestrator | Python | Same build · Start: `cd services/orchestrator-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Webhook | Python | Same build · Start: `cd services/webhook-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
-| Partner Portal | Python | Same build · Start: `cd services/partner-portal && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Omnichannel Broker | Python | Same build · Start: `cd services/omnichannel-broker-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Re-Sourcing | Python | Same build · Start: `cd services/re-sourcing-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Payment | Python | Same build · Start: `cd services/payment-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+
+---
+
+## Partner Portal (Vercel)
+
+The Partner Portal is a Next.js app and is deployed on **Vercel**, not Render.
+
+### Deploy to Vercel
+
+1. Go to [Vercel](https://vercel.com) → **Add New** → **Project**
+2. Connect your GitHub repo
+3. Set **Root Directory** to `apps/portal`
+4. Framework: Next.js (auto-detected)
+5. Environment variables:
+
+| Key | Value |
+|-----|-------|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key |
+| `CLERK_SECRET_KEY` | Clerk secret key |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
+
+6. Deploy
+
+See `apps/portal/README.md` for local setup and design tokens.

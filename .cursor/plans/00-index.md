@@ -59,6 +59,11 @@ Main navigation and overview of all plan sections.
 - Implementation Phases (Phase 1, 2, 3)
 - Key Design Decisions
 
+### [08-task-register.md](./08-task-register.md) — **Single view of all planned tasks**
+- One place for every planned task and latest status (Pending / In progress / Done)
+- Partner Portal, Schema & Discovery, Pillars, Phase 2/3 modules
+- Links to 05-implementation and 03-modules-all for details; update status here
+
 ### [06-user-flows.md](./06-user-flows.md)
 User Flows by Persona:
 - Customer Persona
@@ -80,6 +85,9 @@ User Flows by Persona:
 ---
 
 ## 🚀 Quick Start
+
+**For a single view of what’s planned and current status:**  
+→ [08-task-register.md](./08-task-register.md)
 
 **For MVP Implementation:**
 1. Start with [01-overview.md](./01-overview.md) for context

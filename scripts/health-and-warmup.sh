@@ -10,7 +10,7 @@
 #
 # Override URLs via env:
 #   DISCOVERY_URL=... INTENT_URL=... ./scripts/health-and-warmup.sh
-#   PARTNER_PORTAL_URL=... OMNICHANNEL_URL=... RESOURCING_URL=... PAYMENT_URL=...
+#   OMNICHANNEL_URL=... RESOURCING_URL=... PAYMENT_URL=...
 #
 
 set -e
@@ -21,7 +21,6 @@ INTENT="${INTENT_URL:-https://uso-intent.onrender.com}"
 DURABLE="${DURABLE_URL:-https://uso-durable.onrender.com}"
 ORCHESTRATOR="${ORCHESTRATOR_URL:-https://uso-orchestrator.onrender.com}"
 WEBHOOK="${WEBHOOK_URL:-https://uso-webhook.onrender.com}"
-PARTNER_PORTAL="${PARTNER_PORTAL_URL:-https://uso-partner-portal.onrender.com}"
 OMNICHANNEL="${OMNICHANNEL_URL:-https://uso-omnichannel-broker.onrender.com}"
 RESOURCING="${RESOURCING_URL:-https://uso-resourcing.onrender.com}"
 PAYMENT="${PAYMENT_URL:-https://uso-payment.onrender.com}"
@@ -46,7 +45,6 @@ echo "  Orchestrator: $ORCHESTRATOR"
 echo "  Webhook:      $WEBHOOK"
 echo "  Durable:      $DURABLE"
 echo "Full implementation:"
-echo "  Partner Portal:      $PARTNER_PORTAL"
 echo "  Omnichannel Broker:  $OMNICHANNEL"
 echo "  Re-Sourcing:         $RESOURCING"
 echo "  Payment:             $PAYMENT"
@@ -64,8 +62,6 @@ echo "  Warming Webhook..."
 curl -sf --max-time "$TIMEOUT" "$WEBHOOK/health" > /dev/null || true
 echo "  Warming Durable (Docker + Azure Functions has longest cold start)..."
 curl -sf --max-time "$TIMEOUT" -X POST -H "Content-Type: application/json" -d '{}' "$DURABLE/api/orchestrators/base_orchestrator" > /dev/null || true
-echo "  Warming Partner Portal..."
-curl -sf --max-time "$TIMEOUT" "$PARTNER_PORTAL/health" > /dev/null || true
 echo "  Warming Omnichannel Broker..."
 curl -sf --max-time "$TIMEOUT" "$OMNICHANNEL/health" > /dev/null || true
 echo "  Warming Re-Sourcing..."
@@ -118,7 +114,6 @@ check "Webhook"      "$WEBHOOK/health"
 check_post "Durable" "$DURABLE/api/orchestrators/base_orchestrator" '{}'
 
 echo "--- Health checks (full implementation) ---"
-check_optional "Partner Portal"      "$PARTNER_PORTAL/health"
 check_optional "Omnichannel Broker" "$OMNICHANNEL/health"
 check_optional "Re-Sourcing"        "$RESOURCING/health"
 check_optional "Payment"            "$PAYMENT/health"

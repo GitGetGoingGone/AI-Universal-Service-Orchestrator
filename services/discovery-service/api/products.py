@@ -8,7 +8,8 @@ from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from db import search_products, get_product_by_id, add_product_to_bundle, get_bundle_by_id, remove_from_bundle, create_order_from_bundle
+from db import get_product_by_id, add_product_to_bundle, get_bundle_by_id, remove_from_bundle, create_order_from_bundle
+from scout_engine import search
 from packages.shared.adaptive_cards import generate_product_card, generate_bundle_card, generate_checkout_card
 from packages.shared.adaptive_cards.base import create_card, text_block
 
@@ -48,7 +49,7 @@ async def discover_products(
     Discover products by intent/query.
     Chat-First: Returns JSON-LD and Adaptive Card for AI agents.
     """
-    products = await search_products(
+    products = await search(
         query=intent, limit=limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id
     )
 

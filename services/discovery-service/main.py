@@ -23,6 +23,8 @@ from packages.shared.monitoring.health import DependencyCheck
 from config import settings
 from db import check_connection
 from api.products import router as products_router
+from api.admin import router as admin_router
+from webhooks.inventory_webhook import router as webhooks_router
 
 app = FastAPI(
     title="Discovery Service",
@@ -46,6 +48,8 @@ app.add_exception_handler(Exception, generic_exception_handler)
 
 # API routes
 app.include_router(products_router)
+app.include_router(admin_router)
+app.include_router(webhooks_router)
 
 # Health checks (per 07-project-operations.md)
 health_checker = HealthChecker("discovery-service", "0.1.0")
@@ -97,6 +101,9 @@ async def root():
         "version": "0.1.0",
         "endpoints": {
             "discover": "GET /api/v1/discover?intent=<query>",
+            "manifest_ingest": "POST /api/v1/admin/manifest/ingest",
+            "embedding_backfill": "POST /api/v1/admin/embeddings/backfill",
+            "inventory_webhook": "POST /webhooks/inventory",
             "health": "GET /health",
             "ready": "GET /ready",
         },
