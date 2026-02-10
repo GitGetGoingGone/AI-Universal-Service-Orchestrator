@@ -33,9 +33,9 @@ export default function DiscoveryPage() {
   }, []);
 
   const nextAt = pushStatus?.next_acp_push_allowed_at;
-  const now = typeof Date.now === "function" ? new Date() : null;
   const nextAtDate = nextAt ? new Date(nextAt) : null;
-  const chatgptDisabled = nextAtDate && now && now < nextAtDate;
+  const now = new Date();
+  const chatgptDisabled = !!(nextAtDate && now < nextAtDate);
 
   async function push(targets: ("chatgpt" | "gemini")[]) {
     if (scope === "single" && !productId) {
