@@ -54,7 +54,10 @@ async def search_products(
         # Text search: filter by name containing query (case-insensitive)
         q = (
             client.table("products")
-            .select("id, name, description, price, currency, capabilities, metadata, partner_id")
+            .select(
+                "id, name, description, price, currency, capabilities, metadata, partner_id, "
+                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability"
+            )
             .is_("deleted_at", "null")
         )
 
@@ -82,7 +85,10 @@ async def get_product_by_id(product_id: str) -> Optional[Dict[str, Any]]:
     try:
         result = (
             client.table("products")
-            .select("id, name, description, price, currency, capabilities, metadata, partner_id")
+            .select(
+                "id, name, description, price, currency, capabilities, metadata, partner_id, "
+                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability"
+            )
             .eq("id", product_id)
             .is_("deleted_at", "null")
             .limit(1)
@@ -91,6 +97,97 @@ async def get_product_by_id(product_id: str) -> Optional[Dict[str, Any]]:
         return result.data[0] if result.data else None
     except Exception:
         return None
+
+
+async def get_partner_by_id(partner_id: str) -> Optional[Dict[str, Any]]:
+    """Get partner by ID with seller attribution and last_acp_push_at."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("partners")
+            .select(
+                "id, business_name, seller_name, seller_url, return_policy_url, "
+                "privacy_policy_url, terms_url, store_country, target_countries, last_acp_push_at"
+            )
+            .eq("id", partner_id)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception:
+        return None
+
+
+async def update_partner_last_acp_push(partner_id: str) -> bool:
+    """Set last_acp_push_at to now for 15-minute throttle."""
+    client = get_supabase()
+    if not client:
+        return False
+    try:
+        from datetime import datetime, timezone
+        client.table("partners").update({
+            "last_acp_push_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", partner_id).execute()
+        return True
+    except Exception:
+        return False
+
+
+async def get_products_for_acp_export(
+    partner_id: Optional[str] = None,
+    product_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Get products with partner seller fields joined for ACP feed building.
+    Returns list of product dicts each with partner seller_* merged (seller_name, seller_url, etc.).
+    """
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        q = (
+            client.table("products")
+            .select(
+                "id, name, description, price, currency, capabilities, metadata, partner_id, "
+                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability"
+            )
+            .is_("deleted_at", "null")
+        )
+        if partner_id:
+            q = q.eq("partner_id", partner_id)
+        if product_id:
+            q = q.eq("id", product_id)
+        result = q.execute()
+        products = result.data or []
+        if not products:
+            return []
+        partner_ids = list({str(p["partner_id"]) for p in products if p.get("partner_id")})
+        partners_map = {}
+        for pid in partner_ids:
+            partner = await get_partner_by_id(pid)
+            if partner:
+                partners_map[pid] = partner
+        out = []
+        for p in products:
+            row = dict(p)
+            pid = str(p.get("partner_id", "")) if p.get("partner_id") else ""
+            partner = partners_map.get(pid) if pid else None
+            if partner:
+                row["seller_name"] = partner.get("seller_name") or partner.get("business_name")
+                row["seller_url"] = partner.get("seller_url")
+                row["return_policy"] = partner.get("return_policy_url")
+                row["seller_privacy_policy"] = partner.get("privacy_policy_url")
+                row["seller_tos"] = partner.get("terms_url")
+                row["store_country"] = partner.get("store_country")
+                if partner.get("target_countries") is not None and "target_countries" not in row or row.get("target_countries") is None:
+                    row["target_countries"] = partner.get("target_countries")
+            out.append(row)
+        return out
+    except Exception:
+        return []
 
 
 async def add_product_to_bundle(

@@ -1,5 +1,6 @@
 """HTTP clients for Intent and Discovery services."""
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -51,23 +52,42 @@ async def resolve_intent(text: str, user_id: Optional[str] = None) -> Dict[str, 
         return r.json()
 
 
+# Retry 429 from Discovery (e.g. Render free-tier rate limits): max attempts, base delay seconds
+DISCOVERY_RETRY_ATTEMPTS = 3
+DISCOVERY_RETRY_BASE_DELAY = 15
+
+
 async def discover_products(
     query: str,
     limit: int = 20,
     location: Optional[str] = None,
     partner_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Call Discovery service to find products by query."""
+    """Call Discovery service to find products by query. Retries on 429 (rate limit)."""
     url = f"{settings.discovery_service_url}/api/v1/discover"
     params = {"intent": query, "limit": limit}
     if location:
         params["location"] = location
     if partner_id:
         params["partner_id"] = partner_id
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.get(url, params=params)
-        r.raise_for_status()
-        return r.json()
+    for attempt in range(DISCOVERY_RETRY_ATTEMPTS):
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.get(url, params=params)
+            if r.status_code == 429 and attempt < DISCOVERY_RETRY_ATTEMPTS - 1:
+                delay = DISCOVERY_RETRY_BASE_DELAY
+                retry_after = r.headers.get("Retry-After")
+                if retry_after and retry_after.isdigit():
+                    delay = min(60, max(5, int(retry_after)))
+                logger.warning(
+                    "Discovery rate limited (429), retry %s/%s in %ss",
+                    attempt + 1,
+                    DISCOVERY_RETRY_ATTEMPTS,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            r.raise_for_status()
+            return r.json()
 
 
 async def get_product_details(product_id: str) -> Dict[str, Any]:

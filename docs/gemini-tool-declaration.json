@@ -1,0 +1,28 @@
+{
+  "name": "discover_products",
+  "description": "Discover products from natural language. Call this when the user wants to find, search, or browse products (e.g. 'find flowers', 'I want cakes', 'show me gifts'). Returns a human-readable summary and product list from the USO orchestrator.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The user's message or search request (e.g. 'find flowers', 'I want birthday cakes')"
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of products to return (default 20)",
+        "default": 20
+      },
+      "thread_id": {
+        "type": "string",
+        "description": "Optional chat thread ID for status updates"
+      },
+      "platform": {
+        "type": "string",
+        "enum": ["chatgpt", "gemini"],
+        "description": "Platform identifier for webhook push (use 'gemini' when calling from Gemini)"
+      }
+    },
+    "required": ["text"]
+  }
+}

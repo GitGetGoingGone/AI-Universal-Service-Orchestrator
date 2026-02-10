@@ -61,8 +61,15 @@ Main navigation and overview of all plan sections.
 
 ### [08-task-register.md](./08-task-register.md) — **Single view of all planned tasks**
 - One place for every planned task and latest status (Pending / In progress / Done)
-- Partner Portal, Schema & Discovery, Pillars, Phase 2/3 modules
-- Links to 05-implementation and 03-modules-all for details; update status here
+- Partner Portal, Schema & Discovery, **Profile discoverable (push, rate limit, portal)** § 2b, Pillars, Phase 2/3 modules
+- Links to 05-implementation, profile-discoverable-chatgpt-gemini, and 03-modules-all for details; update status here
+
+### [profile-discoverable-chatgpt-gemini.md](./profile-discoverable-chatgpt-gemini.md)
+- Comprehensive profile discoverable across ChatGPT (ACP) and Gemini (UCP)
+- Push controls: single item vs all; target ChatGPT / Gemini / both
+- ChatGPT 15-minute catalog rate limit handling
+- Partner portal: ACP/UCP fields for validation and update; push controls UI
+- Task tracking: [08-task-register.md § 2b](./08-task-register.md#2b-profile-discoverable--push-rate-limit-portal-profile-discoverable-chatgpt-gemini), [05-implementation.md § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp)
 
 ### [06-user-flows.md](./06-user-flows.md)
 User Flows by Persona:

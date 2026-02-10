@@ -8,8 +8,10 @@ from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from db import get_product_by_id, add_product_to_bundle, get_bundle_by_id, remove_from_bundle, create_order_from_bundle
+from db import get_product_by_id, get_products_for_acp_export, add_product_to_bundle, get_bundle_by_id, remove_from_bundle, create_order_from_bundle
 from scout_engine import search
+from protocols.acp_compliance import validate_product_acp
+from protocols.ucp_compliance import validate_product_ucp
 from packages.shared.adaptive_cards import generate_product_card, generate_bundle_card, generate_checkout_card
 from packages.shared.adaptive_cards.base import create_card, text_block
 
@@ -89,6 +91,72 @@ async def discover_products(
             "api_version": "v1",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "request_id": request_id,
+        },
+    }
+
+
+def _product_to_acp_row_for_validation(product: dict) -> dict:
+    """Build one ACP row from product (with partner seller fields) for validation."""
+    price = float(product.get("price", 0))
+    currency = product.get("currency", "USD") or "USD"
+    availability = product.get("availability")
+    if availability is None or availability == "":
+        is_avail = product.get("is_available", True)
+        availability = "in_stock" if is_avail else "out_of_stock"
+    target_countries = product.get("target_countries")
+    if target_countries is None:
+        target_countries = []
+    if isinstance(target_countries, str):
+        target_countries = [target_countries] if target_countries else []
+    row = {
+        "item_id": str(product.get("id", "")),
+        "title": (product.get("name") or "")[:150],
+        "description": (product.get("description") or "")[:5000],
+        "url": product.get("url") or "",
+        "image_url": product.get("image_url") or "",
+        "price": f"{price:.2f} {currency}",
+        "availability": availability,
+        "brand": (product.get("brand") or "")[:70],
+        "is_eligible_search": bool(product.get("is_eligible_search", True)),
+        "is_eligible_checkout": bool(product.get("is_eligible_checkout", False)),
+        "seller_name": (product.get("seller_name") or "")[:70],
+        "seller_url": product.get("seller_url") or "",
+        "return_policy": product.get("return_policy") or "",
+        "target_countries": target_countries,
+        "store_country": product.get("store_country") or "",
+    }
+    if row.get("is_eligible_checkout"):
+        row["seller_privacy_policy"] = product.get("seller_privacy_policy") or ""
+        row["seller_tos"] = product.get("seller_tos") or ""
+    return row
+
+
+@router.get("/products/{product_id}/validate-discovery")
+async def validate_product_discovery(product_id: str):
+    """
+    Validate product for ACP (ChatGPT) and UCP (Gemini) discovery.
+    Loads product and partner from DB, builds combined record, runs validation.
+    Returns { acp: { valid, errors, warnings }, ucp: { valid, errors } }.
+    """
+    products = await get_products_for_acp_export(product_id=product_id)
+    if not products:
+        raise HTTPException(status_code=404, detail="Product not found")
+    combined = products[0]
+    acp_row = _product_to_acp_row_for_validation(combined)
+    require_checkout = bool(combined.get("is_eligible_checkout"))
+    acp_valid, acp_missing, acp_violations = validate_product_acp(
+        acp_row, require_checkout_fields=require_checkout
+    )
+    ucp_valid, ucp_missing, ucp_violations = validate_product_ucp(combined)
+    return {
+        "acp": {
+            "valid": acp_valid,
+            "errors": acp_missing + acp_violations,
+            "warnings": [],
+        },
+        "ucp": {
+            "valid": ucp_valid,
+            "errors": ucp_missing + ucp_violations,
         },
     }
 

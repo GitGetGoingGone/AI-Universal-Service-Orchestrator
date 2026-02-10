@@ -26,7 +26,7 @@ End-to-end testing for the full stack: backend services on **Render**, Partner P
    - To test successful push: set `CHATGPT_WEBHOOK_URL` or `GEMINI_WEBHOOK_URL` to a URL that accepts POST (e.g. a request bin or your real webhook endpoint).
 
 5. **Portal on Vercel**  
-   Deploy `apps/portal` to Vercel per [RENDER_DEPLOYMENT.md § Partner Portal](./RENDER_DEPLOYMENT.md#partner-portal-vercel). Set Clerk and Supabase env vars.
+   Deploy `apps/portal` to Vercel per [RENDER_DEPLOYMENT.md § Partner Portal](./RENDER_DEPLOYMENT.md#partner-portal-vercel). Set env vars (see **Portal environment variables** below).
 
 ---
 
@@ -145,6 +145,69 @@ Expected: `data` (products, count), `machine_readable` (ItemList/product structu
 
 ---
 
+## 5b. Discovery features (ACP / UCP)
+
+These endpoints support **ChatGPT (ACP)** and **Gemini (UCP)** catalog discovery. Use your deployed discovery base URL (`$DISCOVERY`). For push and push-status you need a valid `partner_id` from your `partners` table.
+
+**5b.1 UCP Business Profile (well-known)**
+
+```bash
+curl -s "$DISCOVERY/.well-known/ucp" | jq '{ ucp: .ucp.version, endpoint: .ucp.services["dev.ucp.shopping"].rest.endpoint }'
+```
+
+Expected: `ucp.version` (e.g. `"2026-01-11"`), `endpoint` containing `/api/v1/ucp`.
+
+**5b.2 UCP catalog (items)**
+
+```bash
+curl -s "$DISCOVERY/api/v1/ucp/items?q=flowers&limit=3" | jq '{ item_count: (.items | length), first: .items[0] | keys }'
+```
+
+Expected: `items` array; each item has `id`, `title`, `price` (integer cents), optional `image_url`, `seller_name`.
+
+**5b.3 ACP feed (public JSON Lines)**
+
+```bash
+curl -s "$DISCOVERY/api/v1/feeds/acp" | head -1 | jq .
+```
+
+Expected: First line is a single JSON object with ACP fields (`item_id`, `title`, `description`, `url`, `image_url`, `price`, `availability`, `brand`, `seller_name`, `seller_url`, etc.). Optional: `?partner_id=<uuid>` to filter by partner.
+
+**5b.4 Push status (15-minute throttle)**
+
+Replace `PARTNER_UUID` with a real partner id from your `partners` table:
+
+```bash
+curl -s "$DISCOVERY/api/v1/feeds/push-status?partner_id=PARTNER_UUID" | jq .
+```
+
+Expected: `{ "next_acp_push_allowed_at": "<ISO8601>" }` or `null` if no recent push.
+
+**5b.5 Push to ChatGPT / Gemini**
+
+Same `PARTNER_UUID`; optionally use a real `product_id` for scope `single`:
+
+```bash
+# Push entire catalog for partner to both targets
+curl -s -X POST "$DISCOVERY/api/v1/feeds/push" \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"all","targets":["chatgpt","gemini"],"partner_id":"PARTNER_UUID"}' | jq .
+```
+
+Expected: 200 with e.g. `chatgpt: "pushed"`, `next_acp_push_allowed_at`, `rows_pushed`, `gemini: "validated"`, `ucp_compliant`, `ucp_non_compliant`. Calling again within 15 minutes for ChatGPT returns **429** with `error: "rate_limited"` and `next_allowed_at`.
+
+**5b.6 Validate product for discovery**
+
+Replace `PRODUCT_UUID` with a real product id:
+
+```bash
+curl -s "$DISCOVERY/api/v1/products/PRODUCT_UUID/validate-discovery" | jq '{ acp: .acp.valid, ucp: .ucp.valid, acp_errors: .acp.errors, ucp_errors: .ucp.errors }'
+```
+
+Expected: `acp.valid`, `ucp.valid` (booleans), optional `acp.errors`, `ucp.errors` arrays.
+
+---
+
 ## 6. Webhook service (no stubs)
 
 **6.1 Register a mapping (must succeed if Supabase configured)**
@@ -253,11 +316,28 @@ Expected: consent returns scope and allowed_actions; handoff returns `configured
 
 The portal is a Next.js app; per the deployment doc it is deployed on **Vercel**, not Render.
 
+### Portal environment variables
+
+Use the same names in **Vercel** (and in local `apps/portal/.env.local`) so config matches across environments:
+
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (client) |
+| `CLERK_SECRET_KEY` | Clerk secret key (server) |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/publishable key (client, RLS) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server, bypasses RLS) |
+| `DISCOVERY_SERVICE_URL` | Discovery service base URL (for validate-discovery and feed push proxy; e.g. `https://uso-discovery.onrender.com`) |
+
+The portal also accepts these **alternate names** (so existing `.env.local` with the older names still works): `SUPABASE_PUBLISHABLE_KEY` instead of `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SECRET_KEY` instead of `SUPABASE_SERVICE_ROLE_KEY`. For new setups and Vercel, prefer the names in the table above (same as [RENDER_DEPLOYMENT.md § Partner Portal](./RENDER_DEPLOYMENT.md#partner-portal-vercel)).
+
+### Test steps
+
 1. **Open the portal**  
    `https://your-portal.vercel.app` (or your Vercel URL).
 
 2. **Sign in with Clerk**  
-   Use the Clerk sign-in/sign-up flow (ensure `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` are set in Vercel).
+   Use the Clerk sign-in/sign-up flow (ensure `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` are set).
 
 3. **Dashboard**  
    After sign-in, you should see the partner dashboard (orders today, earnings, alerts) if your user is linked to a partner (e.g. by `contact_email` in `partners` or `partner_members`).
@@ -266,10 +346,80 @@ The portal is a Next.js app; per the deployment doc it is deployed on **Vercel**
    If you have partner context, use the nav to open Products and confirm list/create/edit work against Supabase.
 
 5. **Settings**  
-   Open Settings and confirm the page loads (no “coming soon” stub if removed).
+   Open Settings and confirm the page loads. In **Commerce profile (AI catalog)** you can edit seller fields (seller name, seller URL, return/privacy/terms URLs, store country, target countries) and save via PATCH /api/partners/me. These are used for ChatGPT and Gemini discovery.
+6. **Discovery (AI catalog)**  
+   In the nav, open **Discovery**. You should see: **Scope** (Push entire catalog or Push this product only with product dropdown); **Buttons** (Push to ChatGPT, Push to Gemini, Push to both). If the partner has pushed to ChatGPT within the last 15 minutes, the ChatGPT (and both) button is disabled and a message shows next update time. After a successful push, the message shows Push completed and push-status refreshes. Ensure `DISCOVERY_SERVICE_URL` is set in the portal env so the push and push-status API routes can call the discovery service.
 
-6. **Link Account from portal (optional)**  
-   If you add a “Link ChatGPT” or “Link Google” button on the portal, it would call `POST $ORCHESTRATOR/api/v1/link-account` with the appropriate `id_token` or `platform_user_id` and `clerk_user_id` (from Clerk session). Testing that is the same as step 7, with `clerk_user_id` taken from your Clerk user id in the browser.
+7. **Product edit – ACP/UCP fields and validation**  
+   Open **Products**, pick a product, Edit. Confirm: **Fields** (Product URL, Brand, Image URL, Eligible for search (AI discovery), Eligible for checkout, Availability); save and reload to persist. **Validate for discovery**: Click Validate for discovery; the UI calls GET /api/products/{id}/validate-discovery (proxied to the discovery service). You should see Ready for ChatGPT / Ready for Gemini or errors/warnings (requires `DISCOVERY_SERVICE_URL`). **Push to AI catalog**: Section Push to AI catalog with Push to ChatGPT, Push to Gemini, Push to both for this product only (scope=single); same 15-minute throttle for ChatGPT.
+
+### Discovery features – full test flow
+
+Use this flow to verify discovery (ACP/UCP) end-to-end from portal and API.
+
+**Prerequisites**
+
+- Portal env: `DISCOVERY_SERVICE_URL` set to your discovery service (e.g. `https://uso-discovery.onrender.com`).
+- At least one **partner** with `verification_status = 'approved'` and a **product** in the DB (created via portal or API).
+- Discovery service deployed and healthy (`curl -s $DISCOVERY/health` returns 200).
+
+**Step 1 – Commerce profile (seller attribution)**
+
+1. Sign in to the portal with a user linked to that partner (same email as `partners.contact_email` or in `partner_members`).
+2. Go to **Settings** → **Commerce profile (AI catalog)**.
+3. Fill in: Business name, Seller name (display), Seller URL, Return policy URL, Privacy policy URL, Terms URL, Store country (e.g. `US`), Target countries (e.g. `US, CA`).
+4. Click **Save commerce profile**. Expect "Saved." and no errors.
+5. _(Optional)_ Verify via API: `curl -s "$PORTAL_URL/api/partners/me"` (with auth) should return partner object including `seller_name`, `seller_url`, etc.
+
+**Step 2 – Product ACP/UCP fields**
+
+1. Go to **Products** → open a product → **Edit**.
+2. Set **Product URL** (e.g. your product page), **Brand**, **Image URL** (main image).
+3. Check **Eligible for search (AI discovery)** and, if you support checkout, **Eligible for checkout**.
+4. Set **Availability** (e.g. In stock).
+5. Click **Save**. Reload the page and confirm values persist.
+6. Click **Validate for discovery**. Expect either "Ready for ChatGPT" / "Ready for Gemini" or a list of errors (e.g. missing URL, prohibited content). Resolve errors and validate again until both show ready if desired.
+
+**Step 3 – Discovery page (push catalog)**
+
+1. Go to **Discovery** in the nav.
+2. Select **Push entire catalog** (or **Push this product only** and pick a product).
+3. Click **Push to ChatGPT**. Expect "Push completed." or, if you pushed recently, "ChatGPT catalog can be updated again at &lt;time&gt;" with the ChatGPT (and "Push to both") button disabled.
+4. Click **Push to Gemini**. Expect "Push completed." and a success message (no rate limit for Gemini).
+5. Click **Push to both** (when not throttled). Expect 200 and both chatgpt and gemini result keys.
+6. Within 15 minutes, click **Push to ChatGPT** again; expect the button to be disabled and the next-allowed time message.
+
+**Step 4 – Verify from API (optional)**
+
+Using your discovery base URL (`$DISCOVERY`) and a real `PARTNER_UUID` / `PRODUCT_UUID`:
+
+- **UCP well-known:** `curl -s "$DISCOVERY/.well-known/ucp" | jq .` — expect `ucp.version` and `rest.endpoint` with `/api/v1/ucp`.
+- **UCP catalog:** `curl -s "$DISCOVERY/api/v1/ucp/items?q=flowers&limit=3" | jq .items` — expect array of items with `id`, `title`, `price` (cents), optional `image_url`, `seller_name`.
+- **ACP feed:** `curl -s "$DISCOVERY/api/v1/feeds/acp" | head -1 | jq .` — expect one JSON object per line with `item_id`, `title`, `url`, `price`, `seller_name`, etc. Use `?partner_id=PARTNER_UUID` to filter.
+- **Push status:** `curl -s "$DISCOVERY/api/v1/feeds/push-status?partner_id=PARTNER_UUID" | jq .` — expect `next_acp_push_allowed_at` (ISO or null).
+- **Validate product:** `curl -s "$DISCOVERY/api/v1/products/PRODUCT_UUID/validate-discovery" | jq '{ acp: .acp.valid, ucp: .ucp.valid, acp_errors: .acp.errors }'` — expect `acp.valid`, `ucp.valid`, and any errors.
+
+**Step 5 – Product page push (single product)**
+
+1. Go to **Products** → open a product.
+2. Scroll to **Push to AI catalog**.
+3. Click **Push to ChatGPT** (or **Push to Gemini** / **Push to both**). Expect success or 15-min throttle message for ChatGPT.
+4. Confirm the link "Push entire catalog" takes you to the Discovery page.
+
+**Discovery quick checklist**
+
+| Check | Where | Pass condition |
+|-------|--------|----------------|
+| Commerce profile saves | Settings → Commerce profile | Save succeeds; GET /api/partners/me returns seller fields |
+| Product ACP/UCP fields persist | Product edit form | URL, brand, image_url, eligibility, availability save and reload |
+| Validate for discovery | Product edit → Validate for discovery | Shows Ready for ChatGPT / Gemini or errors (proxy uses DISCOVERY_SERVICE_URL) |
+| Push status and 15-min throttle | Discovery page | Push to ChatGPT works once; within 15 min button disabled and message shown |
+| Push to Gemini | Discovery page | Push to Gemini returns success (no throttle) |
+| Push to both | Discovery page | Both targets updated when not throttled |
+| Single-product push | Product edit → Push to AI catalog | Push to ChatGPT/Gemini/both works for that product (scope=single) |
+
+8. **Link Account from portal (optional)**  
+   If you add a “Link ChatGPT” or “Link Google” button on the portal, it would call `POST $ORCHESTRATOR/api/v1/link-account` with the appropriate `id_token` or `platform_user_id` and `clerk_user_id` (from Clerk session). Testing that is the same as step 7 (Link Account API), with `clerk_user_id` taken from your Clerk user id in the browser.
 
 ---
 
@@ -298,6 +448,11 @@ curl -s -X POST "$INTENT/api/v1/resolve" -H "Content-Type: application/json" -d 
 echo "4. Discovery (products + card)"
 curl -s "$DISCOVERY/api/v1/discover?intent=cakes&limit=2" | jq '.adaptive_card.type'
 
+echo "4b. Discovery UCP well-known"
+curl -s "$DISCOVERY/.well-known/ucp" | jq '.ucp.version'
+echo "4c. Discovery ACP feed (first line)"
+curl -s "$DISCOVERY/api/v1/feeds/acp" | head -1 | jq -c 'keys | length'
+
 echo "5. Webhook mapping"
 curl -s -X POST "$WEBHOOK/api/v1/webhooks/mappings" -H "Content-Type: application/json" -d '{"platform":"chatgpt","thread_id":"t-1"}' | jq '.status'
 
@@ -317,11 +472,20 @@ curl -s "$ORCHESTRATOR/api/v1/agentic-consent" | jq '.scope'
 | Chat-First response | POST /api/v1/chat | Response has `data`, `machine_readable`, `adaptive_card`, `metadata` |
 | Intent JSON-LD | POST /api/v1/resolve | `machine_readable` has `@context`, `@type`, `result` |
 | Discovery | GET /api/v1/discover | `machine_readable` + `adaptive_card` present |
+| UCP well-known | GET /.well-known/ucp | 200, `ucp.version`, rest endpoint |
+| UCP catalog | GET /api/v1/ucp/items?q=... | 200, `items` with id, title, price (cents) |
+| ACP feed | GET /api/v1/feeds/acp | 200, JSON Lines, ACP fields per line |
+| Push status | GET /api/v1/feeds/push-status?partner_id= | 200, `next_acp_push_allowed_at` |
+| Push (ChatGPT/Gemini) | POST /api/v1/feeds/push | 200 or 429 (rate limit); chatgpt/gemini keys |
+| Validate discovery | GET /api/v1/products/{id}/validate-discovery | 200, `acp.valid`, `ucp.valid` |
 | Webhook mapping | POST /api/v1/webhooks/mappings | 200, `status: registered` |
 | Webhook push (unconfigured) | POST /api/v1/webhooks/chat/chatgpt/... | 503 |
 | Link Account status | GET /api/v1/link-account/status?user_id=... | 200, `linked_platforms` in data |
 | Link Account Google | POST /api/v1/link-account (google + id_token) | 200 and `linked: true` or 401 if invalid |
 | Link Account OpenAI | POST /api/v1/link-account (openai + platform_user_id + clerk_user_id) | 200 and `linked: true` |
 | Portal | Sign in, dashboard, products, settings | Pages load; no stub placeholders |
+| Portal Commerce profile | Settings → Commerce profile | Form loads; PATCH /api/partners/me saves seller fields |
+| Portal Discovery | Discovery page → push scope + buttons | Push to ChatGPT/Gemini/both; 15-min message when throttled |
+| Portal product ACP/UCP | Product edit → URL, brand, eligibility, Validate, Push | Fields persist; validate shows ACP/UCP result; push works (scope=single) |
 
 See [RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md) for deploy steps and env vars; [AI_PLATFORM_PRODUCT_DISCOVERY.md](./AI_PLATFORM_PRODUCT_DISCOVERY.md) for ACP/UCP discovery.

@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { CommerceProfileForm } from "@/components/commerce-profile-form";
 
 export default async function SettingsPage() {
   const { userId } = await auth();
@@ -18,6 +19,13 @@ export default async function SettingsPage() {
         <ThemeSwitcher />
       </section>
 
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold mb-2">Commerce profile (AI catalog)</h2>
+        <p className="text-sm text-[rgb(var(--color-text-secondary))] mb-3">
+          Seller and policy URLs used for ChatGPT and Gemini discovery.
+        </p>
+        <CommerceProfileForm />
+      </section>
     </main>
   );
 }

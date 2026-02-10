@@ -31,6 +31,8 @@ class Settings:
     # Service
     environment: str = get_env("ENVIRONMENT", "development")
     log_level: str = get_env("LOG_LEVEL", "INFO")
+    # Public base URL for UCP well-known and catalog (e.g. https://uso-discovery.onrender.com)
+    discovery_public_url: str = get_env("DISCOVERY_PUBLIC_URL") or get_env("PUBLIC_URL") or ""
 
     @property
     def supabase_configured(self) -> bool:

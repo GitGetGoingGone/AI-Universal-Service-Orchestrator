@@ -50,6 +50,12 @@ export async function PATCH(
       ...(body.product_type != null && { product_type: body.product_type === "service" ? "service" : "product" }),
       ...(body.unit != null && { unit: body.unit }),
       ...(body.is_available != null && { is_available: body.is_available }),
+      ...(body.url !== undefined && { url: body.url ?? null }),
+      ...(body.brand !== undefined && { brand: body.brand ?? null }),
+      ...(body.image_url !== undefined && { image_url: body.image_url ?? null }),
+      ...(body.is_eligible_search !== undefined && { is_eligible_search: !!body.is_eligible_search }),
+      ...(body.is_eligible_checkout !== undefined && { is_eligible_checkout: !!body.is_eligible_checkout }),
+      ...(body.availability !== undefined && { availability: body.availability ?? "in_stock" }),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)

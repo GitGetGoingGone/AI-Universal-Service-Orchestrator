@@ -42,6 +42,25 @@ todos:
   - id: discovery-merchant-attribution
     content: Discovery - Merchant attribution: Feed and catalog responses use partner as seller (not platform); bundling unchanged
     status: pending
+  # Profile discoverable: push, rate limit, portal UI (profile-discoverable-chatgpt-gemini.md)
+  - id: discovery-push-api
+    content: Push API: POST .../feeds/push with scope (single | all), targets (chatgpt | gemini | both)
+    status: pending
+  - id: discovery-acp-rate-limit
+    content: ChatGPT 15-min rate limit: last_acp_push_at, reject if < 15 min, UI countdown
+    status: pending
+  - id: portal-acp-ucp-partner-fields
+    content: Partner portal: Settings form for ACP/UCP seller fields (seller_name, seller_url, return_policy_url, etc.)
+    status: pending
+  - id: portal-acp-ucp-product-fields
+    content: Partner portal: Product edit ACP/UCP product fields + validation display
+    status: pending
+  - id: discovery-validate-api
+    content: Validation API: product/partner ACP+UCP validation for UI
+    status: pending
+  - id: portal-push-controls
+    content: Partner portal: Push controls (single vs all, ChatGPT / Gemini / both) and 15-min throttle messaging
+    status: pending
 ---
 
 # Implementation
@@ -977,7 +996,24 @@ Trackable requirements for commerce feed schema and AI platform discovery. Refer
 - [ ] **Bundling**  
   No change: feed lists individual products with correct seller; cross-partner bundling and checkout remain in our orchestrator (bundle add/remove, order with multiple order_items/order_legs per partner). Document that feed is discovery-only; bundling is runtime.
 
-**Timeline**: Schema and discovery work can run in parallel with Phase 1; ACP feed export and UCP endpoints unlock native ChatGPT/Google discovery when ready.
+#### Profile discoverable: push controls, rate limit, partner portal (tracking)
+
+*Full plan and implementation order: [profile-discoverable-chatgpt-gemini.md](./profile-discoverable-chatgpt-gemini.md). Task status: [08-task-register.md § 2b](./08-task-register.md#2b-profile-discoverable--push-rate-limit-portal-profile-discoverable-chatgpt-gemini).*
+
+- [ ] **Push API**  
+  `POST /api/v1/feeds/push` (or partner-scoped) with `scope`: `single` | `all`, `product_id` when single, `targets`: `["chatgpt"]` | `["gemini"]` | `["chatgpt", "gemini"]`. ChatGPT path triggers ACP feed generation/delivery; Gemini path validation or catalog refresh.
+- [ ] **ChatGPT 15-minute rate limit**  
+  Persist `last_acp_push_at` per partner (or feed); reject push if last push < 15 minutes ago; return next-allowed time. UI: show countdown and disable "Push to ChatGPT" until window passed.
+- [ ] **Partner portal – seller (ACP/UCP) fields**  
+  Settings or "Commerce profile" section: form for seller_name, seller_url, return_policy_url, privacy_policy_url, terms_url, store_country, target_countries. Save to partners; optional preview.
+- [ ] **Partner portal – product (ACP/UCP) fields**  
+  Product edit (or Discovery tab): url, brand, image_url, is_eligible_search, is_eligible_checkout, availability. Validation display (ready for ChatGPT/Gemini, errors/warnings).
+- [ ] **Validation API**  
+  Endpoint (e.g. `GET /api/products/{id}/validate-discovery` or `POST .../validate-discovery`) returning `{ acp: { valid, errors, warnings }, ucp: { valid, errors } }` for UI.
+- [ ] **Partner portal – push controls**  
+  UI: "Push to ChatGPT", "Push to Gemini", "Push to both"; scope "This product only" vs "Entire catalog"; 15-min throttle messaging and next-allowed time for ChatGPT.
+
+**Timeline**: Schema and discovery work can run in parallel with Phase 1; ACP feed export and UCP endpoints unlock native ChatGPT/Google discovery when ready. Push controls and portal UI follow schema and feed/catalog implementation.
 
 ### Pillar 6: Chat-First / Headless Foundation
 

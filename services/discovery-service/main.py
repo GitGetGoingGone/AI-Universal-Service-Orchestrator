@@ -24,6 +24,8 @@ from config import settings
 from db import check_connection
 from api.products import router as products_router
 from api.admin import router as admin_router
+from api.ucp import router as ucp_router
+from api.feeds import router as feeds_router
 from webhooks.inventory_webhook import router as webhooks_router
 
 app = FastAPI(
@@ -49,6 +51,8 @@ app.add_exception_handler(Exception, generic_exception_handler)
 # API routes
 app.include_router(products_router)
 app.include_router(admin_router)
+app.include_router(ucp_router)
+app.include_router(feeds_router)
 app.include_router(webhooks_router)
 
 # Health checks (per 07-project-operations.md)
@@ -103,8 +107,47 @@ async def root():
             "discover": "GET /api/v1/discover?intent=<query>",
             "manifest_ingest": "POST /api/v1/admin/manifest/ingest",
             "embedding_backfill": "POST /api/v1/admin/embeddings/backfill",
+            "ucp_catalog": "GET /api/v1/ucp/items",
+            "well_known_ucp": "GET /.well-known/ucp",
+            "acp_feed": "GET /api/v1/feeds/acp?partner_id=<optional>",
+            "push_feed": "POST /api/v1/feeds/push",
+            "push_status": "GET /api/v1/feeds/push-status?partner_id=",
             "inventory_webhook": "POST /webhooks/inventory",
             "health": "GET /health",
             "ready": "GET /ready",
+        },
+    }
+
+
+@app.get("/.well-known/ucp")
+async def well_known_ucp():
+    """
+    UCP Business Profile for Google/Gemini discovery.
+    Platform discovers us via this URL and calls our catalog API.
+    """
+    base = (settings.discovery_public_url or "").rstrip("/")
+    if not base:
+        base = "https://uso-discovery.onrender.com"
+    return {
+        "ucp": {
+            "version": "2026-01-11",
+            "services": {
+                "dev.ucp.shopping": {
+                    "version": "2026-01-11",
+                    "spec": "https://ucp.dev/specification/overview",
+                    "rest": {
+                        "schema": "https://ucp.dev/services/shopping/rest.openapi.json",
+                        "endpoint": f"{base}/api/v1/ucp",
+                    },
+                },
+            },
+            "capabilities": [
+                {
+                    "name": "dev.ucp.shopping.checkout",
+                    "version": "2026-01-11",
+                    "spec": "https://ucp.dev/specification/checkout",
+                    "schema": "https://ucp.dev/schemas/shopping/checkout.json",
+                },
+            ],
         },
     }
