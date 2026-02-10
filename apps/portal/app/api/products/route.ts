@@ -11,7 +11,7 @@ export async function GET() {
   const supabase = createSupabaseServerClient();
   const { data, error } = await supabase
     .from("products")
-    .select("id, name, description, price, currency, product_type, unit, is_available, image_url, created_at")
+    .select("id, name, description, price, currency, product_type, unit, is_available, image_url, created_at, last_acp_push_at, last_acp_push_success")
     .eq("partner_id", partnerId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false });

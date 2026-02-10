@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 
-from db import get_products_for_acp_export, get_partner_by_id, update_partner_last_acp_push
+from db import get_products_for_acp_export, get_partner_by_id, update_partner_last_acp_push, update_products_last_acp_push
 from protocols.acp_compliance import filter_acp_compliant_products
 
 router = APIRouter(prefix="/api/v1/feeds", tags=["Feeds"])
@@ -169,6 +169,8 @@ async def push_feed(body: PushBody):
             product_id=body.product_id if body.scope == "single" else None,
         )
         await update_partner_last_acp_push(partner_id)
+        product_ids = [body.product_id] if body.scope == "single" and body.product_id else [r.get("item_id") for r in rows if r.get("item_id")]
+        await update_products_last_acp_push(product_ids, success=True)
         next_allowed = now + timedelta(minutes=ACP_PUSH_THROTTLE_MINUTES)
         result["chatgpt"] = "pushed"
         result["next_acp_push_allowed_at"] = next_allowed.isoformat()

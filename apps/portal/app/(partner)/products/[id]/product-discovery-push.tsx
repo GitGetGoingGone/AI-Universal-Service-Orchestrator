@@ -8,15 +8,26 @@ type Props = { productId: string };
 
 export function ProductDiscoveryPush({ productId }: Props) {
   const [pushStatus, setPushStatus] = useState<{ next_acp_push_allowed_at: string | null } | null>(null);
+  const [productPush, setProductPush] = useState<{ last_acp_push_at: string | null; last_acp_push_success: boolean | null } | null>(null);
   const [pushing, setPushing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  function fetchProductPush() {
+    fetch(`/api/products/${productId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { last_acp_push_at?: string | null; last_acp_push_success?: boolean | null } | null) => {
+        if (data) setProductPush({ last_acp_push_at: data.last_acp_push_at ?? null, last_acp_push_success: data.last_acp_push_success ?? null });
+      })
+      .catch(() => {});
+  }
 
   useEffect(() => {
     fetch("/api/feeds/push-status")
       .then((res) => (res.ok ? res.json() : { next_acp_push_allowed_at: null }))
       .then((data: { next_acp_push_allowed_at: string | null }) => setPushStatus(data))
       .catch(() => setPushStatus({ next_acp_push_allowed_at: null }));
-  }, []);
+    fetchProductPush();
+  }, [productId]);
 
   const nextAt = pushStatus?.next_acp_push_allowed_at;
   const nextAtDate = nextAt ? new Date(nextAt) : null;
@@ -44,6 +55,7 @@ export function ProductDiscoveryPush({ productId }: Props) {
       } else {
         setMessage("Push completed.");
         fetch("/api/feeds/push-status").then((r) => (r.ok ? r.json() : { next_acp_push_allowed_at: null })).then((d: { next_acp_push_allowed_at: string | null }) => setPushStatus(d)).catch(() => {});
+        fetchProductPush();
       }
     } catch {
       setMessage("Request failed");
@@ -57,10 +69,18 @@ export function ProductDiscoveryPush({ productId }: Props) {
       <h3 className="font-semibold mb-2">Push to AI catalog</h3>
       <p className="text-sm text-[rgb(var(--color-text-secondary))] mb-3">
         Push this product to ChatGPT and/or Gemini.{" "}
-        <Link href="/discovery" className="text-[rgb(var(--color-primary))] hover:underline">
+        <Link href="/products" className="text-[rgb(var(--color-primary))] hover:underline">
           Push entire catalog
         </Link>
       </p>
+      {productPush?.last_acp_push_at != null && (
+        <p className="text-sm text-[rgb(var(--color-text-secondary))] mb-2">
+          Last pushed: {new Date(productPush.last_acp_push_at).toLocaleString()}
+          {productPush.last_acp_push_success != null && (
+            <> · Status: {productPush.last_acp_push_success ? <span className="text-green-600">Success</span> : <span className="text-[rgb(var(--color-error))]">Failed</span>}</>
+          )}
+        </p>
+      )}
       {nextAtDate && new Date() < nextAtDate && (
         <p className="text-amber-600 text-sm mb-2">
           ChatGPT: next update at {nextAtDate.toLocaleString()} (15-min limit).

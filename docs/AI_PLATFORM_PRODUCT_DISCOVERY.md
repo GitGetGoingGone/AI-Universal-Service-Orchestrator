@@ -60,10 +60,8 @@ Once the feed is submitted and ingested, **detection is ensured by OpenAI’s in
 
 **Partner portal**
 
-- In the partner portal, the **Discovery** (or **AI catalog**) section (e.g. **Settings → Commerce profile** and **Discovery** in the nav) lets partners:
-  - Edit **commerce profile** (seller_name, seller_url, return_policy_url, privacy_policy_url, terms_url, store_country, target_countries) via **PATCH /api/partners/me**.
-  - Push catalog: scope "this product only" or "entire catalog"; buttons "Push to ChatGPT", "Push to Gemini", "Push to both". The UI fetches **GET /api/feeds/push-status** and, if `next_acp_push_allowed_at` is in the future, disables the ChatGPT (and "both") button and shows "Next update at {time}".
-- From a product edit page, partners can also use "Push to ChatGPT / Gemini" for that single product (scope=single, product_id=current).
+- In the partner portal, **Settings → Commerce profile** lets partners edit seller fields via **PATCH /api/partners/me**. **Products** hosts all push features: at the top, **Push to AI catalog** with buttons "Push to ChatGPT", "Push to Gemini", "Push to both" (entire catalog). The UI fetches **GET /api/feeds/push-status** and, if `next_acp_push_allowed_at` is in the future, disables the ChatGPT (and "both") button and shows "Next update at {time}". The products table shows **Last pushed** and **Status** (Success/Failed) per product.
+- From a product edit page, partners can also use "Push to ChatGPT / Gemini" for that single product (scope=single, product_id=current); that product’s last pushed time and success status are shown and updated after push.
 
 **OpenAI registration** is a manual step: document the feed URL for OpenAI and that they must not pull more than once per 15 minutes if we push on demand (or use their scheduled fetch).
 

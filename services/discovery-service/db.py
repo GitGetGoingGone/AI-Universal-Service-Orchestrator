@@ -136,6 +136,27 @@ async def update_partner_last_acp_push(partner_id: str) -> bool:
         return False
 
 
+async def update_products_last_acp_push(product_ids: List[str], success: bool) -> bool:
+    """Set last_acp_push_at and last_acp_push_success for given products (for portal status)."""
+    if not product_ids:
+        return True
+    client = get_supabase()
+    if not client:
+        return False
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        for pid in product_ids:
+            client.table("products").update({
+                "last_acp_push_at": now,
+                "last_acp_push_success": success,
+                "updated_at": now,
+            }).eq("id", pid).execute()
+        return True
+    except Exception:
+        return False
+
+
 async def get_products_for_acp_export(
     partner_id: Optional[str] = None,
     product_id: Optional[str] = None,
