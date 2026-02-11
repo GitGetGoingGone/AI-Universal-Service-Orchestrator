@@ -1,0 +1,16 @@
+# AI Universal Service Orchestrator - shared dependencies
+# Used by discovery, intent, orchestrator, hybrid-response, payment, task-queue,
+# hub-negotiator, reverse-logistics, proofing, omnichannel-broker, webhook services
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+supabase>=2.0.0
+httpx>=0.26.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# Intent service (Azure OpenAI)
+openai>=1.0.0
+
+# Payment service
+stripe>=7.0.0
