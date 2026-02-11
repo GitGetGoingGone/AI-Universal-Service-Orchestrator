@@ -64,7 +64,7 @@ overview: One place for all planned tasks and latest status. Update status here;
 |------|--------|--------|
 | Pillar 1: Data model schema finalized, capability mapping, inventory sync architecture, affiliate link tracking schema | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Pillar 2: Legal framework, ToS drafted, MoR decision, insurance, affiliate commission agreements | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
-| Pillar 3: Manifest template finalized, action models, offline discovery strategy, affiliate manifest integration | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
+| Pillar 3: Manifest template finalized, action models, offline discovery strategy, affiliate manifest integration | Done | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Pillar 4: SLA thresholds, buffer calculations, kill switch protocol, affiliate partner SLAs | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Pillar 5: Proof state machine, Vision AI integration, approval workflows | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Chat-First Foundation: API response standard, JSON-LD schemas, Adaptive Cards library, Link Account flow | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
@@ -86,7 +86,7 @@ overview: One place for all planned tasks and latest status. Update status here;
 | OpenAI merchant/feed onboarding completed | Pending |
 | /.well-known/ucp endpoint with UCP profile | Done |
 | Catalog API: UCP Item shape (id, title, price cents, image_url), optional seller per item | Done |
-| Checkout/order APIs (optional) for full UCP checkout | Pending |
+| Checkout/order APIs (optional) for full UCP checkout | Done |
 | Merchant on record: partner as seller in feed and catalog; product URL shows "Sold by {partner}" | Done |
 | Bundling: document feed = discovery-only; bundling remains in orchestrator | Done |
 | **Profile discoverable (see section 2b)** Push API (scope + targets); ChatGPT 15-min throttle; portal ACP/UCP forms + validation API + push controls | Done |
@@ -100,13 +100,46 @@ overview: One place for all planned tasks and latest status. Update status here;
 | Module | Name | Phase | Status |
 |--------|------|-------|--------|
 | 2 | Legacy Adapter Layer | Phase 2 | Pending |
-| 3 | AI-First Discoverability | Phase 2 | Pending |
-| 8 | Virtual Proofing Engine | Phase 2 | Pending |
+| 3 | AI-First Discoverability | Phase 2 | Done |
+| 8 | Virtual Proofing Engine | Phase 2 | Done |
 | 10 | HubNegotiator & Bidding | Phase 2 | Done |
 | 11 | Multi-Vendor Task Queue | Phase 2 | Done |
 | 13 | Hybrid Response Logic | Phase 2 | Done |
-| 17 | Reverse Logistics | Phase 3 | Pending |
-| 18 | Admin Command Center | Phase 3 | Pending |
+| 17 | Reverse Logistics | Phase 3 | Done |
+| 18 | Admin Command Center | Phase 3 | Done |
+
+---
+
+## 5b. Implementation Order (Next Up)
+
+**Full implementation, no mocks.** Details in [03-modules-all.md](./03-modules-all.md) and [05-implementation.md](./05-implementation.md).
+
+| # | Task | Scope |
+|---|------|-------|
+| 1 | **AI-First Discoverability** (Module 3) | Done – Manifest template, action models, offline discovery strategy |
+| 2 | **Admin Command Center** (Module 18) | Done – Dashboard metrics, period filter, escalations, export |
+| 3 | **Reverse Logistics** (Module 17) | Done – return_requests, refunds, restock_events, API |
+| 4 | **Virtual Proofing Engine** (Module 8) | Done – proof_states, DALL-E generate, approve/reject workflow |
+| 5 | **Portal – Task Queue** | Done – Partner Tasks page, proxy to Task Queue |
+| 6 | **Portal – HubNegotiator** | Done – Partner RFPs/bids; Platform create/select winner |
+| 7 | **Portal – Hybrid Response** | Done – Support page with classify-and-route |
+| 8 | **Portal – Omnichannel connect** | Pending – Connect options (WhatsApp) in portal |
+| 9 | **Order → Task Queue** | Done – Discovery checkout calls Task Queue |
+| 10 | **Checkout and payments** | Done – Payment page with Stripe Elements, Pay link in orders |
+
+---
+
+## 5c. ChatGPT App Directory, Gemini UCP, Unified Web App (05-implementation)
+
+*UCP discovery + checkout for Gemini; ChatGPT App via MCP; unified web app for end users. Full plan: [05-implementation § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app).*
+
+| ID | Task | Status | Source |
+|----|------|--------|--------|
+| ucp-checkout-api | UCP Checkout: Discovery service REST API (Create, Get, Update, Complete, Cancel) per UCP spec | Done | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
+| chatgpt-app-mcp | ChatGPT App: MCP server with 12 tools, deploy, submit to App Directory | Pending | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
+| unified-web-app | Unified Web App: Next.js chat app with ChatGPT or Gemini provider switch | Pending | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
+| orchestrator-auxiliary | Orchestrator: auxiliary endpoints (manifest, order status, classify-support, returns) | Pending | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
+| chatgpt-gemini-test-scenarios | Docs: CHATGPT_GEMINI_TEST_SCENARIOS.md with test prompts for UCP, ChatGPT app, web app | Pending | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
 
 ---
 
@@ -123,6 +156,10 @@ overview: One place for all planned tasks and latest status. Update status here;
 | Module 11: Multi-Vendor Task Queue (vendor_tasks, order-leg sequence, partner task list, start/complete) | Done |
 | Module 10: HubNegotiator & Bidding (RFPs, bids, select winner, hub capacity matching) | Done |
 | Module 13: Hybrid Response Logic (classify-and-route, support_escalations, assign/resolve) | Done |
+| Module 3: AI-First Discoverability (manifest, action models, /.well-known/agent-manifest, /api/v1/manifest) | Done |
+| Module 18: Admin Command Center (dashboard metrics, escalations, export reports) | Done |
+| Module 17: Reverse Logistics (return requests, refunds, restock events) | Done |
+| Module 8: Virtual Proofing Engine (proof_states, DALL-E generate, approve/reject) | Done |
 
 ---
 

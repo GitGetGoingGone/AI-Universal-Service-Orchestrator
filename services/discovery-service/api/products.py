@@ -4,10 +4,12 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+import httpx
 from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from config import settings
 from db import get_product_by_id, get_products_for_acp_export, add_product_to_bundle, get_bundle_by_id, remove_from_bundle, create_order_from_bundle
 from scout_engine import search
 from protocols.acp_compliance import validate_product_acp
@@ -275,6 +277,17 @@ async def proceed_to_checkout(request: Request, body: CheckoutBody):
     order = await create_order_from_bundle(body.bundle_id)
     if not order:
         raise HTTPException(status_code=500, detail="Failed to create order")
+
+    # Order → Task Queue integration: create vendor tasks for the new order
+    order_id = order.get("id", "")
+    if order_id and settings.task_queue_service_url:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    f"{settings.task_queue_service_url.rstrip('/')}/api/v1/orders/{order_id}/tasks"
+                )
+        except Exception:
+            pass
 
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
     total = float(order.get("total", 0))

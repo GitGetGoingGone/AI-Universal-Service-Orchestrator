@@ -57,11 +57,13 @@ Main navigation and overview of all plan sections.
 - Month 0: The Integration Hub (Pre-Implementation Foundation)
 - Critical Pillars (Pre-Implementation Requirements)
 - Implementation Phases (Phase 1, 2, 3)
+- **ChatGPT App Directory, Gemini UCP, Unified Web App** (UCP checkout, MCP server, unified chat app)
 - Key Design Decisions
 
 ### [08-task-register.md](./08-task-register.md) — **Single view of all planned tasks**
 - One place for every planned task and latest status (Pending / In progress / Done)
 - Partner Portal, Schema & Discovery, **Profile discoverable (push, rate limit, portal)** § 2b, Pillars, Phase 2/3 modules
+- **ChatGPT App Directory, Gemini UCP, Unified Web App** § 5c
 - Links to 05-implementation, profile-discoverable-chatgpt-gemini, and 03-modules-all for details; update status here
 
 ### [profile-discoverable-chatgpt-gemini.md](./profile-discoverable-chatgpt-gemini.md)

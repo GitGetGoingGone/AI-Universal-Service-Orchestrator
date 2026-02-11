@@ -9,6 +9,7 @@ sys.path.insert(0, str(_root))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from packages.shared.errors import USOException
 from packages.shared.errors.middleware import (
@@ -26,7 +27,9 @@ from api.products import router as products_router
 from api.partners import router as partners_router
 from api.admin import router as admin_router
 from api.ucp import router as ucp_router
+from api.ucp_checkout import router as ucp_checkout_router
 from api.feeds import router as feeds_router
+from api.manifest import router as manifest_router, _build_manifest
 from webhooks.inventory_webhook import router as webhooks_router
 
 app = FastAPI(
@@ -54,7 +57,9 @@ app.include_router(products_router)
 app.include_router(partners_router)
 app.include_router(admin_router)
 app.include_router(ucp_router)
+app.include_router(ucp_checkout_router)
 app.include_router(feeds_router)
+app.include_router(manifest_router)
 app.include_router(webhooks_router)
 
 # Health checks (per 07-project-operations.md)
@@ -112,6 +117,7 @@ async def root():
             "ucp_catalog": "GET /api/v1/ucp/items",
             "well_known_ucp": "GET /.well-known/ucp",
             "acp_feed": "GET /api/v1/feeds/acp?partner_id=<optional>",
+            "agent_manifest": "GET /api/v1/manifest | /.well-known/agent-manifest",
             "push_feed": "POST /api/v1/feeds/push",
             "push_status": "GET /api/v1/feeds/push-status?partner_id=",
             "inventory_webhook": "POST /webhooks/inventory",
@@ -119,6 +125,21 @@ async def root():
             "ready": "GET /ready",
         },
     }
+
+
+@app.get("/.well-known/agent-manifest")
+async def well_known_agent_manifest():
+    """
+    AI-First Discoverability (Module 3): Platform manifest for AI agents at well-known URL.
+    Same content as GET /api/v1/manifest; discoverable by convention.
+    """
+    manifest = await _build_manifest()
+    return JSONResponse(
+        content=manifest,
+        headers={
+            "Cache-Control": f"public, max-age={manifest.get('offline_discovery', {}).get('cache_ttl', 3600)}",
+        },
+    )
 
 
 @app.get("/.well-known/ucp")

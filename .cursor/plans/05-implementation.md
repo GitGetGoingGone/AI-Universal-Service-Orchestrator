@@ -61,6 +61,22 @@ todos:
   - id: portal-push-controls
     content: Partner portal: Push controls (single vs all, ChatGPT / Gemini / both) and 15-min throttle messaging
     status: pending
+  # ChatGPT App Directory, Gemini UCP, Unified Web App
+  - id: ucp-checkout-api
+    content: UCP Checkout: Discovery service REST API (Create, Get, Update, Complete, Cancel) per UCP spec
+    status: pending
+  - id: chatgpt-app-mcp
+    content: ChatGPT App: MCP server with 12 tools, deploy, submit to App Directory
+    status: pending
+  - id: unified-web-app
+    content: Unified Web App: Next.js chat app with ChatGPT or Gemini provider switch
+    status: pending
+  - id: orchestrator-auxiliary
+    content: Orchestrator: auxiliary endpoints (manifest, order status, classify-support, returns)
+    status: pending
+  - id: chatgpt-gemini-test-scenarios
+    content: Docs: CHATGPT_GEMINI_TEST_SCENARIOS.md with test prompts for UCP, ChatGPT app, web app
+    status: pending
 ---
 
 # Implementation
@@ -1395,3 +1411,87 @@ Trackable requirements for commerce feed schema and AI platform discovery. Refer
   - **Web**: Full admin dashboard
   - **Mobile**: Admin mobile app for on-the-go monitoring
   - **PWA**: Admin PWA for quick access
+
+---
+
+## ChatGPT App Directory, Gemini UCP, and Unified Web App
+
+*Three distinct deliverables for AI platform distribution and end-user access.*
+
+### Overview
+
+| Deliverable | Description | Distribution |
+|-------------|-------------|--------------|
+| **UCP Discovery + Checkout** | Native UCP protocol for Gemini/Google. Discovery (existing) + full checkout lifecycle. | Expose API; Google discovers via `/.well-known/ucp` |
+| **ChatGPT App** | MCP server for ChatGPT App Directory. | Submit to chatgpt.com/apps |
+| **Unified Web App** | End-user chat app that connects to **either** ChatGPT **or** Gemini. | Hosted URL (Vercel, etc.) |
+
+### 1. UCP Discovery and Checkout (Gemini)
+
+**Goal:** Enable native Gemini/Google discovery and checkout via UCP—no web app required. Google discovers our business and calls our APIs.
+
+**Current state:** Discovery done (`/.well-known/ucp`, `GET /api/v1/ucp/items`). Checkout not implemented.
+
+**UCP Checkout operations** (per [ucp.dev/specification/checkout](https://ucp.dev/specification/checkout/)):
+- Create Checkout: `POST /api/v1/ucp/checkout`
+- Get Checkout: `GET /api/v1/ucp/checkout/{id}`
+- Update Checkout: `PUT /api/v1/ucp/checkout/{id}`
+- Complete Checkout: `POST /api/v1/ucp/checkout/{id}/complete`
+- Cancel Checkout: `POST /api/v1/ucp/checkout/{id}/cancel`
+
+**Implementation:**
+- Extend `services/discovery-service/api/ucp.py` with UCP checkout REST API.
+- Map UCP line_items to orchestrator bundle/checkout; bridge to `POST /api/v1/checkout`, `create_payment_intent`.
+- Return `continue_url` when status is `requires_escalation` for buyer handoff.
+- Update `/.well-known/ucp` to advertise checkout endpoint.
+
+**Files:** `services/discovery-service/api/ucp.py`, config for `ORCHESTRATOR_URL`.
+
+### 2. ChatGPT App (App Directory)
+
+**Goal:** Publish to ChatGPT App Directory via Apps SDK.
+
+- MCP server with tools: discover_products, get_product_details, get_bundle_details, add_to_bundle, remove_from_bundle, proceed_to_checkout, create_payment_intent, request_change, get_manifest, track_order, classify_support, create_return.
+- Each tool calls orchestrator HTTP API.
+- Deploy MCP server; submit via platform.openai.com.
+
+**Files:** New `apps/uso-chatgpt-app/` (MCP server).
+
+### 3. Unified Web App (ChatGPT or Gemini)
+
+**Goal:** One end-user-facing web app that lets users choose ChatGPT or Gemini as the AI backend.
+
+**Features:**
+- Provider selector: ChatGPT or Gemini.
+- Unified tool set (12 tools) for both; both call orchestrator.
+- Chat UI: message list, input, streaming responses.
+- Tool execution: execute against orchestrator on function call.
+- Optional: Use as `continue_url` for UCP checkout handoff.
+
+**Implementation:**
+- New `apps/uso-unified-chat/` (Next.js).
+- Server API route: `/api/chat` with `{ provider: "chatgpt" | "gemini", messages }`.
+- Deploy to Vercel; env: `OPENAI_API_KEY`, `GOOGLE_AI_API_KEY`, `ORCHESTRATOR_URL`.
+
+### 4. Orchestrator Additions (Shared Backend)
+
+Add proxy endpoints for full feature coverage:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/v1/manifest` | AI agents discover capabilities |
+| `GET /api/v1/orders/{id}/status` | Track order |
+| `POST /api/v1/classify-support` | Route support (AI vs human) |
+| `POST /api/v1/returns` | Create return request |
+
+**Files:** `services/orchestrator-service/api/auxiliary.py`, config for `HYBRID_RESPONSE_SERVICE_URL`, `REVERSE_LOGISTICS_SERVICE_URL`.
+
+### Summary: File Changes
+
+| Area | Action |
+|------|--------|
+| Discovery | Extend `api/ucp.py` with UCP checkout REST: Create, Get, Update, Complete, Cancel |
+| ChatGPT | New `apps/uso-chatgpt-app/` MCP server |
+| Web app | New `apps/uso-unified-chat/` Next.js app with ChatGPT + Gemini provider switch |
+| Orchestrator | New `api/auxiliary.py`: manifest, order status, classify-support, returns |
+| Docs | `docs/CHATGPT_GEMINI_TEST_SCENARIOS.md` with test prompts for UCP, ChatGPT app, and web app |

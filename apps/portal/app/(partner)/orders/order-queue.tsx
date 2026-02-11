@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PartnerGuard, PartnerRequiredMessage } from "@/components/partner-guard";
 
@@ -10,7 +11,7 @@ type OrderLeg = {
   preparation_mins: number | null;
   reject_reason: string | null;
   created_at: string;
-  orders: { id: string; total_amount: number; currency: string; status: string; created_at: string } | null;
+  orders: { id: string; total_amount: number; currency: string; status: string; payment_status?: string; created_at: string } | null;
 };
 
 export function OrderQueue() {
@@ -108,6 +109,7 @@ export function OrderQueue() {
                 <th className="text-left px-4 py-2">Amount</th>
                 <th className="text-left px-4 py-2">Status</th>
                 <th className="text-left px-4 py-2">Created</th>
+                <th className="text-left px-4 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -120,6 +122,16 @@ export function OrderQueue() {
                   <td className="px-4 py-2">{leg.status}</td>
                   <td className="px-4 py-2">
                     {leg.created_at ? new Date(leg.created_at).toLocaleString() : "—"}
+                  </td>
+                  <td className="px-4 py-2">
+                    {leg.orders?.id && leg.orders?.payment_status === "pending" && (
+                      <Link
+                        href={`/pay?order_id=${leg.orders.id}`}
+                        className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                      >
+                        Pay
+                      </Link>
+                    )}
                   </td>
                 </tr>
               ))}

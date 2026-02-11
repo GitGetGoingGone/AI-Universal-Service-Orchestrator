@@ -33,6 +33,12 @@ class Settings:
     log_level: str = get_env("LOG_LEVEL", "INFO")
     # Public base URL for UCP well-known and catalog (e.g. https://uso-discovery.onrender.com)
     discovery_public_url: str = get_env("DISCOVERY_PUBLIC_URL") or get_env("PUBLIC_URL") or ""
+    # Platform/orchestrator base URL for manifest action endpoints (e.g. https://uso-orchestrator.onrender.com)
+    platform_public_url: str = get_env("PLATFORM_PUBLIC_URL") or get_env("ORCHESTRATOR_PUBLIC_URL") or discovery_public_url or ""
+    # Task Queue service URL (for Order → Task Queue integration)
+    task_queue_service_url: str = get_env("TASK_QUEUE_SERVICE_URL") or ""
+    # Portal/public URL for UCP continue_url (e.g. https://your-portal.vercel.app)
+    portal_public_url: str = get_env("PORTAL_PUBLIC_URL") or get_env("DISCOVERY_PUBLIC_URL") or ""
 
     @property
     def supabase_configured(self) -> bool:

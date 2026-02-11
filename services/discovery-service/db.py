@@ -473,6 +473,100 @@ async def create_order_from_bundle(bundle_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def create_bundle_from_ucp_items(
+    line_items: List[Dict[str, Any]],
+    currency: str = "USD",
+) -> Optional[str]:
+    """
+    Create a bundle from UCP line items. Each item: {item: {id: product_id}, quantity: int}.
+    Returns bundle_id or None.
+    """
+    client = get_supabase()
+    if not client or not line_items:
+        return None
+    try:
+        bundle_result = client.table("bundles").insert({
+            "bundle_name": "UCP Checkout",
+            "total_price": 0,
+            "currency": currency,
+            "status": "draft",
+        }).execute()
+        if not bundle_result.data:
+            return None
+        bundle_id = str(bundle_result.data[0]["id"])
+        total = 0.0
+        seq = 1
+        for li in line_items:
+            item = li.get("item") or {}
+            product_id = str(item.get("id", ""))
+            qty = int(li.get("quantity", 1))
+            if not product_id or qty < 1:
+                continue
+            product = await get_product_by_id(product_id)
+            if not product:
+                continue
+            price = float(product.get("price", 0))
+            partner_id = product.get("partner_id")
+            for _ in range(qty):
+                client.table("bundle_legs").insert({
+                    "bundle_id": bundle_id,
+                    "leg_sequence": seq,
+                    "product_id": product_id,
+                    "partner_id": partner_id,
+                    "leg_type": "product",
+                    "price": price,
+                }).execute()
+                total += price
+                seq += 1
+        client.table("bundles").update({"total_price": total}).eq("id", bundle_id).execute()
+        return bundle_id
+    except Exception:
+        return None
+
+
+async def get_order_by_id(order_id: str) -> Optional[Dict[str, Any]]:
+    """Get order with line items for UCP checkout."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        order_result = (
+            client.table("orders")
+            .select("id, bundle_id, user_id, total_amount, currency, status, payment_status, created_at")
+            .eq("id", order_id)
+            .single()
+            .execute()
+        )
+        if not order_result.data:
+            return None
+        order = dict(order_result.data)
+        items_result = (
+            client.table("order_items")
+            .select("id, product_id, partner_id, item_name, quantity, unit_price, total_price")
+            .eq("order_id", order_id)
+            .execute()
+        )
+        order["items"] = items_result.data or []
+        return order
+    except Exception:
+        return None
+
+
+async def update_order_status(order_id: str, status: str, payment_status: Optional[str] = None) -> bool:
+    """Update order status (and optionally payment_status)."""
+    client = get_supabase()
+    if not client:
+        return False
+    try:
+        updates = {"status": status}
+        if payment_status is not None:
+            updates["payment_status"] = payment_status
+        client.table("orders").update(updates).eq("id", order_id).execute()
+        return True
+    except Exception:
+        return False
+
+
 async def remove_from_bundle(item_id: str) -> Optional[Dict[str, Any]]:
     """
     Remove a bundle leg (item) by id. Updates bundle total_price.
@@ -516,5 +610,48 @@ async def remove_from_bundle(item_id: str) -> Optional[Dict[str, Any]]:
             "total_price": total,
             "currency": bundle_result.data.get("currency", "USD"),
         }
+    except Exception:
+        return None
+
+
+# --- Module 3: AI-First Discoverability ---
+
+
+async def get_agent_action_models() -> List[Dict[str, Any]]:
+    """Get active action models for AI agents."""
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        result = (
+            client.table("agent_action_models")
+            .select(
+                "action_name, method, endpoint, requires_auth, requires_approval_if_over, "
+                "rate_limit_per_hour, allowed_parameters, restricted_parameters, "
+                "allowed_modifications, restricted_modifications"
+            )
+            .eq("is_active", True)
+            .order("action_name")
+            .execute()
+        )
+        return result.data or []
+    except Exception:
+        return []
+
+
+async def get_platform_manifest_config() -> Optional[Dict[str, Any]]:
+    """Get active platform manifest config."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("platform_manifest_config")
+            .select("*")
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
     except Exception:
         return None

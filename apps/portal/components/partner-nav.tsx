@@ -9,8 +9,11 @@ const MAIN_ITEMS = [
   { href: "/products", label: "Products" },
   { href: "/schedule", label: "Schedule" },
   { href: "/orders", label: "Orders" },
+  { href: "/tasks", label: "Tasks" },
+  { href: "/rfps", label: "Hub RFPs" },
   { href: "/promotions", label: "Promotions" },
   { href: "/venues", label: "Venues" },
+  { href: "/support", label: "Support" },
   { href: "/commerce-profile", label: "Commerce profile" },
 ];
 

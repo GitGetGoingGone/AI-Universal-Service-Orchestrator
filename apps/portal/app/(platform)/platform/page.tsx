@@ -17,6 +17,12 @@ export default async function PlatformDashboardPage() {
           <Link href="/platform/partners" className="text-[rgb(var(--color-text-secondary))] hover:text-[rgb(var(--color-text))]">
             Partners
           </Link>
+          <Link href="/platform/escalations" className="text-[rgb(var(--color-text-secondary))] hover:text-[rgb(var(--color-text))]">
+            Escalations
+          </Link>
+          <Link href="/platform/rfps" className="text-[rgb(var(--color-text-secondary))] hover:text-[rgb(var(--color-text))]">
+            RFPs
+          </Link>
           <Link href="/platform/admins" className="text-[rgb(var(--color-text-secondary))] hover:text-[rgb(var(--color-text))]">
             Admins
           </Link>

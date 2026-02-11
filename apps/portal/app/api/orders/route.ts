@@ -22,6 +22,7 @@ export async function GET() {
         total_amount,
         currency,
         status,
+        payment_status,
         created_at
       )
     `)

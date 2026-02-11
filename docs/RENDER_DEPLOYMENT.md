@@ -12,6 +12,31 @@ Step-by-step instructions to deploy the AI Universal Service Orchestrator full s
 
 ---
 
+## Step 0: Create Environment Group (shared variables)
+
+Create one **Environment Group** so you don’t repeat the same variables on every service. [Render Environment Groups](https://docs.render.com/configure-environment-variables#environment-groups) let you share a collection of variables across multiple services; a change in the group updates all linked services.
+
+1. In [Render Dashboard](https://dashboard.render.com) → **Environment Groups** (left pane) → **+ New Environment Group**
+2. **Group name:** `uso-shared` (or `uso-staging`)
+3. Add these variables:
+
+| Key | Value |
+|-----|-------|
+| `SUPABASE_URL` | Your Supabase project URL |
+| `SUPABASE_SECRET_KEY` | Supabase service role / secret key |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase anon / publishable key |
+| `ENVIRONMENT` | `staging` |
+| `LOG_LEVEL` | `INFO` |
+
+4. Click **Create Environment Group**.  
+   **Tip:** If you have a local `.env` with these keys, use **Add from .env** to bulk-add.
+
+**Optional – scope to project environment:** If you use [Render Projects](https://docs.render.com/docs/projects) to organize services by environment (staging vs production), you can scope this group to a single environment (Manage → Move group) so it can’t be linked to services in other environments.
+
+In the steps below, each service will **link this group** and add only its **service-specific** variables. Service-specific vars always override group vars when both define the same key.
+
+---
+
 ## Step 1: Create a Render Web Service (Discovery)
 
 1. Go to [Render Dashboard](https://dashboard.render.com) → **New** → **Web Service**
@@ -27,15 +52,9 @@ Step-by-step instructions to deploy the AI Universal Service Orchestrator full s
 | **Build Command** | `pip install -r requirements.txt` |
 | **Start Command** | `cd services/discovery-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
-4. **Environment** → Add variables:
-
-| Key | Value |
-|-----|-------|
-| `SUPABASE_URL` | Your Supabase project URL |
-| `SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key |
-| `SUPABASE_SECRET_KEY` | Supabase secret key |
-| `ENVIRONMENT` | `staging` |
-| `LOG_LEVEL` | `INFO` |
+4. **Environment**:
+   - Under **Linked Environment Groups**, select `uso-shared` → **Link**
+   - *(No service-specific vars needed; Discovery uses the group vars)*
 
 5. Click **Create Web Service**. Note the URL (e.g. `https://uso-discovery.onrender.com`).
 
@@ -55,15 +74,14 @@ Step-by-step instructions to deploy the AI Universal Service Orchestrator full s
 | **Start Command** | `cd services/intent-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
 4. **Environment**:
+   - Under **Linked Environment Groups**, select `uso-shared` → **Link**
+   - Add service-specific vars (optional for OpenAI):
 
 | Key | Value |
 |-----|-------|
-| `SUPABASE_URL` | Same as Discovery |
-| `SUPABASE_SECRET_KEY` | Same as Discovery |
 | `AZURE_OPENAI_ENDPOINT` | *(optional)* Azure OpenAI endpoint |
 | `AZURE_OPENAI_API_KEY` | *(optional)* |
 | `AZURE_OPENAI_DEPLOYMENT_NAME` | `gpt-4o` |
-| `ENVIRONMENT` | `staging` |
 
 5. Create and note the URL.
 
@@ -124,7 +142,9 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | **Build Command** | `pip install -r requirements.txt` |
 | **Start Command** | `cd services/orchestrator-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
-4. **Environment** (use URLs from Steps 1–5 and 6a–6d):
+4. **Environment**:
+   - Under **Linked Environment Groups**, select `uso-shared` → **Link**
+   - Add service-specific vars (use URLs from Steps 1–5 and 6a–6d):
 
 | Key | Value |
 |-----|-------|
@@ -132,16 +152,14 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | `DISCOVERY_SERVICE_URL` | `https://uso-discovery.onrender.com` |
 | `DURABLE_ORCHESTRATOR_URL` | `https://uso-durable.onrender.com` |
 | `WEBHOOK_SERVICE_URL` | `https://uso-webhook.onrender.com` *(add after Step 5)* |
-| `PAYMENT_SERVICE_URL` | `https://uso-payment.onrender.com` *(add after Step 6d)* |
+| `PAYMENT_SERVICE_URL` | `https://uso-payment.onrender.com` *(add after Step 6c)* |
 | `OMNICHANNEL_BROKER_URL` | `https://uso-omnichannel-broker.onrender.com` *(add after Step 6b)* |
 | `RE_SOURCING_SERVICE_URL` | `https://uso-resourcing.onrender.com` *(add after Step 6c)* |
-| `SUPABASE_URL` | Same as Discovery *(required for Link Account)* |
-| `SUPABASE_SERVICE_KEY` | Same as `SUPABASE_SECRET_KEY` *(for Link Account)* |
+| `SUPABASE_SERVICE_KEY` | Same as `SUPABASE_SECRET_KEY` *(for Link Account; alias)* |
 | `GOOGLE_OAUTH_CLIENT_ID` | *(optional)* For Link Account with Google; from Google Cloud Console |
 | `AZURE_OPENAI_ENDPOINT` | *(optional)* For agentic planner |
 | `AZURE_OPENAI_API_KEY` | *(optional)* |
 | `AZURE_OPENAI_DEPLOYMENT_NAME` | `gpt-4o` |
-| `ENVIRONMENT` | `staging` |
 
 5. Create and note the URL.
 
@@ -161,12 +179,11 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | **Start Command** | `cd services/webhook-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
 4. **Environment**:
+   - Under **Linked Environment Groups**, select `uso-shared` → **Link**
+   - Add service-specific vars (optional):
 
 | Key | Value |
 |-----|-------|
-| `SUPABASE_URL` | Same as Discovery |
-| `SUPABASE_SECRET_KEY` | Same as Discovery |
-| `ENVIRONMENT` | `staging` |
 | `CHATGPT_WEBHOOK_URL` | *(optional)* If unset, push to ChatGPT returns 503 (no stub). |
 | `GEMINI_WEBHOOK_URL` | *(optional)* If unset, push to Gemini returns 503. |
 | `TWILIO_ACCOUNT_SID` | *(optional)* For WhatsApp push |
@@ -197,13 +214,12 @@ Deploy these services for the full production flow (no simulator).
 | **Start Command** | `cd services/omnichannel-broker-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
 4. **Environment**:
+   - Under **Linked Environment Groups**, select `uso-shared` → **Link**
+   - Add service-specific vars:
 
 | Key | Value |
 |-----|-------|
-| `SUPABASE_URL` | Same as Discovery |
-| `SUPABASE_SECRET_KEY` | Same as Discovery |
 | `RE_SOURCING_SERVICE_URL` | `https://uso-resourcing.onrender.com` *(add after Step 6c)* |
-| `ENVIRONMENT` | `staging` |
 
 5. Create and note the URL.
 
@@ -221,13 +237,12 @@ Deploy these services for the full production flow (no simulator).
 | **Start Command** | `cd services/re-sourcing-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
 4. **Environment**:
+   - Under **Linked Environment Groups**, select `uso-shared` → **Link**
+   - Add service-specific vars:
 
 | Key | Value |
 |-----|-------|
-| `SUPABASE_URL` | Same as Discovery |
-| `SUPABASE_SECRET_KEY` | Same as Discovery |
 | `DISCOVERY_SERVICE_URL` | `https://uso-discovery.onrender.com` |
-| `ENVIRONMENT` | `staging` |
 
 5. Create and note the URL.
 
@@ -245,13 +260,13 @@ Deploy these services for the full production flow (no simulator).
 | **Start Command** | `cd services/payment-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
 4. **Environment**:
+   - Under **Linked Environment Groups**, select `uso-shared` → **Link**
+   - Add service-specific vars:
 
 | Key | Value |
 |-----|-------|
-| `SUPABASE_URL` | Same as Discovery |
-| `SUPABASE_SECRET_KEY` | Same as Discovery |
 | `STRIPE_SECRET_KEY` | Stripe secret key (sk_test_... or sk_live_...) – from Dashboard → API keys |
-| `ENVIRONMENT` | `staging` |
+| `STRIPE_WEBHOOK_SECRET` | *(optional)* For webhook verification – from Stripe Webhooks |
 
 **Note:** Stripe provides **Publishable key** (pk_...) and **Secret key** (sk_...) in Dashboard → API keys. Use the Secret key for `STRIPE_SECRET_KEY`.
 
@@ -282,21 +297,33 @@ Requires migration `supabase/migrations/20240128100003_task_queue_hub_negotiator
 | **Name** | `uso-hybrid-response` |
 | **Start Command** | `cd services/hybrid-response-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
-For each: **Root Directory** empty, **Build Command** `pip install -r requirements.txt`, **Environment** `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `ENVIRONMENT=staging`. Test steps: [TESTING_RENDER_AND_PORTAL.md § 8b](./TESTING_RENDER_AND_PORTAL.md#8b-phase-2-modules-task-queue-hubnegotiator-hybrid-response).
+For each: **Root Directory** empty, **Build Command** `pip install -r requirements.txt`, **Environment** → **Linked Environment Groups** → link `uso-shared` (no service-specific vars). Test steps: [TESTING_RENDER_AND_PORTAL.md § 8b](./TESTING_RENDER_AND_PORTAL.md#8b-phase-2-modules-task-queue-hubnegotiator-hybrid-response).
 
 ---
 
 ## Step 7: Update Service URLs (after all services deployed)
 
-1. **uso-orchestrator** → Environment → add/update:
+1. **uso-orchestrator** → Environment → add/update (service-specific vars override group):
    - `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
    - `PAYMENT_SERVICE_URL` = `https://uso-payment.onrender.com` *(required for checkout)*
    - `OMNICHANNEL_BROKER_URL` = `https://uso-omnichannel-broker.onrender.com`
    - `RE_SOURCING_SERVICE_URL` = `https://uso-resourcing.onrender.com`
 
 **Important:** Without `PAYMENT_SERVICE_URL`, createPaymentIntent returns 502 "All connection attempts failed" because the Orchestrator defaults to `http://localhost:8006` which does not exist on Render.
-3. **uso-durable** → Environment → `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
-4. **uso-omnichannel-broker** → Environment → `RE_SOURCING_SERVICE_URL` = `https://uso-resourcing.onrender.com`
+
+2. **uso-durable** → Environment → `WEBHOOK_SERVICE_URL` = `https://uso-webhook.onrender.com`
+3. **uso-omnichannel-broker** → Environment → `RE_SOURCING_SERVICE_URL` = `https://uso-resourcing.onrender.com`
+
+---
+
+## Environment Groups summary
+
+| Source | Variables |
+|-------|-----------|
+| **`uso-shared` env group** | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `ENVIRONMENT`, `LOG_LEVEL` |
+| **Service-specific** | Per-service URLs, Stripe keys, Azure keys, webhook URLs, etc. |
+
+Services that link `uso-shared`: Discovery, Intent, Orchestrator, Webhook, Omnichannel Broker, Re-Sourcing, Payment, Task Queue, Hub Negotiator, Hybrid Response. Durable (Docker) does not use the group. When you change a variable in the env group, Render redeploys all linked services (if autodeploy is on).
 
 ---
 
@@ -407,6 +434,20 @@ The Orchestrator calls the Payment service at `PAYMENT_SERVICE_URL`. If that env
 ### Troubleshooting: "d: command not found"
 
 If you see `bash: line 1: d: command not found`, the Start Command is missing `c` from `cd`. Fix: In Render Dashboard → Your Service → **Settings** → **Build & Deploy** → **Start Command**, ensure it begins with `cd` (not `d`). Copy-paste from the Quick Reference table below.
+
+### Troubleshooting: "Port scan timeout reached, no open ports detected"
+
+This means the process never bound to `$PORT` before Render timed out.
+
+Common causes:
+
+1. **App crashes on startup** – Check **Logs** for `ModuleNotFoundError`, `ImportError`, or missing env vars.
+2. **Wrong Root Directory** – Must be empty for Python services.
+3. **Start command typo** – Ensure `cd` (not `d`) and `uvicorn main:app --host 0.0.0.0 --port $PORT`.
+4. **Use `python -m uvicorn`** – If uvicorn isn't on PATH: `python -m uvicorn main:app --host 0.0.0.0 --port $PORT`
+5. **Env group not linked** – Ensure `uso-shared` is linked if you use environment groups.
+
+**Optional – gunicorn:** If uvicorn continues to fail, you can switch to gunicorn with uvicorn workers. **Apply across all Python web services** (add `gunicorn>=21.0.0` to requirements.txt and use `gunicorn main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT` for every service) to keep configuration consistent.
 
 ---
 

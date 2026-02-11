@@ -424,6 +424,8 @@ Use the same names in **Vercel** (and in local `apps/portal/.env.local`) so conf
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/publishable key (client, RLS) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server, bypasses RLS) |
 | `DISCOVERY_SERVICE_URL` | Discovery service base URL (for validate-discovery and feed push proxy; e.g. `https://uso-discovery.onrender.com`) |
+| `TASK_QUEUE_SERVICE_URL` | Task Queue service (for partner Tasks page; e.g. `https://uso-task-queue.onrender.com`) |
+| `HUB_NEGOTIATOR_SERVICE_URL` | Hub Negotiator service (for partner Hub RFPs and platform RFPs; e.g. `https://uso-hub-negotiator.onrender.com`) |
 
 The portal also accepts these **alternate names** (so existing `.env.local` with the older names still works): `SUPABASE_PUBLISHABLE_KEY` instead of `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SECRET_KEY` instead of `SUPABASE_SERVICE_ROLE_KEY`. For new setups and Vercel, prefer the names in the table above (same as [RENDER_DEPLOYMENT.md § Partner Portal](./RENDER_DEPLOYMENT.md#partner-portal-vercel)).
 
@@ -603,3 +605,5 @@ curl -s -X POST "$HYBRID_RESPONSE/api/v1/classify-and-route" -H "Content-Type: a
 | Hybrid Response (Module 13) | POST /api/v1/classify-and-route, escalations assign/resolve | routine→AI, complex/dispute/damage→human; support_escalations CRUD |
 
 See [RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md) for deploy steps and env vars; [AI_PLATFORM_PRODUCT_DISCOVERY.md](./AI_PLATFORM_PRODUCT_DISCOVERY.md) for ACP/UCP discovery.
+
+**Real-life scenario:** [REAL_LIFE_TEST_SCENARIO.md](./REAL_LIFE_TEST_SCENARIO.md) – End-to-end test of Task Queue, HubNegotiator, and Hybrid Response with a gift bundle (flowers + chocolates) use case.
