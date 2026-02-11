@@ -24,6 +24,9 @@ WEBHOOK="${WEBHOOK_URL:-https://uso-webhook.onrender.com}"
 OMNICHANNEL="${OMNICHANNEL_URL:-https://uso-omnichannel-broker.onrender.com}"
 RESOURCING="${RESOURCING_URL:-https://uso-resourcing.onrender.com}"
 PAYMENT="${PAYMENT_URL:-https://uso-payment.onrender.com}"
+TASK_QUEUE="${TASK_QUEUE_URL:-https://uso-task-queue.onrender.com}"
+HUB_NEGOTIATOR="${HUB_NEGOTIATOR_URL:-https://uso-hub-negotiator.onrender.com}"
+HYBRID_RESPONSE="${HYBRID_RESPONSE_URL:-https://uso-hybrid-response.onrender.com}"
 
 # Timeout for curl (seconds); Render cold starts can take 30-60s
 TIMEOUT=90
@@ -48,6 +51,9 @@ echo "Full implementation:"
 echo "  Omnichannel Broker:  $OMNICHANNEL"
 echo "  Re-Sourcing:         $RESOURCING"
 echo "  Payment:             $PAYMENT"
+echo "  Task Queue:          $TASK_QUEUE"
+echo "  Hub Negotiator:      $HUB_NEGOTIATOR"
+echo "  Hybrid Response:     $HYBRID_RESPONSE"
 echo ""
 
 # --- Warmup first (wake services from cold sleep before health checks) ---
@@ -68,6 +74,12 @@ echo "  Warming Re-Sourcing..."
 curl -sf --max-time "$TIMEOUT" "$RESOURCING/health" > /dev/null || true
 echo "  Warming Payment..."
 curl -sf --max-time "$TIMEOUT" "$PAYMENT/health" > /dev/null || true
+echo "  Warming Task Queue..."
+curl -sf --max-time "$TIMEOUT" "$TASK_QUEUE/health" > /dev/null || true
+echo "  Warming Hub Negotiator..."
+curl -sf --max-time "$TIMEOUT" "$HUB_NEGOTIATOR/health" > /dev/null || true
+echo "  Warming Hybrid Response..."
+curl -sf --max-time "$TIMEOUT" "$HYBRID_RESPONSE/health" > /dev/null || true
 echo "  Done."
 echo ""
 
@@ -117,6 +129,9 @@ echo "--- Health checks (full implementation) ---"
 check_optional "Omnichannel Broker" "$OMNICHANNEL/health"
 check_optional "Re-Sourcing"        "$RESOURCING/health"
 check_optional "Payment"            "$PAYMENT/health"
+check_optional "Task Queue"         "$TASK_QUEUE/health"
+check_optional "Hub Negotiator"     "$HUB_NEGOTIATOR/health"
+check_optional "Hybrid Response"    "$HYBRID_RESPONSE/health"
 
 # --- Optional: Chat E2E ---
 if [ "$run_e2e" = true ]; then

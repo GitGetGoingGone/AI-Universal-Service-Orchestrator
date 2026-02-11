@@ -34,12 +34,12 @@ overview: One place for all planned tasks and latest status. Update status here;
 
 | ID | Task | Status | Source |
 |----|------|--------|--------|
-| schema-partners-seller-fields | Partners: Add seller_name, seller_url, return_policy, privacy_policy, terms_url, store_country | Pending | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
-| schema-products-acp-fields | Products: Add ACP fields (url, brand, is_eligible_search, is_eligible_checkout, target_countries) or metadata | Pending | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
-| discovery-acp-feed-export | ACP feed export: DB → jsonl.gz/csv.gz with partner join for seller_* per product | Pending | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
-| discovery-acp-feed-url | ACP feed URL: Public endpoint or per-partner (?partner_id=) and OpenAI registration | Pending | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
-| discovery-ucp-well-known | UCP: /.well-known/ucp and catalog API (UCP Item shape) | Pending | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
-| discovery-merchant-attribution | Merchant attribution: Feed/catalog use partner as seller; bundling unchanged | Pending | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
+| schema-partners-seller-fields | Partners: Add seller_name, seller_url, return_policy, privacy_policy, terms_url, store_country | Done | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
+| schema-products-acp-fields | Products: Add ACP fields (url, brand, is_eligible_search, is_eligible_checkout, target_countries) or metadata | Done | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
+| discovery-acp-feed-export | ACP feed export: DB → jsonl.gz/csv.gz with partner join for seller_* per product | Done | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
+| discovery-acp-feed-url | ACP feed URL: Public endpoint or per-partner (?partner_id=) and OpenAI registration | Done | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
+| discovery-ucp-well-known | UCP: /.well-known/ucp and catalog API (UCP Item shape) | Done | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
+| discovery-merchant-attribution | Merchant attribution: Feed/catalog use partner as seller; bundling unchanged | Done | [05 § Schema & Discovery](./05-implementation.md#schema--discovery-requirements-acp--ucp) |
 
 ---
 
@@ -49,12 +49,12 @@ overview: One place for all planned tasks and latest status. Update status here;
 
 | ID | Task | Status | Source |
 |----|------|--------|--------|
-| discovery-push-api | Push API: POST .../feeds/push with scope (single \| all), targets (chatgpt \| gemini \| both) | Pending | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
-| discovery-acp-rate-limit | ChatGPT 15-min rate limit: persist last_acp_push_at, reject push if &lt; 15 min, UI countdown / next-allowed time | Pending | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
-| portal-acp-ucp-partner-fields | Partner portal: Settings (or Commerce profile) form for ACP/UCP seller fields (seller_name, seller_url, return_policy_url, etc.) | Pending | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
-| portal-acp-ucp-product-fields | Partner portal: Product edit ACP/UCP product fields (url, brand, eligibility, availability) + validation display | Pending | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
-| discovery-validate-api | Validation API: product/partner ACP+UCP validation for UI (e.g. GET/POST .../validate-discovery) | Pending | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
-| portal-push-controls | Partner portal: Push controls (single vs all, Push to ChatGPT / Gemini / both) and 15-min throttle messaging | Pending | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
+| discovery-push-api | Push API: POST .../feeds/push with scope (single \| all \| selected), targets (chatgpt \| gemini \| both) | Done | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
+| discovery-acp-rate-limit | ChatGPT 15-min rate limit: persist last_acp_push_at, reject push if &lt; 15 min, UI countdown / next-allowed time | Done | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
+| portal-acp-ucp-partner-fields | Partner portal: Commerce profile form for ACP/UCP seller fields + validate for discovery | Done | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
+| portal-acp-ucp-product-fields | Partner portal: Product edit ACP/UCP fields (url, brand, eligibility, availability, target_countries) + validation | Done | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
+| discovery-validate-api | Validation API: product + partner ACP/UCP validation (GET .../validate-discovery) | Done | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
+| portal-push-controls | Partner portal: Push controls (single vs all vs selected), ChatGPT/Gemini/both, 15-min throttle messaging | Done | [profile-discoverable](./profile-discoverable-chatgpt-gemini.md) |
 
 ---
 
@@ -78,18 +78,18 @@ overview: One place for all planned tasks and latest status. Update status here;
 
 | Task | Status |
 |------|--------|
-| Partners table: seller attribution fields (seller_name, seller_url, return_policy_url, privacy_policy_url, terms_url, store_country) | Pending |
-| Products table: ACP fields (url, brand, is_eligible_search, is_eligible_checkout, target_countries, availability enum) | Pending |
-| Products: UCP price in minor units (cents) for UCP Item | Pending |
-| Feed export pipeline: products JOIN partners → ACP jsonl.gz/csv.gz, ACP validation before export; support single product + full catalog | Pending |
-| Feed URL or delivery: public URL or per-partner, OpenAI registration | Pending |
+| Partners table: seller attribution fields (seller_name, seller_url, return_policy_url, privacy_policy_url, terms_url, store_country) | Done |
+| Products table: ACP fields (url, brand, is_eligible_search, is_eligible_checkout, target_countries, availability enum) | Done |
+| Products: UCP price in minor units (cents) for UCP Item | Done |
+| Feed export pipeline: products JOIN partners → ACP ndjson/jsonl.gz/csv/csv.gz (?format=), ACP validation; single + full catalog | Done |
+| Feed URL or delivery: public URL or per-partner (?partner_id=), OpenAI registration (manual) | Done |
 | OpenAI merchant/feed onboarding completed | Pending |
-| /.well-known/ucp endpoint with UCP profile | Pending |
-| Catalog API: UCP Item shape (id, title, price cents, image_url), optional seller per item | Pending |
+| /.well-known/ucp endpoint with UCP profile | Done |
+| Catalog API: UCP Item shape (id, title, price cents, image_url), optional seller per item | Done |
 | Checkout/order APIs (optional) for full UCP checkout | Pending |
-| Merchant on record: partner as seller in feed and catalog; product URL shows "Sold by {partner}" | Pending |
-| Bundling: document feed = discovery-only; bundling remains in orchestrator | Pending |
-| **Profile discoverable (see section 2b)** Push API (scope + targets); ChatGPT 15-min throttle; portal ACP/UCP forms + validation API + push controls | Pending |
+| Merchant on record: partner as seller in feed and catalog; product URL shows "Sold by {partner}" | Done |
+| Bundling: document feed = discovery-only; bundling remains in orchestrator | Done |
+| **Profile discoverable (see section 2b)** Push API (scope + targets); ChatGPT 15-min throttle; portal ACP/UCP forms + validation API + push controls | Done |
 
 ---
 
@@ -102,9 +102,9 @@ overview: One place for all planned tasks and latest status. Update status here;
 | 2 | Legacy Adapter Layer | Phase 2 | Pending |
 | 3 | AI-First Discoverability | Phase 2 | Pending |
 | 8 | Virtual Proofing Engine | Phase 2 | Pending |
-| 10 | HubNegotiator & Bidding | Phase 2 | Pending |
-| 11 | Multi-Vendor Task Queue | Phase 2 | Pending |
-| 13 | Hybrid Response Logic | Phase 2 | Pending |
+| 10 | HubNegotiator & Bidding | Phase 2 | Done |
+| 11 | Multi-Vendor Task Queue | Phase 2 | Done |
+| 13 | Hybrid Response Logic | Phase 2 | Done |
 | 17 | Reverse Logistics | Phase 3 | Pending |
 | 18 | Admin Command Center | Phase 3 | Pending |
 
@@ -118,6 +118,11 @@ overview: One place for all planned tasks and latest status. Update status here;
 | Module 1: Multi-Protocol Scout Engine (semantic search, UCP/ACP adapters, manifest cache, inventory webhook) | Done |
 | Partner Portal: Dashboard with real data; stub nav items removed | Done |
 | Webhook infrastructure (05 Pillar 6) | Done |
+| Schema & Discovery: Partner/product ACP fields, ACP feed (ndjson, jsonl.gz, csv, csv.gz), UCP well-known + catalog, merchant attribution | Done |
+| Profile discoverable: Push API (single/all/selected), 15-min rate limit, Commerce profile + product ACP/UCP forms, validation API, push controls | Done |
+| Module 11: Multi-Vendor Task Queue (vendor_tasks, order-leg sequence, partner task list, start/complete) | Done |
+| Module 10: HubNegotiator & Bidding (RFPs, bids, select winner, hub capacity matching) | Done |
+| Module 13: Hybrid Response Logic (classify-and-route, support_escalations, assign/resolve) | Done |
 
 ---
 

@@ -257,6 +257,33 @@ Deploy these services for the full production flow (no simulator).
 
 **Optional – webhook verification:** To receive and verify Stripe webhook events (payment success/failure), add a webhook endpoint in Stripe Dashboard → Developers → Webhooks with URL `https://uso-payment.onrender.com/webhooks/stripe` and events `payment_intent.succeeded`, `payment_intent.payment_failed`. Stripe then shows a **Signing secret** (whsec_...) for that endpoint – set it as `STRIPE_WEBHOOK_SECRET`. Without it, the service still creates PaymentIntents but will not verify incoming webhook requests.
 
+### Step 6e: Phase 2 Modules (Task Queue, Hub Negotiator, Hybrid Response)
+
+Requires migration `supabase/migrations/20240128100003_task_queue_hub_negotiator_hybrid.sql` (vendor_tasks, rfps, bids, hub_capacity, support_escalations, response_classifications).
+
+**Task Queue (Module 11):**
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `uso-task-queue` |
+| **Start Command** | `cd services/task-queue-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+
+**Hub Negotiator (Module 10):**
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `uso-hub-negotiator` |
+| **Start Command** | `cd services/hub-negotiator-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+
+**Hybrid Response (Module 13):**
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `uso-hybrid-response` |
+| **Start Command** | `cd services/hybrid-response-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+
+For each: **Root Directory** empty, **Build Command** `pip install -r requirements.txt`, **Environment** `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `ENVIRONMENT=staging`. Test steps: [TESTING_RENDER_AND_PORTAL.md § 8b](./TESTING_RENDER_AND_PORTAL.md#8b-phase-2-modules-task-queue-hubnegotiator-hybrid-response).
+
 ---
 
 ## Step 7: Update Service URLs (after all services deployed)
@@ -312,6 +339,9 @@ WEBHOOK="https://uso-webhook.onrender.com"
 OMNICHANNEL="https://uso-omnichannel-broker.onrender.com"
 RESOURCING="https://uso-resourcing.onrender.com"
 PAYMENT="https://uso-payment.onrender.com"
+TASK_QUEUE="https://uso-task-queue.onrender.com"
+HUB_NEGOTIATOR="https://uso-hub-negotiator.onrender.com"
+HYBRID_RESPONSE="https://uso-hybrid-response.onrender.com"
 
 # Health checks (core)
 curl $DISCOVERY/health
@@ -323,6 +353,9 @@ curl $WEBHOOK/health
 curl $OMNICHANNEL/health
 curl $RESOURCING/health
 curl $PAYMENT/health
+curl $TASK_QUEUE/health
+curl $HUB_NEGOTIATOR/health
+curl $HYBRID_RESPONSE/health
 
 # Durable: Azure Functions uses /api/ prefix
 curl "$DURABLE/api/orchestrators/base_orchestrator" -X POST -H "Content-Type: application/json" -d '{}'
@@ -389,6 +422,9 @@ If you see `bash: line 1: d: command not found`, the Start Command is missing `c
 | Omnichannel Broker | Python | Same build · Start: `cd services/omnichannel-broker-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Re-Sourcing | Python | Same build · Start: `cd services/re-sourcing-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Payment | Python | Same build · Start: `cd services/payment-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Task Queue | Python | Same build · Start: `cd services/task-queue-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Hub Negotiator | Python | Same build · Start: `cd services/hub-negotiator-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Hybrid Response | Python | Same build · Start: `cd services/hybrid-response-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 
 ---
 

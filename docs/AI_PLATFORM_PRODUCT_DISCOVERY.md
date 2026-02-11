@@ -48,7 +48,7 @@ Once the feed is submitted and ingested, **detection is ensured by OpenAI’s in
 
 **Feed URL**
 
-- **`GET /api/v1/feeds/acp`** — Public ACP feed URL. Returns JSON Lines (one JSON object per line), `Content-Type: application/x-ndjson`. Optional query: **`?partner_id=<id>`** to return only that partner's products. Point OpenAI's hosted-URL delivery at this URL (or at a per-partner URL with `partner_id`).
+- **`GET /api/v1/feeds/acp`** — Public ACP feed URL. Optional query: **`?partner_id=<id>`** (filter by partner). Optional **`?format=`**: **`ndjson`** (default), **`jsonl.gz`**, **`csv`**, **`csv.gz`**. Returns JSON Lines (or gzip-compressed JSONL/CSV) with ACP-compliant rows. Point OpenAI's hosted-URL delivery at e.g. `.../acp?format=jsonl.gz` or `.../acp?format=csv.gz`.
 - Products are joined with partner seller fields (seller_name, seller_url, return_policy, etc.) and filtered to ACP-compliant rows only.
 
 **Push API (on-demand catalog update)**

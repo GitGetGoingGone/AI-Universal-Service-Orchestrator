@@ -9,16 +9,7 @@
 
 BEGIN;
 
--- PostGIS reference table (if present): allow read-only so spatial lookups work if needed
-ALTER TABLE IF EXISTS public.spatial_ref_sys ENABLE ROW LEVEL SECURITY;
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'spatial_ref_sys') THEN
-    DROP POLICY IF EXISTS "Allow read spatial_ref_sys" ON public.spatial_ref_sys;
-    CREATE POLICY "Allow read spatial_ref_sys" ON public.spatial_ref_sys FOR SELECT USING (true);
-  END IF;
-END $$;
-
+-- Skip spatial_ref_sys: PostGIS system table is owned by extension; project user cannot alter it.
 -- Application tables: enable RLS with no policies (anon/authenticated get no rows; service_role bypasses)
 ALTER TABLE IF EXISTS public.product_capability_mappings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.capability_tags ENABLE ROW LEVEL SECURITY;

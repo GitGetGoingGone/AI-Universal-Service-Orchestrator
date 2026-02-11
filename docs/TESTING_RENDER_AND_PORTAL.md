@@ -10,10 +10,13 @@ End-to-end testing for the full stack: backend services on **Render**, Partner P
    Follow [RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md) through Step 7 so you have:
    - uso-discovery, uso-intent, uso-orchestrator, uso-webhook (required)
    - uso-omnichannel-broker, uso-resourcing, uso-payment (optional for core chat)
+   - uso-task-queue, uso-hub-negotiator, uso-hybrid-response (optional; Phase 2 modules)
    - uso-durable (optional)
 
-2. **Apply migration for Link Account**  
-   Run `supabase/migrations/20240128000012_link_account_support.sql` on your Supabase project (adds `users.clerk_user_id`).
+2. **Apply migrations**  
+   Run these on your Supabase project:
+   - `supabase/migrations/20240128000012_link_account_support.sql` (adds `users.clerk_user_id`)
+   - `supabase/migrations/20240128100003_task_queue_hub_negotiator_hybrid.sql` (for Task Queue, HubNegotiator, Hybrid Response)
 
 3. **Orchestrator env (Render)**  
    On **uso-orchestrator** → Environment, set:
@@ -40,6 +43,11 @@ export DISCOVERY="https://uso-discovery.onrender.com"
 export INTENT="https://uso-intent.onrender.com"
 export WEBHOOK="https://uso-webhook.onrender.com"
 export PORTAL_URL="https://your-portal.vercel.app"   # if using Vercel
+
+# Optional: Phase 2 modules (Task Queue, HubNegotiator, Hybrid Response)
+export TASK_QUEUE="https://uso-task-queue.onrender.com"
+export HUB_NEGOTIATOR="https://uso-hub-negotiator.onrender.com"
+export HYBRID_RESPONSE="https://uso-hybrid-response.onrender.com"
 ```
 
 ---
@@ -65,6 +73,10 @@ curl -s --max-time 90 "$ORCHESTRATOR/health"
 curl -s --max-time 90 "$DISCOVERY/health"
 curl -s --max-time 90 "$INTENT/health"
 curl -s --max-time 90 "$WEBHOOK/health"
+# Optional: Phase 2 modules
+curl -s --max-time 90 "$TASK_QUEUE/health"
+curl -s --max-time 90 "$HUB_NEGOTIATOR/health"
+curl -s --max-time 90 "$HYBRID_RESPONSE/health"
 ```
 
 ---
@@ -312,6 +324,90 @@ Expected: consent returns scope and allowed_actions; handoff returns `configured
 
 ---
 
+## 8b. Phase 2 modules (Task Queue, HubNegotiator, Hybrid Response)
+
+Requires migration `20240128100003_task_queue_hub_negotiator_hybrid.sql` and deployed services. Set `$TASK_QUEUE`, `$HUB_NEGOTIATOR`, `$HYBRID_RESPONSE` as in section 1.
+
+### 8b.1 Multi-Vendor Task Queue (Module 11)
+
+Replace `ORDER_UUID` and `PARTNER_UUID` with real ids from `orders` and `partners` tables:
+
+```bash
+# Create tasks for an order (idempotent)
+curl -s -X POST "$TASK_QUEUE/api/v1/orders/ORDER_UUID/tasks" | jq .
+
+# List partner's tasks (pending only if earlier tasks in order are completed)
+curl -s "$TASK_QUEUE/api/v1/tasks?partner_id=PARTNER_UUID&status=pending" | jq .
+
+# Start / complete a task (replace TASK_UUID)
+curl -s -X POST "$TASK_QUEUE/api/v1/tasks/TASK_UUID/start?partner_id=PARTNER_UUID" | jq .
+curl -s -X POST "$TASK_QUEUE/api/v1/tasks/TASK_UUID/complete?partner_id=PARTNER_UUID" -H "Content-Type: application/json" -d '{}' | jq .
+```
+
+Expected: create returns tasks array; list returns partner tasks; start/complete return updated task with `status`, `started_at`, `completed_at`.
+
+### 8b.2 HubNegotiator & Bidding (Module 10)
+
+Replace `ORDER_UUID`, `BUNDLE_UUID`, `PARTNER_UUID` with real ids:
+
+```bash
+# Create RFP
+curl -s -X POST "$HUB_NEGOTIATOR/api/v1/rfps" -H "Content-Type: application/json" \
+  -d '{"order_id":"ORDER_UUID","bundle_id":"BUNDLE_UUID","request_type":"assembly","title":"Assemble bundle","deadline":"2026-02-15T18:00:00Z","compensation_cents":5000}' | jq .
+
+# List RFPs
+curl -s "$HUB_NEGOTIATOR/api/v1/rfps?status=open" | jq .
+
+# Submit bid (replace RFP_UUID)
+curl -s -X POST "$HUB_NEGOTIATOR/api/v1/rfps/RFP_UUID/bids" -H "Content-Type: application/json" \
+  -d '{"hub_partner_id":"PARTNER_UUID","amount_cents":4500,"proposed_completion_at":"2026-02-10T12:00:00Z"}' | jq .
+
+# Select winning bid (replace BID_UUID)
+curl -s -X POST "$HUB_NEGOTIATOR/api/v1/rfps/RFP_UUID/select-winner" -H "Content-Type: application/json" \
+  -d '{"bid_id":"BID_UUID"}' | jq .
+
+# Add hub capacity
+curl -s -X POST "$HUB_NEGOTIATOR/api/v1/hub-capacity" -H "Content-Type: application/json" \
+  -d '{"partner_id":"PARTNER_UUID","available_from":"2026-02-01T00:00:00Z","available_until":"2026-02-28T23:59:59Z","capacity_slots":5}' | jq .
+```
+
+Expected: create RFP returns `id`, `status: open`; bid returns `id`, `status: submitted`; select-winner returns RFP with `winning_bid_id`, `status: closed`; hub-capacity returns inserted row.
+
+### 8b.3 Hybrid Response Logic (Module 13)
+
+```bash
+# Classify and route (routine -> AI, complex/dispute/physical_damage -> human)
+curl -s -X POST "$HYBRID_RESPONSE/api/v1/classify-and-route" -H "Content-Type: application/json" \
+  -d '{"conversation_ref":"conv-abc","message_content":"Where is my order?"}' | jq .
+```
+
+Expected: `{ "classification": "routine", "route": "ai", "support_escalation_id": null }` for routine queries.
+
+```bash
+# Human route (creates support_escalation)
+curl -s -X POST "$HYBRID_RESPONSE/api/v1/classify-and-route" -H "Content-Type: application/json" \
+  -d '{"conversation_ref":"conv-xyz","message_content":"My order arrived damaged and I want a refund"}' | jq .
+```
+
+Expected: `{ "classification": "physical_damage" or "dispute", "route": "human", "support_escalation_id": "<uuid>" }`.
+
+```bash
+# List escalations
+curl -s "$HYBRID_RESPONSE/api/v1/escalations?status=pending" | jq .
+
+# Assign (replace ESCALATION_UUID and USER_UUID)
+curl -s -X POST "$HYBRID_RESPONSE/api/v1/escalations/ESCALATION_UUID/assign" -H "Content-Type: application/json" \
+  -d '{"assigned_to":"USER_UUID"}' | jq .
+
+# Resolve
+curl -s -X POST "$HYBRID_RESPONSE/api/v1/escalations/ESCALATION_UUID/resolve" -H "Content-Type: application/json" \
+  -d '{"resolution_notes":"Refund issued"}' | jq .
+```
+
+Expected: list returns `escalations` array; assign returns escalation with `status: assigned`; resolve returns `status: resolved`, `resolved_at`.
+
+---
+
 ## 9. Partner Portal (Vercel)
 
 The portal is a Next.js app; per the deployment doc it is deployed on **Vercel**, not Render.
@@ -426,19 +522,25 @@ Using your discovery base URL (`$DISCOVERY`) and a real `PARTNER_UUID` / `PRODUC
 
 ## 10. One-shot script (copy-paste)
 
-Replace `ORCHESTRATOR`, `DISCOVERY`, `INTENT`, `WEBHOOK` and run:
+Replace `ORCHESTRATOR`, `DISCOVERY`, `INTENT`, `WEBHOOK` (and optional `TASK_QUEUE`, `HUB_NEGOTIATOR`, `HYBRID_RESPONSE`) and run:
 
 ```bash
 ORCHESTRATOR="https://uso-orchestrator.onrender.com"
 DISCOVERY="https://uso-discovery.onrender.com"
 INTENT="https://uso-intent.onrender.com"
 WEBHOOK="https://uso-webhook.onrender.com"
+TASK_QUEUE="${TASK_QUEUE:-https://uso-task-queue.onrender.com}"
+HUB_NEGOTIATOR="${HUB_NEGOTIATOR:-https://uso-hub-negotiator.onrender.com}"
+HYBRID_RESPONSE="${HYBRID_RESPONSE:-https://uso-hybrid-response.onrender.com}"
 
 echo "1. Warmup"
 curl -s --max-time 90 "$ORCHESTRATOR/health" > /dev/null
 curl -s --max-time 90 "$DISCOVERY/health" > /dev/null
 curl -s --max-time 90 "$INTENT/health" > /dev/null
 curl -s --max-time 90 "$WEBHOOK/health" > /dev/null
+curl -s --max-time 90 "$TASK_QUEUE/health" > /dev/null || true
+curl -s --max-time 90 "$HUB_NEGOTIATOR/health" > /dev/null || true
+curl -s --max-time 90 "$HYBRID_RESPONSE/health" > /dev/null || true
 
 echo "2. Chat (response shape)"
 curl -s -X POST "$ORCHESTRATOR/api/v1/chat" -H "Content-Type: application/json" -d '{"text":"flowers"}' | jq 'keys'
@@ -462,6 +564,14 @@ curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST "$WEBHOOK/api/v1/webhooks/
 
 echo "7. Agentic consent"
 curl -s "$ORCHESTRATOR/api/v1/agentic-consent" | jq '.scope'
+
+echo "8. Phase 2: Task Queue health"
+curl -s --max-time 90 "$TASK_QUEUE/health" | jq '.status' || echo " (skip if not deployed)"
+echo "9. Phase 2: Hub Negotiator health"
+curl -s --max-time 90 "$HUB_NEGOTIATOR/health" | jq '.status' || echo " (skip if not deployed)"
+echo "10. Phase 2: Hybrid Response classify-and-route"
+curl -s -X POST "$HYBRID_RESPONSE/api/v1/classify-and-route" -H "Content-Type: application/json" \
+  -d '{"conversation_ref":"t","message_content":"order status"}' | jq '.route' || echo " (skip if not deployed)"
 ```
 
 ---
@@ -488,5 +598,8 @@ curl -s "$ORCHESTRATOR/api/v1/agentic-consent" | jq '.scope'
 | Portal Commerce profile | Settings → Commerce profile | Form loads; PATCH /api/partners/me saves seller fields |
 | Portal Push (Products) | Products → Push to AI catalog + table Last pushed/Status | Push to ChatGPT/Gemini/both; 15-min throttle; per-product status |
 | Portal product ACP/UCP | Product edit → URL, brand, eligibility, Validate, Push | Fields persist; validate shows ACP/UCP result; push works (scope=single) |
+| Task Queue (Module 11) | POST /api/v1/orders/{id}/tasks, GET /api/v1/tasks, start/complete | Creates tasks from order legs; partner list; start/complete updates status |
+| HubNegotiator (Module 10) | RFPs, bids, select-winner, hub-capacity | Create RFP; submit bid; select winner; add capacity |
+| Hybrid Response (Module 13) | POST /api/v1/classify-and-route, escalations assign/resolve | routine→AI, complex/dispute/damage→human; support_escalations CRUD |
 
 See [RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md) for deploy steps and env vars; [AI_PLATFORM_PRODUCT_DISCOVERY.md](./AI_PLATFORM_PRODUCT_DISCOVERY.md) for ACP/UCP discovery.

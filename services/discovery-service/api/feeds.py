@@ -1,5 +1,8 @@
 """ACP feed export and push API for ChatGPT/Gemini discovery."""
 
+import csv
+import gzip
+import io
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
@@ -67,20 +70,61 @@ async def _build_acp_rows(
     return compliant
 
 
+def _acp_rows_to_csv(rows: List[Dict[str, Any]]) -> str:
+    """Serialize ACP rows to CSV. List fields (e.g. target_countries) are JSON-encoded in one cell."""
+    if not rows:
+        return ""
+    out = io.StringIO()
+    # Use first row keys as header; ensure consistent order
+    fieldnames = list(rows[0].keys())
+    writer = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        row_flat = {}
+        for k, v in r.items():
+            if isinstance(v, list):
+                row_flat[k] = json.dumps(v)
+            else:
+                row_flat[k] = v
+        writer.writerow(row_flat)
+    return out.getvalue()
+
+
 @router.get("/acp")
 async def get_acp_feed(
     partner_id: Optional[str] = Query(None, description="Filter by partner"),
+    format: str = Query("ndjson", description="ndjson | jsonl.gz | csv | csv.gz"),
 ):
     """
-    Public ACP feed URL for OpenAI (ChatGPT). Returns JSON Lines (one JSON object per line).
+    Public ACP feed URL for OpenAI (ChatGPT).
     Optional partner_id to get only that partner's products.
+    format: ndjson (default), jsonl.gz, csv, or csv.gz.
     """
     rows = await _build_acp_rows(partner_id=partner_id)
+    format_lower = (format or "ndjson").strip().lower()
+
+    if format_lower == "csv":
+        body = _acp_rows_to_csv(rows).encode("utf-8")
+        return Response(content=body, media_type="text/csv; charset=utf-8")
+    if format_lower == "csv.gz":
+        csv_text = _acp_rows_to_csv(rows)
+        body = gzip.compress(csv_text.encode("utf-8"))
+        return Response(
+            content=body,
+            media_type="application/gzip",
+            headers={"Content-Disposition": "attachment; filename=acp_feed.csv.gz"},
+        )
+    if format_lower == "jsonl.gz":
+        ndjson_text = "\n".join(json.dumps(r) for r in rows)
+        body = gzip.compress(ndjson_text.encode("utf-8"))
+        return Response(
+            content=body,
+            media_type="application/gzip",
+            headers={"Content-Disposition": "attachment; filename=acp_feed.jsonl.gz"},
+        )
+    # default: ndjson
     body = "\n".join(json.dumps(r) for r in rows)
-    return Response(
-        content=body,
-        media_type="application/x-ndjson",
-    )
+    return Response(content=body, media_type="application/x-ndjson")
 
 
 @router.get("/push-status")
