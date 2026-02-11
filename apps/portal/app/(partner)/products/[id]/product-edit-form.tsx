@@ -49,6 +49,7 @@ export function ProductEditForm({ productId }: Props) {
     is_eligible_search: true,
     is_eligible_checkout: false,
     availability: "in_stock" as string,
+    target_countries: "" as string,
   });
   const [validation, setValidation] = useState<{
     acp?: { valid: boolean; errors: string[]; warnings: string[] };
@@ -75,6 +76,7 @@ export function ProductEditForm({ productId }: Props) {
           is_eligible_search: data.is_eligible_search !== false,
           is_eligible_checkout: !!data.is_eligible_checkout,
           availability: data.availability ?? "in_stock",
+          target_countries: Array.isArray(data.target_countries) ? data.target_countries.join(", ") : (data.target_countries ?? ""),
         });
       })
       .catch(() => setError("Product not found"))
@@ -114,6 +116,9 @@ export function ProductEditForm({ productId }: Props) {
           is_eligible_search: form.is_eligible_search,
           is_eligible_checkout: form.is_eligible_checkout,
           availability: form.availability,
+          target_countries: form.target_countries
+            ? form.target_countries.split(",").map((s) => s.trim()).filter(Boolean)
+            : undefined,
         }),
       });
 
@@ -290,6 +295,16 @@ export function ProductEditForm({ productId }: Props) {
             />
             Eligible for checkout
           </label>
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Target countries (comma-separated, e.g. US, CA)</label>
+          <input
+            value={form.target_countries}
+            onChange={(e) => setForm((f) => ({ ...f, target_countries: e.target.value }))}
+            type="text"
+            className={inputClass}
+            placeholder="US, CA, GB"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Availability</label>

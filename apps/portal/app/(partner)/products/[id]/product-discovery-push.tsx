@@ -48,7 +48,8 @@ export function ProductDiscoveryPush({ productId }: Props) {
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 429) {
-        setMessage(data.message || "Rate limited. Try again in 15 minutes.");
+        const nextAt = data.next_allowed_at ? new Date(data.next_allowed_at).toLocaleString() : null;
+        setMessage(nextAt ? `Catalog can be updated again at ${nextAt} (15-min limit).` : (data.message || "Rate limited. Try again in 15 minutes."));
         fetch("/api/feeds/push-status").then((r) => (r.ok ? r.json() : { next_acp_push_allowed_at: null })).then((d: { next_acp_push_allowed_at: string | null }) => setPushStatus(d)).catch(() => {});
       } else if (!res.ok) {
         setMessage(data.detail || "Push failed");

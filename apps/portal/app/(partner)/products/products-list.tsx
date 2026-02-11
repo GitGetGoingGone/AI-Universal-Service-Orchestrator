@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { PartnerGuard, PartnerRequiredMessage } from "@/components/partner-guard";
 import { AddProductDialog } from "./add-product-dialog";
+import { ImportProductsDialog } from "./import-products-dialog";
 
 type Product = {
   id: string;
@@ -33,6 +34,7 @@ export function ProductsList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [pushStatus, setPushStatus] = useState<{ next_acp_push_allowed_at: string | null } | null>(null);
   const [pushing, setPushing] = useState(false);
   const [pushMessage, setPushMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -153,9 +155,12 @@ export function ProductsList() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 429) {
+        const nextAt = data.next_allowed_at ? new Date(data.next_allowed_at).toLocaleString() : null;
         setPushMessage({
           type: "error",
-          text: data.message || "Rate limited. Try again in 15 minutes.",
+          text: nextAt
+            ? `Catalog can be updated again at ${nextAt} (15-min limit).`
+            : (data.message || "Rate limited. Try again in 15 minutes."),
         });
         fetchPushStatus();
       } else if (!res.ok) {
@@ -276,7 +281,12 @@ export function ProductsList() {
         <p className="text-[rgb(var(--color-text-secondary))]">
           {products.length} product{products.length !== 1 ? "s" : ""}
         </p>
-        <Button onClick={() => setAddOpen(true)}>Add Product</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setImportOpen(true)}>
+            Import
+          </Button>
+          <Button onClick={() => setAddOpen(true)}>Add Product</Button>
+        </div>
       </div>
 
       <div className="border border-[rgb(var(--color-border))] rounded-lg overflow-hidden">
@@ -390,6 +400,14 @@ export function ProductsList() {
         onClose={() => setAddOpen(false)}
         onSuccess={() => {
           setAddOpen(false);
+          fetchProducts();
+        }}
+      />
+      <ImportProductsDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onSuccess={() => {
+          setImportOpen(false);
           fetchProducts();
         }}
       />

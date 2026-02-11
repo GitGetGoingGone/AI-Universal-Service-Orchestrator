@@ -51,7 +51,20 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { name, description, price, product_type, unit } = body;
+  const {
+    name,
+    description,
+    price,
+    product_type,
+    unit,
+    url,
+    brand,
+    image_url,
+    is_eligible_search,
+    is_eligible_checkout,
+    availability,
+    target_countries,
+  } = body;
 
   if (!name || price == null) {
     return NextResponse.json(
@@ -60,18 +73,35 @@ export async function POST(request: Request) {
     );
   }
 
+  const insert: Record<string, unknown> = {
+    partner_id: partnerId,
+    name,
+    description: description || null,
+    price: Number(price),
+    currency: "USD",
+    product_type: product_type === "service" ? "service" : "product",
+    unit: unit || "piece",
+  };
+  if (url !== undefined) insert.url = url || null;
+  if (brand !== undefined) insert.brand = brand || null;
+  if (image_url !== undefined) insert.image_url = image_url || null;
+  if (is_eligible_search !== undefined) insert.is_eligible_search = !!is_eligible_search;
+  if (is_eligible_checkout !== undefined) insert.is_eligible_checkout = !!is_eligible_checkout;
+  if (availability !== undefined) insert.availability = availability ?? "in_stock";
+  if (target_countries !== undefined) {
+    insert.target_countries = Array.isArray(target_countries)
+      ? target_countries
+      : target_countries == null || target_countries === ""
+        ? null
+        : typeof target_countries === "string"
+          ? target_countries.split(",").map((s: string) => s.trim()).filter(Boolean)
+          : null;
+  }
+
   const supabase = createSupabaseServerClient();
   const { data, error } = await supabase
     .from("products")
-    .insert({
-      partner_id: partnerId,
-      name,
-      description: description || null,
-      price: Number(price),
-      currency: "USD",
-      product_type: product_type === "service" ? "service" : "product",
-      unit: unit || "piece",
-    })
+    .insert(insert)
     .select("id")
     .single();
 

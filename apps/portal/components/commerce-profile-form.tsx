@@ -22,6 +22,10 @@ export function CommerceProfileForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [partnerValidation, setPartnerValidation] = useState<{
+    acp?: { valid: boolean; errors: string[]; warnings: string[] };
+  } | null>(null);
   const [form, setForm] = useState<PartnerCommerce>({
     business_name: "",
     seller_name: "",
@@ -181,9 +185,49 @@ export function CommerceProfileForm() {
           placeholder="e.g. US, CA, GB"
         />
       </div>
-      <Button type="submit" disabled={saving}>
-        {saving ? "Saving..." : "Save commerce profile"}
-      </Button>
+      <div className="flex gap-3 items-center">
+        <Button type="submit" disabled={saving}>
+          {saving ? "Saving..." : "Save commerce profile"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={validating}
+          onClick={async () => {
+            setValidating(true);
+            setPartnerValidation(null);
+            try {
+              const res = await fetch("/api/partners/me/validate-discovery");
+              const data = await res.json().catch(() => ({}));
+              if (res.ok) setPartnerValidation({ acp: data.acp });
+              else setPartnerValidation({ acp: { valid: false, errors: [data.detail || "Validation failed"], warnings: [] } });
+            } catch {
+              setPartnerValidation({ acp: { valid: false, errors: ["Request failed"], warnings: [] } });
+            } finally {
+              setValidating(false);
+            }
+          }}
+        >
+          {validating ? "Validating..." : "Validate for discovery"}
+        </Button>
+      </div>
+      {partnerValidation?.acp && (
+        <div className="mt-4 p-3 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-surface))] text-sm">
+          <span className="font-medium">ChatGPT (ACP) seller profile: </span>
+          {partnerValidation.acp.valid ? (
+            <span className="text-green-600">Ready for discovery</span>
+          ) : (
+            <span className="text-[rgb(var(--color-error))]">Not ready</span>
+          )}
+          {partnerValidation.acp.errors?.length > 0 && (
+            <ul className="list-disc ml-4 mt-1 text-[rgb(var(--color-error))]">
+              {partnerValidation.acp.errors.map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </form>
   );
 }

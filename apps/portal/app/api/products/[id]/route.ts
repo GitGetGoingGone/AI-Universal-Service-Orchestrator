@@ -56,6 +56,15 @@ export async function PATCH(
       ...(body.is_eligible_search !== undefined && { is_eligible_search: !!body.is_eligible_search }),
       ...(body.is_eligible_checkout !== undefined && { is_eligible_checkout: !!body.is_eligible_checkout }),
       ...(body.availability !== undefined && { availability: body.availability ?? "in_stock" }),
+      ...(body.target_countries !== undefined && {
+        target_countries: Array.isArray(body.target_countries)
+          ? body.target_countries
+          : body.target_countries == null || body.target_countries === ""
+            ? null
+            : typeof body.target_countries === "string"
+              ? body.target_countries.split(",").map((s: string) => s.trim()).filter(Boolean)
+              : null,
+      }),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)

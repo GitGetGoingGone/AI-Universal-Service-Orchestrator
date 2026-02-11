@@ -17,6 +17,10 @@ build/
 # Node (when added)
 node_modules/
 
+# Next.js
+.next/
+out/
+
 # IDE
 .idea/
 .vscode/

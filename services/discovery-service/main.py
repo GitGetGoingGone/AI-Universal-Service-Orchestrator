@@ -23,6 +23,7 @@ from packages.shared.monitoring.health import DependencyCheck
 from config import settings
 from db import check_connection
 from api.products import router as products_router
+from api.partners import router as partners_router
 from api.admin import router as admin_router
 from api.ucp import router as ucp_router
 from api.feeds import router as feeds_router
@@ -50,6 +51,7 @@ app.add_exception_handler(Exception, generic_exception_handler)
 
 # API routes
 app.include_router(products_router)
+app.include_router(partners_router)
 app.include_router(admin_router)
 app.include_router(ucp_router)
 app.include_router(feeds_router)
