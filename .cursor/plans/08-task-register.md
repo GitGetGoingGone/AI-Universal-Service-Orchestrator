@@ -20,13 +20,14 @@ overview: One place for all planned tasks and latest status. Update status here;
 
 | ID | Task | Status | Source |
 |----|------|--------|--------|
-| partner-earnings | Earnings: Payout dashboard, commission breakdown, invoice management | Pending | [05 § Phase 1](./05-implementation.md) |
-| partner-analytics | Analytics: Sales, peak hours, popular items, CSV export | Pending | [05 § Phase 1](./05-implementation.md) |
-| partner-ratings | Ratings: Review dashboard, respond to reviews | Pending | [05 § Phase 1](./05-implementation.md) |
-| partner-team | Team: Team members, roles, assignments (partner_members) | Pending | [05 § Phase 1](./05-implementation.md) |
-| partner-admins | Admins: Partner admins (owner promotes/revokes) | Pending | [05 § Phase 1](./05-implementation.md) |
-| partner-integrations | Integrations: Webhook, API poll, OAuth availability | Pending | [05 § Phase 1](./05-implementation.md) |
-| partner-settings-general | Settings General: Channel, pause orders, capacity, notifications | Pending | [05 § Phase 1](./05-implementation.md) |
+| partner-earnings | Earnings: Payout dashboard, commission breakdown, invoice management | Done | [05 § Phase 1](./05-implementation.md) |
+| partner-analytics | Analytics: Sales, peak hours, popular items, CSV export | Done | [05 § Phase 1](./05-implementation.md) |
+| partner-ratings | Ratings: Review dashboard, respond to reviews | Done | [05 § Phase 1](./05-implementation.md) |
+| partner-team | Team: Team members, roles, assignments (partner_members) | Done | [05 § Phase 1](./05-implementation.md) |
+| partner-admins | Admins: Partner admins (owner promotes/revokes) | Done | [05 § Phase 1](./05-implementation.md) |
+| partner-integrations | Integrations: Webhook, API poll, OAuth availability | Done | [05 § Phase 1](./05-implementation.md) |
+| partner-settings-general | Settings General: Channel, pause orders, capacity, notifications | Done | [05 § Phase 1](./05-implementation.md) |
+| partner-conversations | Chat: ChatGPT-style UX (left nav + center chat), team assignment | Done | [09-chat-conversations](./09-chat-conversations.md) |
 
 ---
 

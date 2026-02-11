@@ -46,7 +46,16 @@ export default clerkMiddleware(async (auth, req) => {
     pathname.startsWith("/team") ||
     pathname.startsWith("/admins") ||
     pathname.startsWith("/settings") ||
-    pathname.startsWith("/integrations")
+    pathname.startsWith("/integrations") ||
+    pathname.startsWith("/omnichannel") ||
+    pathname.startsWith("/conversations") ||
+    pathname.startsWith("/knowledge-base") ||
+    pathname.startsWith("/faqs") ||
+    pathname.startsWith("/tasks") ||
+    pathname.startsWith("/rfps") ||
+    pathname.startsWith("/support") ||
+    pathname.startsWith("/commerce-profile") ||
+    pathname.startsWith("/pay")
   ) {
     await auth.protect();
     return;

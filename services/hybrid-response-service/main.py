@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from db import check_connection
 from api.classify import router as classify_router
+from api.respond import router as respond_router
 
 app = FastAPI(
     title="Hybrid Response Service",
@@ -27,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(classify_router)
+app.include_router(respond_router)
 
 
 @app.get("/health")

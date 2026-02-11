@@ -1,0 +1,56 @@
+import { NextResponse } from "next/server";
+import { getPartnerId } from "@/lib/auth";
+import { createSupabaseServerClient } from "@/lib/supabase";
+
+export async function GET() {
+  const partnerId = await getPartnerId();
+  if (!partnerId) {
+    return NextResponse.json({ detail: "No partner account" }, { status: 403 });
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("partner_faqs")
+    .select("id, question, answer, sort_order, is_active, created_at, updated_at")
+    .eq("partner_id", partnerId)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error) return NextResponse.json({ detail: error.message }, { status: 500 });
+  return NextResponse.json({ faqs: data ?? [] });
+}
+
+export async function POST(request: Request) {
+  const partnerId = await getPartnerId();
+  if (!partnerId) {
+    return NextResponse.json({ detail: "No partner account" }, { status: 403 });
+  }
+
+  const body = await request.json();
+  const question = body?.question as string;
+  const answer = body?.answer as string;
+  const sortOrder = (body?.sort_order as number) ?? 0;
+
+  if (!question || typeof question !== "string") {
+    return NextResponse.json({ detail: "question required" }, { status: 400 });
+  }
+  if (!answer || typeof answer !== "string") {
+    return NextResponse.json({ detail: "answer required" }, { status: 400 });
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("partner_faqs")
+    .insert({
+      partner_id: partnerId,
+      question: question.trim(),
+      answer: answer.trim(),
+      sort_order: sortOrder,
+      is_active: true,
+    })
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ detail: error.message }, { status: 500 });
+  return NextResponse.json(data);
+}

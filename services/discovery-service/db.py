@@ -455,6 +455,29 @@ async def create_order_from_bundle(bundle_id: str) -> Optional[Dict[str, Any]]:
                 "status": "pending",
             }).execute()
 
+        # Create conversations for each partner (order linkage for AI support)
+        partner_ids_seen = set()
+        for leg in legs:
+            pid = leg.get("partner_id")
+            if pid and pid not in partner_ids_seen:
+                partner_ids_seen.add(pid)
+                try:
+                    conv_r = client.table("conversations").insert({
+                        "partner_id": pid,
+                        "order_id": order_id,
+                        "bundle_id": bundle_id,
+                        "title": f"Order {order_id[:8]}...",
+                        "status": "active",
+                    }).select("id").execute()
+                    if conv_r.data and user_id:
+                        client.table("participants").insert({
+                            "conversation_id": conv_r.data[0]["id"],
+                            "user_id": user_id,
+                            "participant_type": "customer",
+                        }).execute()
+                except Exception:
+                    pass
+
         line_items = [
             {"name": product_names.get(str(leg.get("product_id")), "Unknown"), "quantity": 1, "price": float(leg.get("price", 0)), "currency": currency}
             for leg in legs
