@@ -18,14 +18,16 @@ export async function POST(
 
   const supabase = createSupabaseServerClient();
 
-  const { data: member } =
-    assignedToMemberId &&
-    (await supabase
+  let member: { id: string } | null = null;
+  if (assignedToMemberId) {
+    const res = await supabase
       .from("partner_members")
       .select("id")
       .eq("id", assignedToMemberId)
       .eq("partner_id", partnerId)
-      .single());
+      .single();
+    member = res.data ?? null;
+  }
 
   if (assignedToMemberId && !member) {
     return NextResponse.json({ detail: "Invalid team member" }, { status: 400 });
