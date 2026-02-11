@@ -89,7 +89,7 @@ export default function KnowledgeBasePage() {
         </div>
         {(addOpen || editId) && (
           <ArticleForm
-            article={editId ? articles.find((a) => a.id === editId) : null}
+            article={editId ? (articles.find((a) => a.id === editId) ?? null) : null}
             onClose={() => {
               setAddOpen(false);
               setEditId(null);

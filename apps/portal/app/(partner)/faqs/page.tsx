@@ -85,7 +85,7 @@ export default function FaqsPage() {
         </div>
         {(addOpen || editId) && (
           <FaqForm
-            faq={editId ? faqs.find((f) => f.id === editId) : null}
+            faq={editId ? (faqs.find((f) => f.id === editId) ?? null) : null}
             onClose={() => {
               setAddOpen(false);
               setEditId(null);
