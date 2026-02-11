@@ -48,7 +48,10 @@ export async function GET(request: Request) {
     const rfpsRes = settled(7);
 
     const ordersData = ordersRes?.data || [];
-    const revenueCents = ordersData.reduce((s, o) => s + Math.round((Number((o as { total_amount?: number })?.total_amount) || 0) * 100), 0);
+    const revenueCents = (ordersData as { total_amount?: number }[]).reduce(
+      (s: number, o) => s + Math.round((Number(o?.total_amount) || 0) * 100),
+      0
+    );
 
     return NextResponse.json({
       partners: partnersRes?.count ?? 0,
