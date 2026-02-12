@@ -27,6 +27,7 @@ Create one **Environment Group** so you don’t repeat the same variables on eve
 | `SUPABASE_PUBLISHABLE_KEY` | Supabase anon / publishable key |
 | `ENVIRONMENT` | `staging` |
 | `LOG_LEVEL` | `INFO` |
+| `PYTHON_VERSION` | `3.11.11` *(optional; pins Python for all services; repo also has `.python-version`)* |
 
 4. Click **Create Environment Group**.  
    **Tip:** If you have a local `.env` with these keys, use **Add from .env** to bulk-add.
@@ -508,6 +509,24 @@ curl -s "$DISCOVERY/api/v1/ucp/items?q=flowers&limit=2" | jq '.items | length'
 ### Troubleshooting: "Payment service error: All connection attempts failed"
 
 The Orchestrator calls the Payment service at `PAYMENT_SERVICE_URL`. If that env var is not set, it defaults to `http://localhost:8006`, which does not exist on Render. **Fix:** Add `PAYMENT_SERVICE_URL=https://uso-payment.onrender.com` to **uso-orchestrator** → Environment, then redeploy.
+
+### Troubleshooting: "Failed deploy" with no error ID
+
+When Render shows **Failed deploy** without a clear error in the dashboard:
+
+1. **Check deploy logs** – In Dashboard → Your Service → **Events** → click the failed **Deploy** row. Open the **Logs** tab and search for `error`, `Error`, `ModuleNotFoundError`, `ImportError`, or `SyntaxError`.
+
+2. **Pin Python version** – Render defaults to Python 3.13 for new services (June 2025+). Add `PYTHON_VERSION=3.11.11` to your service’s environment variables, or add a `.python-version` file at repo root with `3.11.11`. Commit and redeploy.
+
+3. **Use `python -m uvicorn`** – If uvicorn isn’t on PATH, change the Start Command to:
+   ```bash
+   cd services/discovery-service && python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+   ```
+   (Replace `discovery-service` with the correct service folder for each service.)
+
+4. **Verify env group** – Ensure `uso-shared` is linked and all required vars are set (e.g. `SUPABASE_URL`, `SUPABASE_SECRET_KEY`). Missing vars can cause startup crashes.
+
+5. **Disable health check** – Render may run a health check before marking deploy successful. Temporarily disable: **Settings** → **Health Check Path** → leave empty or set to `/health`. Ensure `/health` returns 200.
 
 ### Troubleshooting: "d: command not found"
 
