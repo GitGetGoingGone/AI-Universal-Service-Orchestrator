@@ -1,0 +1,362 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "USO UCP Gift Aggregator",
+    "version": "2026-01-11",
+    "description": "UCP-Native Gift Aggregator schema for AI agents. Enables discovery (searchGifts) and checkout. The base URL is obtained from /.well-known/ucp under services[\"dev.ucp.shopping\"].rest.endpoint. OperationIds are critical for LLMs—they identify the tool the AI can call."
+  },
+  "servers": [
+    {
+      "url": "{endpoint}",
+      "description": "Merchant endpoint from /.well-known/ucp → services[\"dev.ucp.shopping\"].rest.endpoint",
+      "variables": {
+        "endpoint": {
+          "default": "https://uso-discovery.onrender.com/api/v1/ucp",
+          "description": "Discovery base URL for UCP catalog and checkout"
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/items": {
+      "get": {
+        "operationId": "searchGifts",
+        "summary": "Search for gifts and products",
+        "description": "Search the gift aggregator catalog using natural language. Pass the user's raw query (e.g. 'flowers for mom', 'birthday gift under $50', 'chocolates for her') directly to the q parameter. Supports semantic search across multi-vendor products. Returns UCP Item shape (id, title, price in cents, image_url, seller_name).",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Natural language search query. Pass user intent verbatim: 'flowers', 'gifts for her under $30', 'baby shower gift', 'luxury chocolates'."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Maximum number of items to return"
+            }
+          },
+          {
+            "name": "partner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Filter results by partner (vendor) ID"
+            }
+          },
+          {
+            "name": "occasion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["birthday", "anniversary", "baby_shower", "wedding", "holiday", "thank_you", "get_well", "graduation", "general"],
+              "description": "Gift occasion for relevance boost"
+            }
+          },
+          {
+            "name": "budget_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum budget in cents (e.g. 5000 = $50). Filters results to items at or below this price."
+            }
+          },
+          {
+            "name": "recipient_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["her", "him", "them", "baby", "couple", "family", "any"],
+              "description": "Recipient type for gift relevance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog items matching the search",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UcpItem"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/checkout": {
+      "post": {
+        "operationId": "create_checkout",
+        "summary": "Create Checkout",
+        "description": "Create a checkout session. Called when the user adds items to a cart. Line items use UCP Item shape (id, title, price in cents).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkout session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/checkout/{checkout_id}": {
+      "get": {
+        "operationId": "get_checkout",
+        "summary": "Get Checkout",
+        "description": "Get the latest state of a checkout session.",
+        "parameters": [
+          {
+            "name": "checkout_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkout session state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_checkout",
+        "summary": "Update Checkout",
+        "description": "Update line items or buyer info in the checkout session.",
+        "parameters": [
+          {
+            "name": "checkout_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkout session updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/checkout/{checkout_id}/complete": {
+      "post": {
+        "operationId": "complete_checkout",
+        "summary": "Complete Checkout",
+        "description": "Place the order. May require buyer to complete payment via continue_url.",
+        "parameters": [
+          {
+            "name": "checkout_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "payment_data": { "type": "object" },
+                  "risk_signals": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkout completed or payment required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/checkout/{checkout_id}/cancel": {
+      "post": {
+        "operationId": "cancel_checkout",
+        "summary": "Cancel Checkout",
+        "description": "Cancel a checkout session.",
+        "parameters": [
+          {
+            "name": "checkout_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checkout cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "UcpItem": {
+        "type": "object",
+        "required": ["id", "title", "price"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Product ID. Use this when adding to checkout."
+          },
+          "title": {
+            "type": "string",
+            "description": "Product name"
+          },
+          "price": {
+            "type": "integer",
+            "description": "Price in cents (minor units)"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Product image URL"
+          },
+          "seller_name": {
+            "type": "string",
+            "description": "Vendor/merchant name"
+          }
+        }
+      },
+      "LineItemCreate": {
+        "type": "object",
+        "required": ["item", "quantity"],
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/UcpItem"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1
+          }
+        }
+      },
+      "CheckoutCreateRequest": {
+        "type": "object",
+        "required": ["line_items", "payment"],
+        "properties": {
+          "line_items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/LineItemCreate" }
+          },
+          "buyer": { "type": "object" },
+          "currency": { "type": "string", "default": "USD" },
+          "payment": { "type": "object" }
+        }
+      },
+      "CheckoutUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "line_items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/LineItemCreate" }
+          },
+          "buyer": { "type": "object" },
+          "currency": { "type": "string" },
+          "payment": { "type": "object" }
+        }
+      },
+      "CheckoutResponse": {
+        "type": "object",
+        "properties": {
+          "ucp": {
+            "type": "object",
+            "properties": {
+              "version": { "type": "string" },
+              "capability": { "type": "string" }
+            }
+          },
+          "id": { "type": "string" },
+          "line_items": { "type": "array" },
+          "status": { "type": "string" },
+          "currency": { "type": "string" },
+          "totals": { "type": "array" },
+          "continue_url": { "type": "string", "format": "uri" },
+          "order": { "type": "object" },
+          "links": { "type": "array" },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

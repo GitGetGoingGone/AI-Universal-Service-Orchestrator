@@ -22,9 +22,17 @@ Test via `curl` or Postman. Gemini discovers us via `/.well-known/ucp` and calls
 curl -s "$DISCOVERY_URL/.well-known/ucp" | jq .
 ```
 
-Expected: `ucp.version`, `ucp.services`, `rest.endpoint` with `/api/v1/ucp`.
+Expected: `ucp.version`, `ucp.services`, `rest.schema` pointing to our OpenAPI schema, `rest.endpoint` with `/api/v1/ucp`.
 
-### 1.2 UCP Catalog (Discovery)
+### 1.2 UCP REST Schema (OpenAPI)
+
+```bash
+curl -s "$DISCOVERY_URL/api/v1/ucp/rest.openapi.json" | jq '.paths["/items"].get.operationId'
+```
+
+Expected: `"searchGifts"`. The schema documents the tool the AI can call: `GET /items?q=<natural_language>` with optional `occasion`, `budget_max`, `recipient_type`.
+
+### 1.3 UCP Catalog (Discovery)
 
 ```bash
 curl -s "$DISCOVERY_URL/api/v1/ucp/items?q=flowers&limit=3" | jq .
@@ -32,7 +40,13 @@ curl -s "$DISCOVERY_URL/api/v1/ucp/items?q=flowers&limit=3" | jq .
 
 Expected: `items` array with `id`, `title`, `price` (cents), optional `image_url`, `seller_name`.
 
-### 1.3 UCP Checkout – Create
+Gift aggregator params (beads/bridge logic):
+
+```bash
+curl -s "$DISCOVERY_URL/api/v1/ucp/items?q=flowers&occasion=birthday&recipient_type=her&budget_max=5000&limit=5" | jq .
+```
+
+### 1.4 UCP Checkout – Create
 
 ```bash
 curl -s -X POST "$DISCOVERY_URL/api/v1/ucp/checkout" \
@@ -48,7 +62,7 @@ curl -s -X POST "$DISCOVERY_URL/api/v1/ucp/checkout" \
 
 Expected: `id`, `status`, `line_items`, `continue_url` when `requires_escalation`.
 
-### 1.4 Test Prompts (for Gemini AI Mode)
+### 1.5 Test Prompts (for Gemini AI Mode)
 
 When testing with Gemini AI Mode pointing at our domain:
 

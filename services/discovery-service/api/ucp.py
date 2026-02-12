@@ -1,13 +1,38 @@
 """UCP (Google Universal Commerce Protocol) catalog API for Gemini discovery."""
 
+import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse
 
-from db import search_products, get_partner_by_id
+from db import get_partner_by_id
 from protocols.ucp_compliance import _normalize_for_ucp
+from scout_engine import search as scout_search
 
 router = APIRouter(prefix="/api/v1/ucp", tags=["UCP"])
+
+# Path to OpenAPI schema (sibling to api/)
+_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schemas" / "rest.openapi.json"
+
+
+@router.get("/rest.openapi.json")
+async def ucp_rest_openapi():
+    """
+    Serve the UCP REST OpenAPI schema. Referenced by /.well-known/ucp under rest.schema.
+    AI agents use this to discover searchGifts and checkout operations.
+    """
+    if not _SCHEMA_PATH.exists():
+        return JSONResponse(status_code=404, content={"error": "Schema not found"})
+    data = json.loads(_SCHEMA_PATH.read_text())
+    return JSONResponse(
+        content=data,
+        headers={
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
 
 
 def _product_to_ucp_item(product: Dict[str, Any], partner: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -39,17 +64,71 @@ def _product_to_ucp_item(product: Dict[str, Any], partner: Optional[Dict[str, An
     return item
 
 
+# Occasion/recipient keywords for query augmentation (beads/bridge logic)
+_OCCASION_KEYWORDS = {
+    "birthday": "birthday gift",
+    "anniversary": "anniversary gift",
+    "baby_shower": "baby shower gift",
+    "wedding": "wedding gift",
+    "holiday": "holiday gift",
+    "thank_you": "thank you gift",
+    "get_well": "get well gift",
+    "graduation": "graduation gift",
+    "general": "gift",
+}
+_RECIPIENT_KEYWORDS = {
+    "her": "for her",
+    "him": "for him",
+    "them": "gift",
+    "baby": "baby",
+    "couple": "for couple",
+    "family": "for family",
+    "any": "",
+}
+
+
 @router.get("/items")
 async def ucp_items(
-    q: str = Query("", description="Search query"),
+    q: str = Query("", description="Natural language search query"),
     limit: int = Query(20, ge=1, le=100),
     partner_id: Optional[str] = Query(None, description="Filter by partner"),
+    occasion: Optional[str] = Query(None, description="Gift occasion for relevance"),
+    budget_max: Optional[int] = Query(None, ge=0, description="Max budget in cents"),
+    recipient_type: Optional[str] = Query(None, description="Recipient type for relevance"),
 ):
     """
     UCP catalog: search/browse products as UCP Item shape (id, title, price in cents, image_url).
-    Used by Gemini/Google when they discover us via /.well-known/ucp.
+    operationId: searchGifts. Pass natural language to q; optional occasion, budget_max, recipient_type.
     """
-    products = await search_products(query=q or "", limit=limit, partner_id=partner_id)
+    # Augment query with occasion/recipient for semantic relevance (beads/bridge logic)
+    search_parts = [q.strip()] if q else []
+    if occasion and occasion in _OCCASION_KEYWORDS:
+        search_parts.append(_OCCASION_KEYWORDS[occasion])
+    if recipient_type and recipient_type in _RECIPIENT_KEYWORDS and _RECIPIENT_KEYWORDS[recipient_type]:
+        search_parts.append(_RECIPIENT_KEYWORDS[recipient_type])
+    search_query = " ".join(search_parts) if search_parts else ""
+
+    products = await scout_search(
+        query=search_query or "gift",
+        limit=limit * 2 if budget_max else limit,
+        partner_id=partner_id,
+    )
+
+    # Filter by budget_max (price in cents) if provided
+    if budget_max is not None:
+        filtered = []
+        for p in products:
+            price = p.get("price")
+            if price is not None:
+                price_cents = int(round(float(price) * 100))
+                if price_cents <= budget_max:
+                    filtered.append(p)
+            else:
+                filtered.append(p)
+        products = filtered[:limit]
+    else:
+        products = products[:limit]
+
     partner_ids = list({str(p["partner_id"]) for p in products if p.get("partner_id")})
     partners_map: Dict[str, Dict[str, Any]] = {}
     for pid in partner_ids:

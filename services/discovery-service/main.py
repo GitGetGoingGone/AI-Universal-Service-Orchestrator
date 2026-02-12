@@ -117,6 +117,7 @@ async def root():
             "manifest_ingest": "POST /api/v1/admin/manifest/ingest",
             "embedding_backfill": "POST /api/v1/admin/embeddings/backfill",
             "ucp_catalog": "GET /api/v1/ucp/items",
+            "ucp_rest_schema": "GET /api/v1/ucp/rest.openapi.json",
             "well_known_ucp": "GET /.well-known/ucp",
             "acp_feed": "GET /api/v1/feeds/acp?partner_id=<optional>",
             "agent_manifest": "GET /api/v1/manifest | /.well-known/agent-manifest",
@@ -150,11 +151,12 @@ async def well_known_ucp():
     """
     UCP Business Profile for Google/Gemini discovery.
     Platform discovers us via this URL and calls our catalog API.
+    Returns explicit application/json for crawlers.
     """
     base = (settings.discovery_public_url or "").rstrip("/")
     if not base:
         base = "https://uso-discovery.onrender.com"
-    return {
+    body = {
         "ucp": {
             "version": "2026-01-11",
             "services": {
@@ -162,7 +164,7 @@ async def well_known_ucp():
                     "version": "2026-01-11",
                     "spec": "https://ucp.dev/specification/overview",
                     "rest": {
-                        "schema": "https://ucp.dev/services/shopping/rest.openapi.json",
+                        "schema": f"{base}/api/v1/ucp/rest.openapi.json",
                         "endpoint": f"{base}/api/v1/ucp",
                     },
                 },
@@ -177,3 +179,10 @@ async def well_known_ucp():
             ],
         },
     }
+    return JSONResponse(
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=3600",
+        },
+    )

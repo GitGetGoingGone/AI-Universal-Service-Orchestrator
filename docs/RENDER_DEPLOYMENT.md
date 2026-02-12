@@ -359,7 +359,8 @@ End-user chat app with ChatGPT or Gemini provider switch. Deploy on **Vercel** (
 **Gemini UCP** (discovery + checkout) is served by the Discovery service (Step 1). No separate deployment needed.
 
 - **UCP Well-Known:** `GET https://uso-discovery.onrender.com/.well-known/ucp`
-- **UCP Catalog:** `GET https://uso-discovery.onrender.com/api/v1/ucp/items?q=flowers`
+- **UCP REST Schema:** `GET https://uso-discovery.onrender.com/api/v1/ucp/rest.openapi.json` — OpenAPI 3.1 schema with `searchGifts` operationId for AI agents
+- **UCP Catalog:** `GET https://uso-discovery.onrender.com/api/v1/ucp/items?q=flowers` (operationId: `searchGifts`)
 - **UCP Checkout:** `POST https://uso-discovery.onrender.com/api/v1/ucp/checkout`
 
 Ensure Discovery has `DISCOVERY_PUBLIC_URL` or `PUBLIC_URL` set to its Render URL for correct UCP endpoint URLs in well-known. Test: [CHATGPT_GEMINI_TEST_SCENARIOS.md](./CHATGPT_GEMINI_TEST_SCENARIOS.md).

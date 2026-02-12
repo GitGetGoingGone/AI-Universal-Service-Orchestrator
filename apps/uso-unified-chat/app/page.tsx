@@ -26,9 +26,16 @@ export default function ChatPage() {
         body: JSON.stringify({ provider, messages: [...messages, { role: "user", content: userMessage }] }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const data = await res.json();
+      let data: Record<string, unknown>;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(res.ok ? "Invalid response" : `HTTP ${res.status}`);
+      }
+      if (!res.ok) {
+        const errMsg = (data as { error?: string })?.error || `HTTP ${res.status}`;
+        throw new Error(errMsg);
+      }
       const assistantContent =
         data.data?.products?.length > 0
           ? `Found ${data.data.products.length} products:\n${data.data.products
@@ -42,12 +49,10 @@ export default function ChatPage() {
         { role: "assistant", content: assistantContent },
       ]);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: `Error: ${err instanceof Error ? err.message : String(err)}`,
-        },
+        { role: "assistant", content: `Error: ${msg}` },
       ]);
     } finally {
       setLoading(false);
