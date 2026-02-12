@@ -26,23 +26,35 @@ export default function ChatPage() {
         body: JSON.stringify({ provider, messages: [...messages, { role: "user", content: userMessage }] }),
       });
 
-      let data: Record<string, unknown>;
+      type ChatResponse = {
+        data?: {
+          products?: { products?: Array<{ name?: string; price?: number }>; count?: number };
+          text?: string;
+          error?: string;
+        };
+        summary?: string;
+        message?: string;
+        error?: string;
+      };
+      let data: ChatResponse;
       try {
-        data = await res.json();
+        data = (await res.json()) as ChatResponse;
       } catch {
         throw new Error(res.ok ? "Invalid response" : `HTTP ${res.status}`);
       }
       if (!res.ok) {
-        const errMsg = (data as { error?: string })?.error || `HTTP ${res.status}`;
+        const errMsg = data?.error || `HTTP ${res.status}`;
         throw new Error(errMsg);
       }
+      const productList = data.data?.products?.products ?? [];
       const assistantContent =
-        data.data?.products?.length > 0
-          ? `Found ${data.data.products.length} products:\n${data.data.products
+        data.summary ??
+        (productList.length > 0
+          ? `Found ${productList.length} products:\n${productList
               .slice(0, 5)
-              .map((p: { name?: string; price?: number }) => `- ${p.name} ($${p.price})`)
+              .map((p) => `- ${p.name} ($${p.price})`)
               .join("\n")}`
-          : data.data?.text || data.message || JSON.stringify(data);
+          : data.data?.text ?? data.message ?? JSON.stringify(data));
 
       setMessages((prev) => [
         ...prev,
