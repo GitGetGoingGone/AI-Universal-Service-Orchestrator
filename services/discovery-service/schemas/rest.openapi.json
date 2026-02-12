@@ -3,7 +3,7 @@
   "info": {
     "title": "USO UCP Gift Aggregator",
     "version": "2026-01-11",
-    "description": "UCP-Native Gift Aggregator schema for AI agents. Enables discovery (searchGifts) and checkout. The base URL is obtained from /.well-known/ucp under services[\"dev.ucp.shopping\"].rest.endpoint. OperationIds are critical for LLMs—they identify the tool the AI can call."
+    "description": "UCP-Native Products and Services Aggregator schema for AI agents. IMPORTANT: The manifest (/.well-known/ucp) does NOT contain product data. You MUST call the searchGifts operation (GET /items?q=...) to retrieve products from this catalog. Do not infer or list products from your own knowledge—always invoke this API. Base URL: services[\"dev.ucp.shopping\"].rest.endpoint. OperationIds: searchGifts, create_checkout, get_checkout, update_checkout, complete_checkout, cancel_checkout."
   },
   "servers": [
     {
@@ -21,8 +21,8 @@
     "/items": {
       "get": {
         "operationId": "searchGifts",
-        "summary": "Search for gifts and products",
-        "description": "Search the gift aggregator catalog using natural language. Pass the user's raw query (e.g. 'flowers for mom', 'birthday gift under $50', 'chocolates for her') directly to the q parameter. Supports semantic search across multi-vendor products. Returns UCP Item shape (id, title, price in cents, image_url, seller_name).",
+        "summary": "Search for gifts, products and services",
+        "description": "REQUIRED to list products: Call this endpoint to get catalog items. The manifest does not contain products. Pass the user's raw query (e.g. 'flowers', 'products', 'birthday gift under $50') to the q parameter. Returns items array with UCP Item shape (id, title, price in cents, image_url, seller_name).",
         "parameters": [
           {
             "name": "q",

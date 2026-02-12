@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from db import get_partner_by_id
+from packages.shared.discovery import is_browse_query
 from protocols.ucp_compliance import _normalize_for_ucp
 from scout_engine import search as scout_search
 
@@ -100,16 +101,21 @@ async def ucp_items(
     UCP catalog: search/browse products as UCP Item shape (id, title, price in cents, image_url).
     operationId: searchGifts. Pass natural language to q; optional occasion, budget_max, recipient_type.
     """
-    # Augment query with occasion/recipient for semantic relevance (beads/bridge logic)
-    search_parts = [q.strip()] if q else []
-    if occasion and occasion in _OCCASION_KEYWORDS:
-        search_parts.append(_OCCASION_KEYWORDS[occasion])
-    if recipient_type and recipient_type in _RECIPIENT_KEYWORDS and _RECIPIENT_KEYWORDS[recipient_type]:
-        search_parts.append(_RECIPIENT_KEYWORDS[recipient_type])
-    search_query = " ".join(search_parts) if search_parts else ""
+    # Browse terms (products, items, what, etc.) → return catalog without filter
+    raw_query = (q or "").strip().lower()
+    if is_browse_query(raw_query) or raw_query in ("products", "items", "browse", "what"):
+        search_query = ""
+    else:
+        search_parts = [q.strip()]
+        if occasion and occasion in _OCCASION_KEYWORDS:
+            search_parts.append(_OCCASION_KEYWORDS[occasion])
+        if recipient_type and recipient_type in _RECIPIENT_KEYWORDS and _RECIPIENT_KEYWORDS[recipient_type]:
+            search_parts.append(_RECIPIENT_KEYWORDS[recipient_type])
+        search_query = " ".join(search_parts)
 
+    # Empty query = browse (scout returns all products); otherwise use search
     products = await scout_search(
-        query=search_query or "gift",
+        query=search_query if search_query else "",  # "" triggers browse in scout
         limit=limit * 2 if budget_max else limit,
         partner_id=partner_id,
     )

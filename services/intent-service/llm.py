@@ -17,7 +17,7 @@ Entities to extract when present: product_type, location, quantity, price_range,
 
 For discover intent, search_query must be a product category or keyword (flowers, chocolates, limo, gifts, cakes, etc.).
 - Extract the product/service the user wants, not the action verb. "find limo service" -> "limo", "get flowers" -> "flowers".
-- If the user asks for "sample products", "demo", "show me some", "brief summary", "anything", or similar without a specific product: use "browse" as search_query (Discovery will return sample products).
+- If the user asks for "sample products", "demo", "show me some", "brief summary", "anything", "what products do you have", "what do you have", or similar without a specific product: use "browse" as search_query (Discovery will return sample products).
 - Never use filler words or verbs (please, hi, hello, find, get, search) as search_query; use "browse" for generic requests.
 - Normalize to a product category: "send flowers to mom" -> "flowers", "I want something sweet" -> "chocolates", "find limo service" -> "limo".
 
@@ -99,10 +99,11 @@ def _parse_llm_response(content: str, original_text: str) -> Dict[str, Any]:
 _PRODUCT_KEYWORDS = [
     "flowers", "chocolates", "chocolate", "gifts", "gift", "cakes", "cake",
     "bouquet", "plants", "candy", "candies", "wine", "spa", "massage",
+    "products", "items",
 ]
 
 # Generic words → Discovery treats as browse (returns sample products)
-_GENERIC_QUERY_WORDS = {"please", "hi", "hello", "hey", "sample", "demo", "anything", "something", "show", "return", "brief", "small", "set", "browse", "intent", "example", "examples"}
+_GENERIC_QUERY_WORDS = {"please", "hi", "hello", "hey", "sample", "demo", "anything", "something", "show", "return", "brief", "small", "set", "browse", "intent", "example", "examples", "what"}
 
 # Action verbs to skip when extracting product (e.g. "find limo service" -> "limo")
 _ACTION_SKIP = {"find", "search", "get", "need", "looking", "show", "want", "send"}
@@ -114,6 +115,9 @@ def _extract_search_query(text: str) -> str:
         return "browse"
     # Sample/demo requests → browse (Discovery returns products without filter)
     if any(w in text_lower for w in ["sample", "demo", "show me some", "brief", "anything", "something", "example", "examples"]):
+        return "browse"
+    # "what do you have" / "what products" / "what's available" → browse
+    if any(w in text_lower for w in ["what products", "what do you have", "what's available", "what do you sell"]):
         return "browse"
     # Check for known product keywords
     for kw in _PRODUCT_KEYWORDS:

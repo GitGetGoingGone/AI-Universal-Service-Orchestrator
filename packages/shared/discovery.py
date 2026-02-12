@@ -11,7 +11,7 @@ rather than a specific product search.
 BROWSE_QUERIES = frozenset({
     "please", "hi", "hello", "hey", "sample", "demo", "general", "anything",
     "something", "browse", "show", "return", "brief", "small", "set",
-    "intent", "example", "examples",
+    "intent", "example", "examples", "what", "products", "items",
 })
 
 
@@ -34,6 +34,7 @@ def is_browse_query(query: str) -> bool:
 _PRODUCT_KEYWORDS = frozenset({
     "flowers", "chocolates", "chocolate", "gifts", "gift", "cakes", "cake",
     "bouquet", "plants", "candy", "candies", "wine", "spa", "massage",
+    "products", "items",
 })
 
 

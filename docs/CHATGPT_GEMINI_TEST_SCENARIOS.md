@@ -2,6 +2,8 @@
 
 Reproducible test prompts for UCP (Gemini), ChatGPT App (MCP), and Unified Web App.
 
+**UCP Schema:** `rest.openapi.json` v2026-01-11 — operationIds: `searchGifts`, `create_checkout`, `get_checkout`, `update_checkout`, `complete_checkout`, `cancel_checkout`.
+
 ---
 
 ## Prerequisites
@@ -22,7 +24,7 @@ Test via `curl` or Postman. Gemini discovers us via `/.well-known/ucp` and calls
 curl -s "$DISCOVERY_URL/.well-known/ucp" | jq .
 ```
 
-Expected: `ucp.version`, `ucp.services`, `rest.schema` pointing to our OpenAPI schema, `rest.endpoint` with `/api/v1/ucp`.
+Expected: `ucp.version`, `ucp.services`, `rest.schema` pointing to `{base}/api/v1/ucp/rest.openapi.json`, `rest.endpoint` with UCP base path.
 
 ### 1.2 UCP REST Schema (OpenAPI)
 
@@ -30,7 +32,16 @@ Expected: `ucp.version`, `ucp.services`, `rest.schema` pointing to our OpenAPI s
 curl -s "$DISCOVERY_URL/api/v1/ucp/rest.openapi.json" | jq '.paths["/items"].get.operationId'
 ```
 
-Expected: `"searchGifts"`. The schema documents the tool the AI can call: `GET /items?q=<natural_language>` with optional `occasion`, `budget_max`, `recipient_type`.
+Expected: `"searchGifts"`. The schema documents the tool the AI can call: `GET /items?q=<natural_language>` with optional params:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `q` | string (required) | Natural language search query |
+| `limit` | integer (1–100, default 20) | Max items to return |
+| `partner_id` | string | Filter by vendor |
+| `occasion` | enum | `birthday`, `anniversary`, `baby_shower`, `wedding`, `holiday`, `thank_you`, `get_well`, `graduation`, `general` |
+| `budget_max` | integer (cents) | Max budget (e.g. 5000 = $50) |
+| `recipient_type` | enum | `her`, `him`, `them`, `baby`, `couple`, `family`, `any` |
 
 ### 1.3 UCP Catalog (Discovery)
 
@@ -38,15 +49,17 @@ Expected: `"searchGifts"`. The schema documents the tool the AI can call: `GET /
 curl -s "$DISCOVERY_URL/api/v1/ucp/items?q=flowers&limit=3" | jq .
 ```
 
-Expected: `items` array with `id`, `title`, `price` (cents), optional `image_url`, `seller_name`.
+Expected: `items` array with UCP Item shape (`id`, `title`, `price` in cents, optional `image_url`, `seller_name`).
 
-Gift aggregator params (beads/bridge logic):
+Gift aggregator params (align with rest.openapi.json operationId `searchGifts`):
 
 ```bash
 curl -s "$DISCOVERY_URL/api/v1/ucp/items?q=flowers&occasion=birthday&recipient_type=her&budget_max=5000&limit=5" | jq .
 ```
 
-### 1.4 UCP Checkout – Create
+### 1.4 UCP Checkout (per rest.openapi.json)
+
+**Create** (`operationId: create_checkout`):
 
 ```bash
 curl -s -X POST "$DISCOVERY_URL/api/v1/ucp/checkout" \
@@ -60,15 +73,45 @@ curl -s -X POST "$DISCOVERY_URL/api/v1/ucp/checkout" \
   }' | jq .
 ```
 
-Expected: `id`, `status`, `line_items`, `continue_url` when `requires_escalation`.
+Expected: `id`, `status`, `line_items`, `continue_url` when payment required.
+
+**Get** (`operationId: get_checkout`):
+
+```bash
+curl -s "$DISCOVERY_URL/api/v1/ucp/checkout/CHECKOUT_ID" | jq .
+```
+
+**Update** (`operationId: update_checkout`):
+
+```bash
+curl -s -X PUT "$DISCOVERY_URL/api/v1/ucp/checkout/CHECKOUT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"line_items": [...], "buyer": {}, "currency": "USD"}' | jq .
+```
+
+**Complete** (`operationId: complete_checkout`):
+
+```bash
+curl -s -X POST "$DISCOVERY_URL/api/v1/ucp/checkout/CHECKOUT_ID/complete" \
+  -H "Content-Type: application/json" \
+  -d '{"payment_data": {}, "risk_signals": {}}' | jq .
+```
+
+**Cancel** (`operationId: cancel_checkout`):
+
+```bash
+curl -s -X POST "$DISCOVERY_URL/api/v1/ucp/checkout/CHECKOUT_ID/cancel" | jq .
+```
 
 ### 1.5 Test Prompts (for Gemini AI Mode)
 
-When testing with Gemini AI Mode pointing at our domain:
+When testing with Gemini AI Mode pointing at our domain. Gemini uses `searchGifts` with natural language `q` and optional gift params:
 
-- "Find me flowers for under $50"
-- "What products do you have?"
-- "Add roses to my cart and proceed to checkout"
+- "Find me flowers for under $50" → `q=flowers for under $50`, `budget_max=5000`
+- "What products do you have?" → `q=products` or browse
+- "Gifts for mom's birthday under $30" → `q=gifts for mom`, `occasion=birthday`, `budget_max=3000`
+- "Baby shower gift for her" → `q=baby shower gift`, `occasion=baby_shower`, `recipient_type=her`
+- "Add roses to my cart and proceed to checkout" → `create_checkout` with line item
 
 ---
 
@@ -121,6 +164,7 @@ Run: `cd apps/uso-unified-chat && npm run dev` → http://localhost:3011
 - "I want chocolates"
 - "What products are available?"
 - "Show me gifts under $30"
+- "Birthday gift for her under $50" (tests `occasion` + `recipient_type` + `budget_max` when using Gemini UCP)
 
 ---
 
@@ -156,11 +200,34 @@ curl -s -X POST "$ORCHESTRATOR_URL/api/v1/returns" \
 
 ---
 
-## 5. Environment Variables
+## 5. Troubleshooting: Gemini Returns Its Own Products Instead of Ours
+
+**Symptom:** Gemini connects to `/.well-known/ucp` but lists products from its training data (Posh Peanut, Caden Lane, Estella, Nike, Hatch) instead of your catalog. Even when explicitly asked to "Call the searchGifts API", Gemini may claim it did so but still return hallucinated products.
+
+**Cause:** Gemini may **not actually execute** HTTP requests to arbitrary URLs in this context. It can read the manifest and simulate responses, but the products it returns do not come from your API.
+
+**Proof:** Your catalog returns real products like `Red Roses Bouquet` (Flower Shop Demo). If Gemini lists Posh Peanut, Caden Lane, Estella, Nike, or Hatch, it did **not** call your API—those are from Gemini's training data.
+
+**Verification:**
+```bash
+# Your actual catalog (e.g. Red Roses Bouquet, Flower Shop Demo)
+curl -s "https://uso-discovery.onrender.com/api/v1/ucp/items?q=flowers&limit=5" | jq .
+curl -s "https://uso-discovery.onrender.com/api/v1/ucp/items?q=products&limit=10" | jq .
+```
+
+**How to detect hallucinations:** If Gemini returns Posh Peanut, Caden Lane, Estella, Nike, Hatch, or Hatch Rest+—it did not call your API. Your catalog has different products (e.g. Red Roses Bouquet, Flower Shop Demo).
+
+**Google UCP integration:** Full discovery (Gemini actually calling your APIs) requires [Google UCP merchant registration](https://support.google.com/merchants/contact/ucp_integration_interest). Until approved, Gemini may not execute HTTP requests to your catalog.
+
+**Reliable alternative:** Use the [Unified Web App](http://localhost:3011) with the **Gemini** provider—it proxies to your orchestrator and Discovery, returning your real products. The Unified Web App makes real API calls; Gemini chat in its own UI may not.
+
+---
+
+## 6. Environment Variables
 
 | Variable | Example | Used By |
 |----------|---------|---------|
-| `DISCOVERY_URL` | http://localhost:8000 | UCP, catalog |
+| `DISCOVERY_URL` | https://uso-discovery.onrender.com | UCP, catalog |
 | `ORCHESTRATOR_URL` | http://localhost:8002 | Chat, auxiliary, MCP client |
 | `PORT` | 3010 | MCP server |
 | `ORCHESTRATOR_URL` | http://localhost:8002 | Unified Web App |
