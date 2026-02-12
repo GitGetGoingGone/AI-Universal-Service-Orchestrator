@@ -43,6 +43,16 @@ class Settings:
         get_env("PAYMENT_SERVICE_URL") or "http://localhost:8006"
     ).rstrip("/")
 
+    # Hybrid Response (Module 13) - classify-support
+    hybrid_response_service_url: str = (
+        get_env("HYBRID_RESPONSE_SERVICE_URL") or "http://localhost:8010"
+    ).rstrip("/")
+
+    # Reverse Logistics (Module 17) - returns
+    reverse_logistics_service_url: str = (
+        get_env("REVERSE_LOGISTICS_SERVICE_URL") or "http://localhost:8011"
+    ).rstrip("/")
+
     # Omnichannel Broker (Module 24)
     omnichannel_broker_url: str = (
         get_env("OMNICHANNEL_BROKER_URL") or "http://localhost:8004"

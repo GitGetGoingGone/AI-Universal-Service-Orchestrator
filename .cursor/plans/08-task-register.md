@@ -68,7 +68,7 @@ overview: One place for all planned tasks and latest status. Update status here;
 | Pillar 3: Manifest template finalized, action models, offline discovery strategy, affiliate manifest integration | Done | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Pillar 4: SLA thresholds, buffer calculations, kill switch protocol, affiliate partner SLAs | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Pillar 5: Proof state machine, Vision AI integration, approval workflows | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
-| Chat-First Foundation: API response standard, JSON-LD schemas, Adaptive Cards library, Link Account flow | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
+| Chat-First Foundation: API response standard, JSON-LD schemas, Adaptive Cards library, Link Account flow | Done | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Month 0 Integration Hub: Durable Orchestrator shell, Agentic AI configured, Adaptive Card Generator, integration testing | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 
 ---
@@ -124,7 +124,7 @@ overview: One place for all planned tasks and latest status. Update status here;
 | 5 | **Portal – Task Queue** | Done – Partner Tasks page, proxy to Task Queue |
 | 6 | **Portal – HubNegotiator** | Done – Partner RFPs/bids; Platform create/select winner |
 | 7 | **Portal – Hybrid Response** | Done – Support page with classify-and-route |
-| 8 | **Portal – Omnichannel connect** | Pending – Connect options (WhatsApp) in portal |
+| 8 | **Portal – Omnichannel connect** | Done – Connect options (WhatsApp) in portal |
 | 9 | **Order → Task Queue** | Done – Discovery checkout calls Task Queue |
 | 10 | **Checkout and payments** | Done – Payment page with Stripe Elements, Pay link in orders |
 
@@ -161,6 +161,8 @@ overview: One place for all planned tasks and latest status. Update status here;
 | Module 18: Admin Command Center (dashboard metrics, escalations, export reports) | Done |
 | Module 17: Reverse Logistics (return requests, refunds, restock events) | Done |
 | Module 8: Virtual Proofing Engine (proof_states, DALL-E generate, approve/reject) | Done |
+| Portal – Omnichannel connect (WhatsApp) | Done |
+| Chat-First Foundation (Link Account, Adaptive Cards, JSON-LD) | Done |
 
 ---
 

@@ -54,7 +54,11 @@ In the steps below, each service will **link this group** and add only its **ser
 
 4. **Environment**:
    - Under **Linked Environment Groups**, select `uso-shared` → **Link**
-   - *(No service-specific vars needed; Discovery uses the group vars)*
+   - Add service-specific vars (for UCP well-known and ACP feed URLs):
+
+| Key | Value |
+|-----|-------|
+| `DISCOVERY_PUBLIC_URL` | `https://uso-discovery.onrender.com` *(same as Render URL; for UCP/Gemini discovery)* |
 
 5. Click **Create Web Service**. Note the URL (e.g. `https://uso-discovery.onrender.com`).
 
@@ -155,6 +159,8 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | `PAYMENT_SERVICE_URL` | `https://uso-payment.onrender.com` *(add after Step 6c)* |
 | `OMNICHANNEL_BROKER_URL` | `https://uso-omnichannel-broker.onrender.com` *(add after Step 6b)* |
 | `RE_SOURCING_SERVICE_URL` | `https://uso-resourcing.onrender.com` *(add after Step 6c)* |
+| `HYBRID_RESPONSE_SERVICE_URL` | `https://uso-hybrid-response.onrender.com` *(for classify-support; add after Step 6e)* |
+| `REVERSE_LOGISTICS_SERVICE_URL` | `https://uso-reverse-logistics.onrender.com` *(for returns; optional)* |
 | `SUPABASE_SERVICE_KEY` | Same as `SUPABASE_SECRET_KEY` *(for Link Account; alias)* |
 | `GOOGLE_OAUTH_CLIENT_ID` | *(optional)* For Link Account with Google; from Google Cloud Console |
 | `AZURE_OPENAI_ENDPOINT` | *(optional)* For agentic planner |
@@ -299,6 +305,65 @@ Requires migration `supabase/migrations/20240128100003_task_queue_hub_negotiator
 
 For each: **Root Directory** empty, **Build Command** `pip install -r requirements.txt`, **Environment** → **Linked Environment Groups** → link `uso-shared` (no service-specific vars). Test steps: [TESTING_RENDER_AND_PORTAL.md § 8b](./TESTING_RENDER_AND_PORTAL.md#8b-phase-2-modules-task-queue-hubnegotiator-hybrid-response).
 
+### Step 6f: ChatGPT App (MCP Server)
+
+Node.js MCP server for ChatGPT App Directory. Exposes 12 tools (discover, products, bundles, checkout, manifest, orders, support, returns).
+
+1. **New** → **Web Service**
+2. Same repo
+3. Configure:
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `uso-chatgpt-app` |
+| **Root Directory** | `apps/uso-chatgpt-app` |
+| **Runtime** | Node |
+| **Build Command** | `npm install && npm run build` |
+| **Start Command** | `npm start` |
+
+4. **Environment**:
+   - Under **Linked Environment Groups**, select `uso-shared` → **Link**
+   - Add service-specific vars:
+
+| Key | Value |
+|-----|-------|
+| `ORCHESTRATOR_URL` | `https://uso-orchestrator.onrender.com` |
+| `DISCOVERY_URL` | `https://uso-discovery.onrender.com` |
+
+5. Create and note the URL (e.g. `https://uso-chatgpt-app.onrender.com`).
+
+**Note:** For ChatGPT App Directory submission, connect this MCP endpoint to ChatGPT via [platform.openai.com](https://platform.openai.com). See [CHATGPT_APP_DIRECTORY_SUBMISSION.md](./CHATGPT_APP_DIRECTORY_SUBMISSION.md).
+
+### Step 6g: Unified Web App (Vercel)
+
+End-user chat app with ChatGPT or Gemini provider switch. Deploy on **Vercel** (like Partner Portal).
+
+1. Go to [Vercel](https://vercel.com) → **Add New** → **Project**
+2. Connect your GitHub repo
+3. Set **Root Directory** to `apps/uso-unified-chat`
+4. Framework: Next.js (auto-detected)
+5. Environment variables:
+
+| Key | Value |
+|-----|-------|
+| `ORCHESTRATOR_URL` | `https://uso-orchestrator.onrender.com` |
+
+6. Deploy. Note the URL (e.g. `https://uso-unified-chat.vercel.app`).
+
+**Test:** Open the URL, select ChatGPT or Gemini provider, send e.g. "Find me flowers".
+
+---
+
+## Gemini (UCP) – Discovery Service
+
+**Gemini UCP** (discovery + checkout) is served by the Discovery service (Step 1). No separate deployment needed.
+
+- **UCP Well-Known:** `GET https://uso-discovery.onrender.com/.well-known/ucp`
+- **UCP Catalog:** `GET https://uso-discovery.onrender.com/api/v1/ucp/items?q=flowers`
+- **UCP Checkout:** `POST https://uso-discovery.onrender.com/api/v1/ucp/checkout`
+
+Ensure Discovery has `DISCOVERY_PUBLIC_URL` or `PUBLIC_URL` set to its Render URL for correct UCP endpoint URLs in well-known. Test: [CHATGPT_GEMINI_TEST_SCENARIOS.md](./CHATGPT_GEMINI_TEST_SCENARIOS.md).
+
 ---
 
 ## Step 7: Update Service URLs (after all services deployed)
@@ -369,6 +434,7 @@ PAYMENT="https://uso-payment.onrender.com"
 TASK_QUEUE="https://uso-task-queue.onrender.com"
 HUB_NEGOTIATOR="https://uso-hub-negotiator.onrender.com"
 HYBRID_RESPONSE="https://uso-hybrid-response.onrender.com"
+CHATGPT_APP="https://uso-chatgpt-app.onrender.com"
 
 # Health checks (core)
 curl $DISCOVERY/health
@@ -399,6 +465,17 @@ curl -X POST $WEBHOOK/api/v1/webhooks/chat/chatgpt/test-123 \
   -d '{"narrative": "Test update"}'
 
 # Partner Portal: deployed on Vercel (see apps/portal)
+
+# ChatGPT App (MCP) – verify MCP server responds
+curl -s $CHATGPT_APP/ -o /dev/null -w "%{http_code}"  # Expect 200 or 405 (GET may not be supported)
+# Or: use MCP client to connect and list tools
+
+# Gemini (UCP) – Discovery serves UCP
+curl -s $DISCOVERY/.well-known/ucp | jq '.ucp.version'
+curl -s "$DISCOVERY/api/v1/ucp/items?q=flowers&limit=2" | jq '.items | length'
+
+# Unified Web App – manual test in browser
+# Open https://uso-unified-chat.vercel.app (or your Vercel URL), send "Find me flowers"
 ```
 
 ---
@@ -466,6 +543,7 @@ Common causes:
 | Task Queue | Python | Same build · Start: `cd services/task-queue-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Hub Negotiator | Python | Same build · Start: `cd services/hub-negotiator-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Hybrid Response | Python | Same build · Start: `cd services/hybrid-response-service && uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| ChatGPT App (MCP) | Node | Root: `apps/uso-chatgpt-app` · Build: `npm install && npm run build` · Start: `npm start` |
 
 ---
 
@@ -492,3 +570,15 @@ The Partner Portal is a Next.js app and is deployed on **Vercel**, not Render.
 6. Deploy
 
 See `apps/portal/README.md` for local setup and design tokens.
+
+---
+
+## Unified Web App (Vercel)
+
+The Unified Web App (`apps/uso-unified-chat`) is a Next.js chat app with ChatGPT or Gemini provider switch. Deploy on **Vercel** (see Step 6g above).
+
+| Key | Value |
+|-----|-------|
+| `ORCHESTRATOR_URL` | `https://uso-orchestrator.onrender.com` |
+
+See `apps/uso-unified-chat/README.md` for local setup. Full test prompts: [CHATGPT_GEMINI_TEST_SCENARIOS.md](./CHATGPT_GEMINI_TEST_SCENARIOS.md).

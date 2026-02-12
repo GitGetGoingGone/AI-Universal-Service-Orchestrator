@@ -30,6 +30,7 @@ from api.ucp import router as ucp_router
 from api.ucp_checkout import router as ucp_checkout_router
 from api.feeds import router as feeds_router
 from api.manifest import router as manifest_router, _build_manifest
+from api.orders import router as orders_router
 from webhooks.inventory_webhook import router as webhooks_router
 
 app = FastAPI(
@@ -60,6 +61,7 @@ app.include_router(ucp_router)
 app.include_router(ucp_checkout_router)
 app.include_router(feeds_router)
 app.include_router(manifest_router)
+app.include_router(orders_router)
 app.include_router(webhooks_router)
 
 # Health checks (per 07-project-operations.md)
@@ -118,6 +120,7 @@ async def root():
             "well_known_ucp": "GET /.well-known/ucp",
             "acp_feed": "GET /api/v1/feeds/acp?partner_id=<optional>",
             "agent_manifest": "GET /api/v1/manifest | /.well-known/agent-manifest",
+            "order_status": "GET /api/v1/orders/{id}/status",
             "push_feed": "POST /api/v1/feeds/push",
             "push_status": "GET /api/v1/feeds/push-status?partner_id=",
             "inventory_webhook": "POST /webhooks/inventory",

@@ -22,6 +22,7 @@ from config import settings
 from api.chat import router as chat_router
 from api.products import router as products_router
 from api.link_account import router as link_account_router
+from api.auxiliary import router as auxiliary_router
 
 app = FastAPI(
     title="Orchestrator Service",
@@ -44,6 +45,7 @@ app.add_exception_handler(Exception, generic_exception_handler)
 app.include_router(chat_router)
 app.include_router(products_router)
 app.include_router(link_account_router)
+app.include_router(auxiliary_router)
 
 health_checker = HealthChecker("orchestrator-service", "0.1.0")
 
@@ -111,6 +113,10 @@ async def root():
             "agentic_handoff": "GET /api/v1/agentic-handoff",
             "link_account": "POST /api/v1/link-account",
             "link_account_status": "GET /api/v1/link-account/status",
+            "manifest": "GET /api/v1/manifest",
+            "order_status": "GET /api/v1/orders/{id}/status",
+            "classify_support": "POST /api/v1/classify-support",
+            "returns": "POST /api/v1/returns",
             "health": "GET /health",
             "ready": "GET /ready",
         },
