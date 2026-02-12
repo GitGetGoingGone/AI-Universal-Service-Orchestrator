@@ -37,6 +37,8 @@ class Settings:
     platform_public_url: str = get_env("PLATFORM_PUBLIC_URL") or get_env("ORCHESTRATOR_PUBLIC_URL") or discovery_public_url or ""
     # Task Queue service URL (for Order → Task Queue integration)
     task_queue_service_url: str = get_env("TASK_QUEUE_SERVICE_URL") or ""
+    # Webhook service URL (for inventory webhook push to chat threads)
+    webhook_service_url: str = (get_env("WEBHOOK_SERVICE_URL") or "http://localhost:8003").rstrip("/")
     # Portal/public URL for UCP continue_url (e.g. https://your-portal.vercel.app)
     portal_public_url: str = get_env("PORTAL_PUBLIC_URL") or get_env("DISCOVERY_PUBLIC_URL") or ""
 

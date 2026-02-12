@@ -22,7 +22,7 @@ export type NormalizedProduct = {
 };
 
 /** Supported import sources; extend for Shopify API, WooCommerce, etc. */
-export type ImportSourceType = "shopify_csv" | "woocommerce_csv"; // add more as needed
+export type ImportSourceType = "shopify_csv" | "woocommerce_csv" | "legacy"; // legacy => Discovery service
 
 export type ImportSourceAdapter = (
   row: Record<string, string>

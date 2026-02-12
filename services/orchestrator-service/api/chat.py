@@ -5,7 +5,13 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-from clients import resolve_intent_with_fallback, discover_products, start_orchestration, register_thread_mapping
+from clients import (
+    resolve_intent_with_fallback,
+    discover_products,
+    start_orchestration,
+    create_standing_intent_via_api,
+    register_thread_mapping,
+)
 from agentic.loop import run_agentic_loop
 from packages.shared.utils.api_response import chat_first_response, request_id_from_request
 from packages.shared.json_ld.error import error_ld
@@ -71,6 +77,20 @@ async def chat(
             location=location,
         )
 
+    async def _create_standing_intent(
+        intent_description: str,
+        approval_timeout_hours: int = 24,
+        platform: Optional[str] = None,
+        thread_id: Optional[str] = None,
+    ):
+        return await create_standing_intent_via_api(
+            intent_description=intent_description,
+            approval_timeout_hours=approval_timeout_hours,
+            platform=platform,
+            thread_id=thread_id,
+            user_id=user_id,
+        )
+
     try:
         result = await run_agentic_loop(
             body.text,
@@ -79,7 +99,10 @@ async def chat(
             resolve_intent_fn=_resolve,
             discover_products_fn=_discover,
             start_orchestration_fn=start_orchestration,
+            create_standing_intent_fn=_create_standing_intent,
             use_agentic=agentic,
+            platform=body.platform,
+            thread_id=body.thread_id,
         )
     except Exception as e:
         return chat_first_response(
@@ -164,7 +187,7 @@ async def agentic_consent():
     """
     return {
         "scope": "discover_and_browse",
-        "allowed_actions": ["resolve_intent", "discover_products", "start_orchestration"],
+        "allowed_actions": ["resolve_intent", "discover_products", "start_orchestration", "create_standing_intent"],
         "requires_confirmation": ["checkout", "add_to_bundle"],
         "message": "Agent can discover products and start workflows. Checkout and add-to-bundle require user confirmation.",
     }

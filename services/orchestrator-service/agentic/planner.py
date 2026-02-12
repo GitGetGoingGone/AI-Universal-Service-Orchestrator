@@ -17,7 +17,8 @@ Rules:
 - For a NEW user message: first call resolve_intent to understand what they want.
 - If intent is "discover": call discover_products with the search_query.
 - If intent is checkout/track/support: you may complete with a message directing them.
-- For standing intents or long-running tasks: use start_orchestration.
+- For standing intents (condition-based, delayed, "notify me when"): use create_standing_intent.
+- For other long-running workflows: use start_orchestration.
 - Call "complete" when you have a response ready for the user.
 - Prefer completing in one or two tool calls when possible.
 - Extract location from "around me" or "near X" for discover_products when relevant.

@@ -23,6 +23,8 @@ from api.chat import router as chat_router
 from api.products import router as products_router
 from api.link_account import router as link_account_router
 from api.auxiliary import router as auxiliary_router
+from api.standing_intents import router as standing_intents_router
+from api.admin import router as admin_router
 
 app = FastAPI(
     title="Orchestrator Service",
@@ -46,6 +48,8 @@ app.include_router(chat_router)
 app.include_router(products_router)
 app.include_router(link_account_router)
 app.include_router(auxiliary_router)
+app.include_router(standing_intents_router)
+app.include_router(admin_router)
 
 health_checker = HealthChecker("orchestrator-service", "0.1.0")
 
@@ -109,6 +113,8 @@ async def root():
             "bundle_add": "POST /api/v1/bundle/add",
             "bundle_remove": "POST /api/v1/bundle/remove",
             "checkout": "POST /api/v1/checkout",
+            "standing_intents": "POST /api/v1/standing-intents",
+            "standing_intent_approve": "POST /api/v1/standing-intents/{id}/approve",
             "agentic_consent": "GET /api/v1/agentic-consent",
             "agentic_handoff": "GET /api/v1/agentic-handoff",
             "link_account": "POST /api/v1/link-account",

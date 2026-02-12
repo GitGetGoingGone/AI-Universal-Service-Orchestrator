@@ -662,6 +662,71 @@ async def get_agent_action_models() -> List[Dict[str, Any]]:
         return []
 
 
+async def upsert_products_from_legacy(
+    partner_id: str,
+    products: List[Dict[str, Any]],
+    replace_legacy: bool = False,
+) -> Dict[str, Any]:
+    """
+    Insert or upsert products from Legacy Adapter (Module 2).
+    Normalized products are indexed for Scout Engine discovery.
+
+    replace_legacy: If True, soft-delete existing products with metadata.source='legacy_adapter'
+    for this partner before inserting. Prevents duplicates on re-import.
+    """
+    client = get_supabase()
+    if not client:
+        return {"inserted": 0, "updated": 0, "error": "Database not configured"}
+
+    try:
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        if replace_legacy:
+            # Soft-delete existing legacy products for this partner
+            all_rows = (
+                client.table("products")
+                .select("id, metadata")
+                .eq("partner_id", partner_id)
+                .is_("deleted_at", "null")
+                .execute()
+            )
+            for row in all_rows.data or []:
+                meta = row.get("metadata") or {}
+                if isinstance(meta, dict) and meta.get("source") == "legacy_adapter":
+                    client.table("products").update({
+                        "deleted_at": now,
+                        "updated_at": now,
+                    }).eq("id", row["id"]).execute()
+
+        inserted = 0
+        for p in products:
+            legacy_id = p.get("id") or ""
+            metadata = dict(p.get("metadata") or {})
+            metadata["legacy_id"] = legacy_id
+            row = {
+                "partner_id": partner_id,
+                "name": p.get("name") or "Unknown",
+                "description": p.get("description") or "",
+                "price": float(p.get("price", 0)),
+                "currency": p.get("currency", "USD"),
+                "capabilities": p.get("capabilities") or [],
+                "metadata": metadata,
+                "url": p.get("url"),
+                "brand": p.get("brand"),
+                "image_url": p.get("image_url"),
+                "availability": p.get("availability", "in_stock"),
+                "is_eligible_search": True,
+                "is_eligible_checkout": False,
+            }
+            client.table("products").insert(row).execute()
+            inserted += 1
+
+        return {"inserted": inserted, "updated": 0}
+    except Exception as e:
+        return {"inserted": 0, "updated": 0, "error": str(e)}
+
+
 async def get_platform_manifest_config() -> Optional[Dict[str, Any]]:
     """Get active platform manifest config."""
     client = get_supabase()

@@ -203,6 +203,80 @@ async def start_orchestration(
         }
 
 
+async def start_standing_intent_orchestration(
+    message: str,
+    approval_timeout_hours: int = 24,
+    platform: Optional[str] = None,
+    thread_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Start standing intent orchestrator. Returns instance ID or error."""
+    url = f"{settings.durable_orchestrator_url}/api/orchestrators/standing_intent_orchestrator"
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.post(
+                url,
+                json={
+                    "message": message,
+                    "approval_timeout_hours": approval_timeout_hours,
+                    "platform": platform,
+                    "thread_id": thread_id,
+                },
+            )
+            r.raise_for_status()
+            data = r.json()
+            instance_id = data.get("id") or data.get("instanceId") or data.get("instance_id")
+            return {"id": instance_id, "statusQueryGetUri": data.get("statusQueryGetUri")}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def raise_orchestrator_event(instance_id: str, event_name: str, event_data: Optional[Dict[str, Any]] = None) -> None:
+    """Raise external event to wake a waiting orchestrator."""
+    url = f"{settings.durable_orchestrator_url}/api/orchestrators/{instance_id}/raise/{event_name}"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(url, json=event_data or {})
+        r.raise_for_status()
+
+
+async def get_orchestrator_status(instance_id: str) -> Optional[Dict[str, Any]]:
+    """Get orchestration instance status."""
+    url = f"{settings.durable_orchestrator_url}/api/orchestrators/{instance_id}/status"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            return r.json()
+    except Exception:
+        return None
+
+
+async def create_standing_intent_via_api(
+    intent_description: str,
+    approval_timeout_hours: int = 24,
+    platform: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create standing intent via orchestrator API (for agentic flow)."""
+    url = f"{settings.orchestrator_base_url}/api/v1/standing-intents"
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.post(
+                url,
+                json={
+                    "intent_description": intent_description,
+                    "approval_timeout_hours": approval_timeout_hours,
+                    "platform": platform,
+                    "thread_id": thread_id,
+                    "user_id": user_id,
+                },
+            )
+            r.raise_for_status()
+            return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
 async def register_thread_mapping(
     platform: str,
     thread_id: str,

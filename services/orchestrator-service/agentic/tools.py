@@ -40,6 +40,20 @@ TOOL_DEFS = [
         },
     },
     {
+        "name": "create_standing_intent",
+        "description": "Create a standing intent requiring user approval. Use when user wants condition-based or delayed action (e.g. 'notify me when', 'remind me to', 'schedule for later').",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "intent_description": {"type": "string", "description": "Human-readable description of the standing intent"},
+                "approval_timeout_hours": {"type": "integer", "description": "Hours to wait for approval", "default": 24},
+                "platform": {"type": "string", "description": "Chat platform (chatgpt, gemini) for webhook push"},
+                "thread_id": {"type": "string", "description": "Chat thread ID for approval notification"},
+            },
+            "required": ["intent_description"],
+        },
+    },
+    {
         "name": "complete",
         "description": "Finish the conversation and return the final response to the user. Use when you have enough information.",
         "parameters": {
@@ -61,6 +75,7 @@ async def execute_tool(
     resolve_intent_fn: Optional[Callable] = None,
     discover_products_fn: Optional[Callable] = None,
     start_orchestration_fn: Optional[Callable] = None,
+    create_standing_intent_fn: Optional[Callable] = None,
 ) -> Dict[str, Any]:
     """
     Execute a tool by name with given parameters.
@@ -87,6 +102,16 @@ async def execute_tool(
         return await start_orchestration_fn(
             message=params.get("message", ""),
             wait_event_name=params.get("wait_event_name", "WakeUp"),
+        )
+
+    if name == "create_standing_intent":
+        if not create_standing_intent_fn:
+            return {"error": "create_standing_intent not configured"}
+        return await create_standing_intent_fn(
+            intent_description=params.get("intent_description", ""),
+            approval_timeout_hours=params.get("approval_timeout_hours", 24),
+            platform=params.get("platform"),
+            thread_id=params.get("thread_id"),
         )
 
     if name == "complete":

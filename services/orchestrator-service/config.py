@@ -58,6 +58,11 @@ class Settings:
         get_env("OMNICHANNEL_BROKER_URL") or "http://localhost:8004"
     ).rstrip("/")
 
+    # Self-URL for internal API calls (e.g. standing intent from chat)
+    orchestrator_base_url: str = (
+        get_env("ORCHESTRATOR_SERVICE_URL") or "http://localhost:8002"
+    ).rstrip("/")
+
     # Azure OpenAI (for Agentic AI planner - optional)
     azure_openai_endpoint: str = get_env("AZURE_OPENAI_ENDPOINT") or ""
     azure_openai_api_key: str = get_env("AZURE_OPENAI_API_KEY") or ""

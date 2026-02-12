@@ -17,8 +17,11 @@ async def run_agentic_loop(
     resolve_intent_fn=None,
     discover_products_fn=None,
     start_orchestration_fn=None,
+    create_standing_intent_fn=None,
     use_agentic: bool = True,
     max_iterations: int = 5,
+    platform: Optional[str] = None,
+    thread_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run the agentic decision loop until completion.
@@ -69,12 +72,18 @@ async def run_agentic_loop(
                     if loc:
                         tool_args.setdefault("location", loc)
 
+            if tool_name == "create_standing_intent":
+                tool_args = dict(tool_args)
+                tool_args.setdefault("platform", platform)
+                tool_args.setdefault("thread_id", thread_id)
+
             result = await execute_tool(
                 tool_name,
                 tool_args,
                 resolve_intent_fn=resolve_intent_fn,
                 discover_products_fn=discover_products_fn,
                 start_orchestration_fn=start_orchestration_fn,
+                create_standing_intent_fn=create_standing_intent_fn,
             )
 
             state["last_tool_result"] = result
@@ -90,6 +99,9 @@ async def run_agentic_loop(
                 products_data = result.get("data", result)
                 adaptive_card = result.get("adaptive_card")
                 machine_readable = result.get("machine_readable")
+            elif tool_name == "create_standing_intent":
+                intent_data = intent_data or {}
+                intent_data["standing_intent"] = result
 
             if tool_name == "complete":
                 break

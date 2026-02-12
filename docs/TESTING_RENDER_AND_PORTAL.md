@@ -218,6 +218,15 @@ curl -s "$DISCOVERY/api/v1/products/PRODUCT_UUID/validate-discovery" | jq '{ acp
 
 Expected: `acp.valid`, `ucp.valid` (booleans), optional `acp.errors`, `ucp.errors` arrays.
 
+**5b.7 Legacy Adapter (Module 2) – ingest CSV/Excel/JSON**
+
+```bash
+curl -s -X POST "$DISCOVERY/api/v1/admin/legacy/ingest?partner_id=PARTNER_UUID" \
+  -F "file=@apps/portal/public/sample-products-shopify.csv" | jq .
+```
+
+Expected: `inserted`, `products_count`, `preview`. Products are indexed for Scout Engine discovery.
+
 ---
 
 ## 6. Webhook service (no stubs)

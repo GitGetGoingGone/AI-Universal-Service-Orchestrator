@@ -162,3 +162,39 @@ def reject_proof_endpoint(proof_id: str, body: RejectBody) -> Dict[str, Any]:
     if not proof:
         raise HTTPException(status_code=404, detail="Proof not found or not in proof_ready state")
     return proof
+
+
+class VisionCheckBody(BaseModel):
+    source_of_truth_url: Optional[str] = None
+
+
+@router.post("/proofs/{proof_id}/vision-check")
+def vision_check(proof_id: str, body: Optional[VisionCheckBody] = None) -> Dict[str, Any]:
+    """
+    Vision AI comparison: proof image vs source of truth.
+    Returns similarity score and recommendation (auto_approve, human_review, reject).
+    If auto_approve, optionally auto-approves the proof.
+    """
+    from vision_ai import auto_approve_with_vision_ai
+
+    proof = get_proof_state(proof_id)
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    if proof.get("current_state") != "proof_ready":
+        raise HTTPException(status_code=400, detail=f"Proof must be in proof_ready state, got {proof.get('current_state')}")
+
+    img_url = proof.get("proof_image_url")
+    if not img_url:
+        return {"similarity_score": 0.0, "recommendation": "reject", "message": "No proof image"}
+
+    source_url = (body and body.source_of_truth_url) or None
+    score, recommendation = auto_approve_with_vision_ai(img_url, source_url)
+
+    result = {"similarity_score": score, "recommendation": recommendation}
+    if recommendation == "auto_approve":
+        approved = approve_proof(proof_id, method="vision_ai", confidence=score)
+        if approved:
+            result["auto_approved"] = True
+            result["proof"] = approved
+
+    return result

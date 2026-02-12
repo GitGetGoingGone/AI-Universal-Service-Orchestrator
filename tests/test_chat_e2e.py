@@ -62,3 +62,4 @@ async def test_agentic_consent_endpoint(orchestrator_url):
     data = r.json()
     assert "allowed_actions" in data
     assert "resolve_intent" in data["allowed_actions"]
+    assert "create_standing_intent" in data["allowed_actions"]

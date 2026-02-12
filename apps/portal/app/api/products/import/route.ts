@@ -26,9 +26,49 @@ export async function POST(request: Request) {
 
   if (!file || !source) {
     return NextResponse.json(
-      { detail: "Missing 'file' or 'source'. Use source: shopify_csv" },
+      { detail: "Missing 'file' or 'source'. Use source: shopify_csv or legacy" },
       { status: 400 }
     );
+  }
+
+  // Legacy Adapter (Module 2): proxy to Discovery service
+  if (source === "legacy") {
+    const discoveryUrl = process.env.DISCOVERY_SERVICE_URL;
+    if (!discoveryUrl) {
+      return NextResponse.json(
+        { detail: "DISCOVERY_SERVICE_URL not configured for Legacy import" },
+        { status: 503 }
+      );
+    }
+    try {
+      const buf = await file.arrayBuffer();
+      const blob = new Blob([buf]);
+      const fd = new FormData();
+      fd.set("file", blob, file.name);
+      const res = await fetch(
+        `${discoveryUrl.replace(/\/$/, "")}/api/v1/admin/legacy/ingest?partner_id=${encodeURIComponent(partnerId)}`,
+        { method: "POST", body: fd }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return NextResponse.json(
+          { detail: data.error || data.detail || "Legacy ingest failed" },
+          { status: res.status }
+        );
+      }
+      return NextResponse.json({
+        created: data.inserted ?? 0,
+        failed: 0,
+        skipped: (data.products_count ?? 0) - (data.inserted ?? 0),
+        errors: [],
+        total_rows: data.products_count ?? 0,
+      });
+    } catch (e) {
+      return NextResponse.json(
+        { detail: e instanceof Error ? e.message : "Legacy ingest failed" },
+        { status: 500 }
+      );
+    }
   }
 
   if (file.size > MAX_FILE_SIZE) {

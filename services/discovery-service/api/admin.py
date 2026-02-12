@@ -1,12 +1,20 @@
-"""Admin endpoints for Module 1: manifest ingest, embedding backfill."""
+"""Admin endpoints for Module 1: manifest ingest, embedding backfill; Module 2: Legacy Adapter."""
 
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
+from db import upsert_products_from_legacy
 from manifest_cache import cache_partner_manifest
 from semantic_search import backfill_product_embedding
+
+from adapters.legacy_adapter import (
+    parse_csv_to_products,
+    parse_excel_to_products,
+    parse_json_to_products,
+    DEFAULT_COLUMN_MAP,
+)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 
@@ -88,3 +96,91 @@ async def backfill_embeddings(product_id: Optional[str] = Query(None)):
         return {"product_id": product_id, "updated": ok}
     # TODO: batch backfill when product_id omitted
     return {"message": "Specify product_id for single backfill; batch coming soon"}
+
+
+# --- Module 2: Legacy Adapter Layer ---
+
+
+class LegacyIngestColumnMap(BaseModel):
+    """Optional column mapping override: legacy_header -> canonical_field."""
+
+    column_map: Optional[Dict[str, str]] = None
+
+
+@router.post("/legacy/ingest")
+async def legacy_ingest(
+    partner_id: str = Query(..., description="Partner ID that owns these products"),
+    replace_legacy: bool = Query(False, description="Replace existing legacy products before insert"),
+    column_map: Optional[str] = Query(None, description="JSON object of column mapping overrides"),
+    file: UploadFile = File(..., description="CSV, Excel (.xlsx), or JSON file"),
+):
+    """
+    Legacy Adapter: Ingest CSV, Excel, or JSON feed into products table.
+
+    Maps legacy columns to canonical schema (name, description, price, image_url, etc.).
+    Normalized products are indexed for Scout Engine discovery.
+
+    Supports: Shopify export, WooCommerce CSV, generic CSV/Excel/JSON.
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    cm: Optional[Dict[str, str]] = None
+    if column_map:
+        try:
+            import json
+
+            cm = json.loads(column_map)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid column_map JSON")
+
+    filename = (file.filename or "").lower()
+    products: List[Dict[str, Any]] = []
+
+    if filename.endswith(".csv"):
+        products = parse_csv_to_products(content, cm)
+    elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+        try:
+            products = parse_excel_to_products(content, cm)
+        except ImportError:
+            raise HTTPException(
+                status_code=503,
+                detail="Excel support requires openpyxl. Add to requirements.txt: openpyxl>=3.0.0",
+            )
+    elif filename.endswith(".json"):
+        products = parse_json_to_products(content, cm)
+    else:
+        # Try JSON first, then CSV
+        try:
+            products = parse_json_to_products(content, cm)
+        except Exception:
+            products = parse_csv_to_products(content, cm)
+
+    if not products:
+        return {
+            "products_count": 0,
+            "inserted": 0,
+            "message": "No valid products found in file",
+            "column_map": cm or DEFAULT_COLUMN_MAP,
+        }
+
+    result = await upsert_products_from_legacy(
+        partner_id=partner_id,
+        products=products,
+        replace_legacy=replace_legacy,
+    )
+
+    return {
+        "products_count": len(products),
+        "inserted": result.get("inserted", 0),
+        "updated": result.get("updated", 0),
+        "error": result.get("error"),
+        "preview": products[:3] if products else [],
+    }
+
+
+@router.get("/legacy/column-map")
+async def legacy_column_map():
+    """Return default column mapping for legacy formats."""
+    return {"column_map": DEFAULT_COLUMN_MAP}

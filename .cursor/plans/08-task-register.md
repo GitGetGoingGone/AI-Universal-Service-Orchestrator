@@ -11,6 +11,7 @@ overview: One place for all planned tasks and latest status. Update status here;
 - **See what’s pending**: Scan for `Pending` or `In progress`.
 - **Update status**: Change the status cell when work is done (or started), and optionally add a short note.
 - **Find details**: Use the **Source** link to open the section that defines the task.
+- **Plan for pending**: [docs/PENDING_FEATURES_PLAN.md](../../docs/PENDING_FEATURES_PLAN.md) – detailed plan for all pending features.
 
 **Status key**: `Pending` | `In progress` | `Done`
 
@@ -63,13 +64,13 @@ overview: One place for all planned tasks and latest status. Update status here;
 
 | Task | Status | Source |
 |------|--------|--------|
-| Pillar 1: Data model schema finalized, capability mapping, inventory sync architecture, affiliate link tracking schema | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
+| Pillar 1: Data model schema finalized, capability mapping, inventory sync architecture, affiliate link tracking schema | Done | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Pillar 2: Legal framework, ToS drafted, MoR decision, insurance, affiliate commission agreements | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Pillar 3: Manifest template finalized, action models, offline discovery strategy, affiliate manifest integration | Done | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
-| Pillar 4: SLA thresholds, buffer calculations, kill switch protocol, affiliate partner SLAs | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
-| Pillar 5: Proof state machine, Vision AI integration, approval workflows | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
+| Pillar 4: SLA thresholds, buffer calculations, kill switch protocol, affiliate partner SLAs | Done | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
+| Pillar 5: Proof state machine, Vision AI integration, approval workflows | Done | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 | Chat-First Foundation: API response standard, JSON-LD schemas, Adaptive Cards library, Link Account flow | Done | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
-| Month 0 Integration Hub: Durable Orchestrator shell, Agentic AI configured, Adaptive Card Generator, integration testing | Pending | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
+| Month 0 Integration Hub: Durable Orchestrator shell, Agentic AI configured, Adaptive Card Generator, integration testing | Done | [05 § Pillar Checklist](./05-implementation.md#pillar-implementation-checklist) |
 
 ---
 
@@ -86,6 +87,7 @@ overview: One place for all planned tasks and latest status. Update status here;
 | Feed URL or delivery: public URL or per-partner (?partner_id=), OpenAI registration (manual) | Done |
 | OpenAI merchant/feed onboarding completed | Pending |
 | /.well-known/ucp endpoint with UCP profile | Done |
+| UCP REST Schema (rest.openapi.json) with searchGifts, custom endpoint | Done |
 | Catalog API: UCP Item shape (id, title, price cents, image_url), optional seller per item | Done |
 | Checkout/order APIs (optional) for full UCP checkout | Done |
 | Merchant on record: partner as seller in feed and catalog; product URL shows "Sold by {partner}" | Done |
@@ -100,7 +102,7 @@ overview: One place for all planned tasks and latest status. Update status here;
 
 | Module | Name | Phase | Status |
 |--------|------|-------|--------|
-| 2 | Legacy Adapter Layer | Phase 2 | Pending |
+| 2 | Legacy Adapter Layer | Phase 2 | Done |
 | 3 | AI-First Discoverability | Phase 2 | Done |
 | 8 | Virtual Proofing Engine | Phase 2 | Done |
 | 10 | HubNegotiator & Bidding | Phase 2 | Done |
@@ -127,6 +129,7 @@ overview: One place for all planned tasks and latest status. Update status here;
 | 8 | **Portal – Omnichannel connect** | Done – Connect options (WhatsApp) in portal |
 | 9 | **Order → Task Queue** | Done – Discovery checkout calls Task Queue |
 | 10 | **Checkout and payments** | Done – Payment page with Stripe Elements, Pay link in orders |
+| 11 | **Legacy Adapter (Module 2)** | Done – POST /api/v1/admin/legacy/ingest, portal Import → Legacy |
 
 ---
 
@@ -137,10 +140,10 @@ overview: One place for all planned tasks and latest status. Update status here;
 | ID | Task | Status | Source |
 |----|------|--------|--------|
 | ucp-checkout-api | UCP Checkout: Discovery service REST API (Create, Get, Update, Complete, Cancel) per UCP spec | Done | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
-| chatgpt-app-mcp | ChatGPT App: MCP server with 12 tools, deploy, submit to App Directory | Pending | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
-| unified-web-app | Unified Web App: Next.js chat app with ChatGPT or Gemini provider switch | Pending | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
-| orchestrator-auxiliary | Orchestrator: auxiliary endpoints (manifest, order status, classify-support, returns) | Pending | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
-| chatgpt-gemini-test-scenarios | Docs: CHATGPT_GEMINI_TEST_SCENARIOS.md with test prompts for UCP, ChatGPT app, web app | Pending | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
+| chatgpt-app-mcp | ChatGPT App: MCP server with 12 tools, deploy, submit to App Directory | Done | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
+| unified-web-app | Unified Web App: Next.js chat app with ChatGPT or Gemini provider switch | Done | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
+| orchestrator-auxiliary | Orchestrator: auxiliary endpoints (manifest, order status, classify-support, returns) | Done | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
+| chatgpt-gemini-test-scenarios | Docs: CHATGPT_GEMINI_TEST_SCENARIOS.md with test prompts for UCP, ChatGPT app, web app | Done | [05 § ChatGPT App Directory](./05-implementation.md#chatgpt-app-directory-gemini-ucp-and-unified-web-app) |
 
 ---
 
@@ -163,6 +166,9 @@ overview: One place for all planned tasks and latest status. Update status here;
 | Module 8: Virtual Proofing Engine (proof_states, DALL-E generate, approve/reject) | Done |
 | Portal – Omnichannel connect (WhatsApp) | Done |
 | Chat-First Foundation (Link Account, Adaptive Cards, JSON-LD) | Done |
+| Module 2: Legacy Adapter Layer | Done – CSV/Excel/JSON ingest, column mapping, Scout Engine integration, portal import |
+| UCP REST Schema (rest.openapi.json) | Done – searchGifts operationId, gift params, well-known points to custom schema |
+| ChatGPT App (MCP), Unified Web App, Orchestrator auxiliary | Done – see 5c |
 
 ---
 

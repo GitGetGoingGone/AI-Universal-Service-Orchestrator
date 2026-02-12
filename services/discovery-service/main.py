@@ -115,6 +115,7 @@ async def root():
         "endpoints": {
             "discover": "GET /api/v1/discover?intent=<query>",
             "manifest_ingest": "POST /api/v1/admin/manifest/ingest",
+            "legacy_ingest": "POST /api/v1/admin/legacy/ingest",
             "embedding_backfill": "POST /api/v1/admin/embeddings/backfill",
             "ucp_catalog": "GET /api/v1/ucp/items",
             "ucp_rest_schema": "GET /api/v1/ucp/rest.openapi.json",

@@ -3,10 +3,11 @@
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 
-type ImportSource = "shopify_csv";
+type ImportSource = "shopify_csv" | "legacy";
 
 const SOURCES: { value: ImportSource; label: string }[] = [
   { value: "shopify_csv", label: "Shopify CSV export" },
+  { value: "legacy", label: "Legacy (CSV / Excel / JSON)" },
 ];
 
 type Props = {
@@ -105,15 +106,19 @@ export function ImportProductsDialog({ open, onClose, onSuccess }: Props) {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">CSV file</label>
+            <label className="block text-sm font-medium mb-1">
+              {source === "legacy" ? "CSV, Excel, or JSON file" : "CSV file"}
+            </label>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,text/csv"
+              accept={source === "legacy" ? ".csv,.xlsx,.xls,.json,text/csv,application/json" : ".csv,text/csv"}
               className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
             />
             <p className="text-xs text-[rgb(var(--color-text-secondary))] mt-1">
-              Use Shopify product export columns: Handle, Title, Body (HTML), Vendor, Type, Tags, Published, Variant Price, Image Src, etc.
+              {source === "legacy"
+                ? "Legacy Adapter: CSV, Excel (.xlsx), or JSON. Supports Shopify, WooCommerce, generic exports."
+                : "Use Shopify product export columns: Handle, Title, Body (HTML), Vendor, Type, Tags, Published, Variant Price, Image Src, etc."}
             </p>
           </div>
           {error && <p className="text-sm text-[rgb(var(--color-error))]">{error}</p>}

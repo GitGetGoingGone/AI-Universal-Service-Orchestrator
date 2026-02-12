@@ -13,6 +13,7 @@ Integrates with Webhook Push Bridge for status updates to chat threads.
 import json
 import logging
 import os
+from datetime import timedelta
 import urllib.request
 
 import azure.functions as func
@@ -37,7 +38,7 @@ async def start_orchestrator(
     """
     orchestrator_name = req.route_params.get("orchestrator_name", "base_orchestrator")
 
-    if orchestrator_name not in ("base_orchestrator",):
+    if orchestrator_name not in ("base_orchestrator", "standing_intent_orchestrator"):
         return func.HttpResponse(
             f"Unknown orchestrator: {orchestrator_name}",
             status_code=400,
@@ -151,6 +152,70 @@ def base_orchestrator(context: df.DurableOrchestrationContext):
     )
 
     return {"status": "completed", "final_result": final_result}
+
+
+# ---------------------------------------------------------------------------
+# Standing Intent Orchestrator: wait_for_external_event(UserApproval)
+# ---------------------------------------------------------------------------
+
+@bp.orchestration_trigger(context_name="context")
+def standing_intent_orchestrator(context: df.DurableOrchestrationContext):
+    """
+    Standing intent workflow: scout → wait for UserApproval → complete.
+    Uses wait_for_external_event with timeout for approval.
+    """
+    input_data = context.get_input() or {}
+    message = input_data.get("message", "Standing intent waiting for approval")
+    approval_timeout_hours = input_data.get("approval_timeout_hours", 24)
+    platform = input_data.get("platform")
+    thread_id = input_data.get("thread_id")
+
+    # Step 1: Push approval request to chat
+    yield context.call_activity(
+        "status_narrator_activity",
+        {
+            "platform": platform,
+            "thread_id": thread_id,
+            "narrative": f"Standing intent created: {message}. Please approve or reject.",
+            "adaptive_card": {
+                "type": "AdaptiveCard",
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "version": "1.5",
+                "body": [
+                    {"type": "TextBlock", "text": "Standing Intent Approval", "weight": "Bolder", "size": "Large"},
+                    {"type": "TextBlock", "text": message, "wrap": True},
+                ],
+                "actions": [
+                    {"type": "Action.Submit", "title": "Approve", "data": {"event": "UserApproval", "approved": True}},
+                    {"type": "Action.Submit", "title": "Reject", "data": {"event": "UserApproval", "approved": False}},
+                ],
+            },
+            "metadata": {"orchestration_instance_id": context.instance_id},
+        },
+    )
+
+    # Step 2: Wait for UserApproval (with timeout)
+    timeout = timedelta(hours=approval_timeout_hours)
+    approval_event = yield context.wait_for_external_event("UserApproval", timeout)
+
+    if approval_event is None:
+        return {"status": "timeout", "message": "Approval timeout - no response received"}
+
+    approved = approval_event.get("approved", False) if isinstance(approval_event, dict) else bool(approval_event)
+
+    # Step 3: Push result to chat
+    if platform and thread_id:
+        yield context.call_activity(
+            "status_narrator_activity",
+            {
+                "platform": platform,
+                "thread_id": thread_id,
+                "narrative": "Standing intent approved. Proceeding." if approved else "Standing intent rejected.",
+                "metadata": {"approved": approved},
+            },
+        )
+
+    return {"status": "approved" if approved else "rejected", "approved": approved}
 
 
 # ---------------------------------------------------------------------------
