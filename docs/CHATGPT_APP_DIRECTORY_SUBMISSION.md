@@ -62,11 +62,13 @@ How to submit the USO ChatGPT App (MCP server) to the ChatGPT App Directory.
 
 4. **Check Render logs** – Dashboard → uso-chatgpt-app → Logs. Look for "MCP transport error" or stack traces.
 
-5. **URL format** – Use the root URL: `https://uso-chatgpt-app.onrender.com` (no trailing slash, no path). ChatGPT uses this as the MCP endpoint.
+5. **URL format** – Use the root URL: `https://uso-chatgpt-app.onrender.com` (no trailing slash). Both `/` and `/mcp` are supported.
+
+6. **"Nothing happens" after entering URL** – ChatGPT may send GET with `Accept: *`; we now add `text/event-stream` so the transport accepts it. Also try `enableJsonResponse: true` for JSON responses. If it still hangs, try the `/mcp` path: `https://uso-chatgpt-app.onrender.com/mcp`.
 
 ---
 
-## 6. References
+## 7. References
 
 - [OpenAI Apps SDK](https://developers.openai.com/apps-sdk)
 - [Building MCP servers for ChatGPT](https://developers.openai.com/apps-sdk/build/mcp-server)

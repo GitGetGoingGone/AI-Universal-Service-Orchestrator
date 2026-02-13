@@ -172,6 +172,15 @@ function logRequest(req: IncomingMessage) {
   console.log(`[MCP] ${req.method} ${url} | Accept: ${accept || "(none)"}`);
 }
 
+/** Adds text/event-stream to Accept for GET (ChatGPT sends Accept: *). */
+function ensureAcceptForMCP(req: IncomingMessage): void {
+  const accept = req.headers["accept"] ?? "";
+  if (!accept.includes("text/event-stream")) {
+    const newAccept = accept ? accept + ", text/event-stream" : "application/json, text/event-stream";
+    (req.headers as Record<string, string>)["accept"] = newAccept;
+  }
+}
+
 const server = createServer((req, res) => {
   // Health check for Render / load balancers
   if (req.url === "/health" && req.method === "GET") {
@@ -182,10 +191,12 @@ const server = createServer((req, res) => {
 
   if (req.method === "GET" || req.method === "POST") {
     logRequest(req);
+    if (req.method === "GET") ensureAcceptForMCP(req);
     (async () => {
       const mcpServer = createMcpServer();
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
+        enableJsonResponse: true,
       });
       transport.onerror = (err) => console.error("[MCP] transport error:", err);
 
