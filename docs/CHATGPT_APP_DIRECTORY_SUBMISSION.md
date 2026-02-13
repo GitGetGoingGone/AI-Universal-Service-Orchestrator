@@ -46,7 +46,27 @@ How to submit the USO ChatGPT App (MCP server) to the ChatGPT App Directory.
 
 ---
 
-## 5. References
+## 5. Troubleshooting: "Error creating connector" / 500 Internal Server Error
+
+**Symptom:** ChatGPT shows "Received error from MCP server: Server error '500 Internal Server Error'" when creating the connector.
+
+**Causes and fixes:**
+
+1. **Env vars not set on Render** – Ensure `ORCHESTRATOR_URL` and `DISCOVERY_URL` are set in the ChatGPT App service:
+   - `ORCHESTRATOR_URL` = `https://uso-orchestrator.onrender.com`
+   - `DISCOVERY_URL` = `https://uso-discovery.onrender.com`
+
+2. **Cold start** – On free tier, the service may spin down. Run `./scripts/health-and-warmup.sh` first, or hit `https://uso-chatgpt-app.onrender.com/health` to wake it, then retry the connector.
+
+3. **MCP SDK compatibility** – Ensure `@modelcontextprotocol/sdk` is `^1.0.0` or later. If issues persist, try upgrading: `npm update @modelcontextprotocol/sdk`.
+
+4. **Check Render logs** – Dashboard → uso-chatgpt-app → Logs. Look for "MCP transport error" or stack traces.
+
+5. **URL format** – Use the root URL: `https://uso-chatgpt-app.onrender.com` (no trailing slash, no path). ChatGPT uses this as the MCP endpoint.
+
+---
+
+## 6. References
 
 - [OpenAI Apps SDK](https://developers.openai.com/apps-sdk)
 - [Building MCP servers for ChatGPT](https://developers.openai.com/apps-sdk/build/mcp-server)

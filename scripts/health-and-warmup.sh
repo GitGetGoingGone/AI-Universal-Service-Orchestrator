@@ -9,7 +9,7 @@
 #   ./scripts/health-and-warmup.sh --e2e --webhook  # also test webhook push
 #
 # Override URLs via env:
-#   DISCOVERY_URL=... INTENT_URL=... ./scripts/health-and-warmup.sh
+#   DISCOVERY_URL=... INTENT_URL=... CHATGPT_APP_URL=... ./scripts/health-and-warmup.sh
 #   OMNICHANNEL_URL=... RESOURCING_URL=... PAYMENT_URL=...
 #
 
@@ -27,6 +27,7 @@ PAYMENT="${PAYMENT_URL:-https://uso-payment.onrender.com}"
 TASK_QUEUE="${TASK_QUEUE_URL:-https://uso-task-queue.onrender.com}"
 HUB_NEGOTIATOR="${HUB_NEGOTIATOR_URL:-https://uso-hub-negotiator.onrender.com}"
 HYBRID_RESPONSE="${HYBRID_RESPONSE_URL:-https://uso-hybrid-response.onrender.com}"
+CHATGPT_APP="${CHATGPT_APP_URL:-https://uso-chatgpt-app.onrender.com}"
 
 # Timeout for curl (seconds); Render cold starts can take 30-60s
 TIMEOUT=90
@@ -54,6 +55,7 @@ echo "  Payment:             $PAYMENT"
 echo "  Task Queue:          $TASK_QUEUE"
 echo "  Hub Negotiator:      $HUB_NEGOTIATOR"
 echo "  Hybrid Response:     $HYBRID_RESPONSE"
+echo "  ChatGPT App (MCP):   $CHATGPT_APP"
 echo ""
 
 # --- Warmup first (wake services from cold sleep before health checks) ---
@@ -80,6 +82,8 @@ echo "  Warming Hub Negotiator..."
 curl -sf --max-time "$TIMEOUT" "$HUB_NEGOTIATOR/health" > /dev/null || true
 echo "  Warming Hybrid Response..."
 curl -sf --max-time "$TIMEOUT" "$HYBRID_RESPONSE/health" > /dev/null || true
+echo "  Warming ChatGPT App (MCP)..."
+curl -sf --max-time "$TIMEOUT" "$CHATGPT_APP/health" > /dev/null || curl -sf --max-time "$TIMEOUT" "$CHATGPT_APP/" > /dev/null || true
 echo "  Done."
 echo ""
 
@@ -132,6 +136,7 @@ check_optional "Payment"            "$PAYMENT/health"
 check_optional "Task Queue"         "$TASK_QUEUE/health"
 check_optional "Hub Negotiator"     "$HUB_NEGOTIATOR/health"
 check_optional "Hybrid Response"    "$HYBRID_RESPONSE/health"
+check_optional "ChatGPT App (MCP)"  "$CHATGPT_APP/health"
 
 # --- Optional: Chat E2E ---
 if [ "$run_e2e" = true ]; then

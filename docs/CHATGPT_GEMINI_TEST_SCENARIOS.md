@@ -223,7 +223,58 @@ curl -s "https://uso-discovery.onrender.com/api/v1/ucp/items?q=products&limit=10
 
 ---
 
-## 6. Environment Variables
+## 6. Why Gemini Asks for curl Output (and Simulates)
+
+**"Why does Gemini ask me to paste the curl output instead of calling the API?"**
+
+Gemini's chat interface **cannot make HTTP requests** to arbitrary URLs. It can read web pages when you share them (e.g. via Google Search) but cannot execute `GET` or `POST` to your API. So when you say "try q=products", it cannot call the API—it asks you to share the URL or paste the response so it can reason about it.
+
+**"Why does Gemini simulate checkout instead of calling the real API?"**
+
+Same reason: it cannot execute `POST /api/v1/ucp/checkout`. It may also invent a custom payload format (e.g. `UC_PURCHASE_INTENT`) instead of using your actual UCP checkout schema.
+
+**Your real checkout API (live today):**
+
+| Operation | Method | URL |
+|-----------|--------|-----|
+| Create checkout | POST | `https://uso-discovery.onrender.com/api/v1/ucp/checkout` |
+| Get checkout | GET | `https://uso-discovery.onrender.com/api/v1/ucp/checkout/{id}` |
+| Complete | POST | `https://uso-discovery.onrender.com/api/v1/ucp/checkout/{id}/complete` |
+
+**Correct create_checkout payload (not UC_PURCHASE_INTENT):**
+
+```json
+{
+  "line_items": [
+    {"item": {"id": "c2c19ec8-7ef6-4d93-8bd7-d01fd004fbf4", "title": "Limo Rental per Hour", "price": 12500}, "quantity": 1},
+    {"item": {"id": "2dd17d3a-9675-4655-b6db-1eff47e2ae35", "title": "Fresh Rose Bouquet", "price": 4999}, "quantity": 1}
+  ],
+  "currency": "USD",
+  "payment": {}
+}
+```
+
+**To test live:** Run this curl yourself (Gemini cannot execute it). Creates order → appears in partner portal:
+
+```bash
+curl -X POST "https://uso-discovery.onrender.com/api/v1/ucp/checkout" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "line_items": [
+      {"item": {"id": "b0378ebb-a40f-4d58-bd99-65dc8c0f9ebd", "title": "Swedish Massage 60 min", "price": 8900}, "quantity": 1},
+      {"item": {"id": "de003ef8-deb4-4300-954a-9c58125ff764", "title": "Organic Honey 12oz", "price": 1499}, "quantity": 1},
+      {"item": {"id": "0b4e5ac4-08de-4679-a739-62deac82b60e", "title": "Taxi Service", "price": 3000}, "quantity": 1}
+    ],
+    "currency": "USD",
+    "payment": {}
+  }' | jq .
+```
+
+Expected: `id`, `status`, `line_items`, `continue_url`. Order created with `order_legs` per partner → visible in partner portal.
+
+---
+
+## 7. Environment Variables
 
 | Variable | Example | Used By |
 |----------|---------|---------|

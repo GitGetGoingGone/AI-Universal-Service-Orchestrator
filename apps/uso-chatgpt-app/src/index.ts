@@ -4,7 +4,7 @@
  * 12 tools for AI Universal Service Orchestrator: discover, products, bundles, checkout, manifest, orders, support, returns.
  */
 
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -173,13 +173,39 @@ const transport = new StreamableHTTPServerTransport({
 
 await mcp.connect(transport);
 
+function safeWriteError(res: ServerResponse, status: number, message: string) {
+  if (!res.headersSent) {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Internal Server Error", message }));
+  }
+}
+
 const server = createServer((req, res) => {
+  // Health check for Render / load balancers
+  if (req.url === "/health" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok", service: "uso-chatgpt-app" }));
+    return;
+  }
+
   if (req.method === "GET" || req.method === "POST") {
-    transport.handleRequest(req as Parameters<typeof transport.handleRequest>[0], res);
+    (async () => {
+      try {
+        await transport.handleRequest(req as Parameters<typeof transport.handleRequest>[0], res);
+      } catch (err) {
+        console.error("MCP transport error:", err);
+        safeWriteError(res, 500, String(err));
+      }
+    })();
   } else {
     res.writeHead(405);
     res.end("Method Not Allowed");
   }
+});
+
+server.on("clientError", (err, socket) => {
+  console.error("Client error:", err);
+  socket.destroy();
 });
 
 server.listen(PORT, () => {
