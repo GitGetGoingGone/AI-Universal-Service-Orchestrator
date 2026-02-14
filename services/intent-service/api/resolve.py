@@ -19,6 +19,7 @@ class ResolveRequest(BaseModel):
 
     text: str = Field(..., min_length=1, max_length=2000, description="User message to resolve")
     user_id: Optional[str] = Field(None, description="Optional user ID for attribution")
+    last_suggestion: Optional[str] = Field(None, description="Previous assistant suggestion for refinement (e.g. 'I don't want flowers, add a movie')")
     persist: bool = Field(True, description="Persist intent to database")
 
 
@@ -39,7 +40,7 @@ async def resolve(
     Chat-First: Returns JSON-LD and machine-readable structure for AI agents.
     """
     # Resolve intent via LLM (async to avoid blocking)
-    resolved = await resolve_intent(body.text, user_id=body.user_id)
+    resolved = await resolve_intent(body.text, user_id=body.user_id, last_suggestion=body.last_suggestion)
 
     intent_id = None
     if body.persist and get_supabase():

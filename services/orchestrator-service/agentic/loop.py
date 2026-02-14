@@ -87,6 +87,7 @@ async def run_agentic_loop(
     max_iterations: int = 5,
     platform: Optional[str] = None,
     thread_id: Optional[str] = None,
+    messages: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Run the agentic decision loop until completion.
@@ -102,8 +103,19 @@ async def run_agentic_loop(
             discover_products_fn=discover_products_fn,
         )
 
+    # Derive last_suggestion from conversation history (for refinement: "I don't want flowers, add a movie")
+    last_suggestion = None
+    if messages:
+        for m in reversed(messages):
+            if isinstance(m, dict) and m.get("role") == "assistant":
+                content = m.get("content") or ""
+                if content:
+                    last_suggestion = str(content)[:500]
+                break
+
     state = {
-        "messages": [],
+        "messages": messages or [],
+        "last_suggestion": last_suggestion,
         "last_tool_result": None,
         "iteration": 0,
         "agent_reasoning": [],
@@ -140,6 +152,11 @@ async def run_agentic_loop(
                     loc = _extract_location(intent_data)
                     if loc:
                         tool_args.setdefault("location", loc)
+
+            # Inject last_suggestion for resolve_intent (refinement: "I don't want flowers, add a movie")
+            if tool_name == "resolve_intent" and state.get("last_suggestion"):
+                tool_args = dict(tool_args)
+                tool_args.setdefault("last_suggestion", state["last_suggestion"])
 
             if tool_name == "create_standing_intent":
                 tool_args = dict(tool_args)

@@ -15,13 +15,17 @@ logger = logging.getLogger(__name__)
 HTTP_TIMEOUT = 60.0
 
 
-async def resolve_intent_with_fallback(text: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+async def resolve_intent_with_fallback(
+    text: str,
+    user_id: Optional[str] = None,
+    last_suggestion: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Resolve intent via Intent service. On 502/timeout/unavailable, use local fallback
     so chat still returns products (Intent service outage resilience).
     """
     try:
-        return await resolve_intent(text, user_id)
+        return await resolve_intent(text, user_id=user_id, last_suggestion=last_suggestion)
     except (httpx.HTTPStatusError, httpx.RequestError) as e:
         logger.warning("Intent service unavailable (%s), using local fallback", e)
         query = fallback_search_query(text)
@@ -37,17 +41,21 @@ async def resolve_intent_with_fallback(text: str, user_id: Optional[str] = None)
         }
 
 
-async def resolve_intent(text: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+async def resolve_intent(
+    text: str,
+    user_id: Optional[str] = None,
+    last_suggestion: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Call Intent service to resolve intent from natural language.
     Raises on 4xx/5xx. Callers should catch and use local fallback when Intent is unavailable.
     """
     url = f"{settings.intent_service_url}/api/v1/resolve"
+    payload: Dict[str, Any] = {"text": text, "user_id": user_id, "persist": True}
+    if last_suggestion:
+        payload["last_suggestion"] = last_suggestion
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.post(
-            url,
-            json={"text": text, "user_id": user_id, "persist": True},
-        )
+        r = await client.post(url, json=payload)
         r.raise_for_status()
         return r.json()
 

@@ -21,11 +21,12 @@ WAIT_EVENT_MAX_LEN = 100
 TOOL_DEFS = [
     {
         "name": "resolve_intent",
-        "description": "Resolve user's natural language message to structured intent (discover, checkout, track_status, etc.). Use when user sends a new message.",
+        "description": "Resolve user's natural language message to structured intent (discover, checkout, track_status, etc.). Use when user sends a new message. When last_suggestion exists, user may be refining (e.g. 'I don't want flowers, add a movie').",
         "parameters": {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "The user's message"},
+                "last_suggestion": {"type": "string", "description": "Previous assistant suggestion for refinement context"},
             },
             "required": ["text"],
         },
@@ -99,6 +100,9 @@ def apply_guardrails(name: str, params: Dict[str, Any]) -> Tuple[Dict[str, Any],
         if not text:
             return {}, "resolve_intent requires non-empty text"
         p["text"] = text[:MAX_TEXT_LEN]
+        ls = p.get("last_suggestion")
+        if ls is not None and isinstance(ls, str):
+            p["last_suggestion"] = ls.strip()[:500] or None
 
     elif name == "discover_products":
         query = (p.get("query") or "").strip()
@@ -165,7 +169,8 @@ async def execute_tool(
         if not resolve_intent_fn:
             return {"error": "resolve_intent not configured"}
         text = params.get("text", "")
-        return await resolve_intent_fn(text)
+        last_suggestion = params.get("last_suggestion")
+        return await resolve_intent_fn(text, last_suggestion=last_suggestion)
 
     if name == "discover_products":
         if not discover_products_fn:

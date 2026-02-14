@@ -1,6 +1,6 @@
 """Chat endpoint - Agentic AI with Intent → Discovery orchestration."""
 
-from typing import Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
@@ -24,6 +24,7 @@ class ChatRequest(BaseModel):
     """Request body for chat (natural language)."""
 
     text: str = Field(..., min_length=1, max_length=2000, description="User message")
+    messages: Optional[List[Dict[str, Any]]] = Field(None, description="Conversation history [{role, content}] for refinement")
     user_id: Optional[str] = Field(None, description="Optional platform user UUID (or resolved from platform_user_id when linked)")
     platform_user_id: Optional[str] = Field(None, description="Platform identity (e.g. ChatGPT/Gemini user id); resolved to user_id via account_links")
     limit: int = Field(20, ge=1, le=100, description="Max products when discover")
@@ -69,8 +70,8 @@ async def chat(
         )
 
     # Resolve intent with user_id captured; uses local fallback when Intent service unavailable
-    async def _resolve(text: str):
-        return await resolve_intent_with_fallback(text, user_id)
+    async def _resolve(text: str, last_suggestion: Optional[str] = None):
+        return await resolve_intent_with_fallback(text, user_id=user_id, last_suggestion=last_suggestion)
 
     async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None):
         return await discover_products(
@@ -106,6 +107,7 @@ async def chat(
             use_agentic=agentic,
             platform=body.platform,
             thread_id=body.thread_id,
+            messages=body.messages,
         )
     except Exception as e:
         return chat_first_response(

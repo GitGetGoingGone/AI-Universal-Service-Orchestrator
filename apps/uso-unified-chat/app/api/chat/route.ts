@@ -122,6 +122,9 @@ export async function POST(req: Request) {
     if (resolvedThreadId) {
       payload.thread_id = resolvedThreadId;
     }
+    if (messages && messages.length > 0) {
+      payload.messages = messages;
+    }
 
     const res = await fetch(`${ORCHESTRATOR_URL}/api/v1/chat`, {
       method: "POST",

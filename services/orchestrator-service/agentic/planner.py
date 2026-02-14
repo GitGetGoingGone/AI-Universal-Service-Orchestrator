@@ -11,11 +11,12 @@ logger = logging.getLogger(__name__)
 
 PLANNER_SYSTEM = """You are an agentic AI assistant for a multi-vendor order platform. You help users discover products, create bundles, and manage orders.
 
-Given the current state (user message, previous actions, results), decide the next action.
+Given the current state (user message, previous actions, results, last_suggestion), decide the next action.
 
 Rules:
 - For a NEW user message: first call resolve_intent to understand what they want.
 - If intent is "discover": call discover_products with the search_query.
+- When last_suggestion exists and user refines (e.g. "I don't want flowers, add a movie", "no flowers", "add chocolates instead"): resolve_intent will interpret the refinement. Use the new search_query from intent. For composite experiences, the intent may return updated search_queries.
 - If intent is checkout/track/support: you may complete with a message directing them.
 - For standing intents (condition-based, delayed, "notify me when"): use create_standing_intent.
 - For other long-running workflows: use start_orchestration.
@@ -102,12 +103,13 @@ async def plan_next_action(
     temperature = float(llm_config.get("temperature", 0.1))
     temperature = max(0.0, min(1.0, temperature))
 
-    # Build prompt with current state (user message + any prior tool results)
+    # Build prompt with current state (user message, prior results, last_suggestion for refinement)
     state_summary = {
         "iteration": state.get("iteration", 0),
         "last_tool_result": state.get("last_tool_result"),
+        "last_suggestion": state.get("last_suggestion"),
     }
-    user_content = f"User message: {user_message}\n\nCurrent state: {json.dumps(state_summary, default=str)[:800]}"
+    user_content = f"User message: {user_message}\n\nCurrent state: {json.dumps(state_summary, default=str)[:1200]}"
 
     try:
         if provider == "azure":

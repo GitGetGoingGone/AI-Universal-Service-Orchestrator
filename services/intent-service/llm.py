@@ -21,6 +21,7 @@ Rules:
 - "discover" = user wants to find/browse a single product category
 - "discover_composite" = user wants a composed experience (e.g. "plan a date night", "birthday party", "picnic"). Decompose into product categories.
 - "browse" = generic "show me products" with no specific query
+- When last_suggestion is provided: user may be refining (e.g. "I don't want flowers, add a movie", "no flowers", "add chocolates"). Interpret as discover or discover_composite with updated search_queries (remove rejected categories, add requested ones).
 - search_query should be product/category terms only, e.g. "limo", "flowers", "dinner"
 - For discover_composite: search_queries = ["flowers","dinner","limo"] for "date night"; experience_name = "date night"
 - Strip action words like "wanna book", "looking for", "find me" - keep the product term
@@ -29,7 +30,7 @@ Rules:
 """
 
 
-async def resolve_intent(text: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+async def resolve_intent(text: str, user_id: Optional[str] = None, last_suggestion: Optional[str] = None) -> Dict[str, Any]:
     """
     Resolve intent from natural language. Uses Azure OpenAI when configured;
     falls back to heuristics with action-word stripping otherwise.
@@ -45,7 +46,7 @@ async def resolve_intent(text: str, user_id: Optional[str] = None) -> Dict[str, 
 
     if settings.azure_openai_configured:
         try:
-            result = await _resolve_via_azure(text)
+            result = await _resolve_via_azure(text, last_suggestion=last_suggestion)
             # When LLM returns bad/empty search_query for discover intent, use derived
             if result.get("intent_type") == "discover":
                 sq = (result.get("search_query") or "").strip()
@@ -61,7 +62,7 @@ async def resolve_intent(text: str, user_id: Optional[str] = None) -> Dict[str, 
     return _heuristic_resolve(text)
 
 
-async def _resolve_via_azure(text: str) -> Dict[str, Any]:
+async def _resolve_via_azure(text: str, last_suggestion: Optional[str] = None) -> Dict[str, Any]:
     """Resolve intent via Azure OpenAI."""
     from openai import AzureOpenAI
 
@@ -71,12 +72,16 @@ async def _resolve_via_azure(text: str) -> Dict[str, Any]:
         azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
     )
 
+    user_content = f"User message: {text}"
+    if last_suggestion:
+        user_content += f"\n\nPrevious suggestion shown to user: {last_suggestion[:300]}"
+
     def _call():
         r = client.chat.completions.create(
             model=settings.azure_openai_deployment,
             messages=[
                 {"role": "system", "content": INTENT_SYSTEM},
-                {"role": "user", "content": f"User message: {text}"},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.1,
             max_tokens=200,
