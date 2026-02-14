@@ -37,6 +37,13 @@ export async function GET(
     .eq("thread_id", id)
     .order("created_at", { ascending: true });
 
+  const { data: pendingApprovals } = await supabase
+    .from("standing_intents")
+    .select("id, intent_description, created_at")
+    .eq("platform", "web")
+    .eq("thread_id", id)
+    .in("status", ["pending", "active"]);
+
   return NextResponse.json({
     thread: {
       id: thread.id,
@@ -49,6 +56,11 @@ export async function GET(
       role: m.role,
       content: m.content,
       adaptiveCard: m.adaptive_card,
+    })),
+    pending_approvals: (pendingApprovals ?? []).map((a) => ({
+      id: a.id,
+      intent_description: a.intent_description,
+      created_at: a.created_at,
     })),
   });
 }

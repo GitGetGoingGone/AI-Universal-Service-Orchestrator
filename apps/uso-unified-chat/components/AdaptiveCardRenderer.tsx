@@ -10,6 +10,8 @@ export type ActionPayload = {
   bundle_id?: string;
   item_id?: string;
   order_id?: string;
+  standing_intent_id?: string;
+  approved?: boolean;
   [key: string]: unknown;
 };
 

@@ -15,6 +15,7 @@ type ChatMessage = {
 };
 
 const E2E_ACTIONS = ["add_to_bundle", "view_bundle", "remove_from_bundle", "checkout", "complete_checkout"];
+const STANDING_INTENT_ACTION = "approve_standing_intent";
 
 function filterE2EActions(card: Record<string, unknown>, e2eEnabled: boolean): Record<string, unknown> {
   if (e2eEnabled) return card;
@@ -140,6 +141,9 @@ export function ChatPage(props: ChatPageProps = {}) {
   } = props;
   const [provider, setProvider] = useState<Provider>("chatgpt");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<
+    Array<{ id: string; intent_description: string }>
+  >([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
@@ -177,6 +181,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         );
         setMessages(msgs);
         if (data.thread?.bundle_id) setBundleId(data.thread.bundle_id);
+        setPendingApprovals(data.pending_approvals ?? []);
       })
       .catch(() => {});
   }, [hydrated, threadId, anonymousId, setBundleId]);
@@ -294,6 +299,40 @@ export function ChatPage(props: ChatPageProps = {}) {
       const action = data.action;
       if (!action) return;
       if (E2E_ACTIONS.includes(action) && !e2eEnabled) return;
+
+      if (action === STANDING_INTENT_ACTION && data.standing_intent_id) {
+        setLoading(true);
+        try {
+          const res = await fetch(
+            `/api/standing-intents/${data.standing_intent_id}/approve`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ approved: data.approved !== false }),
+            }
+          );
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || "Approve failed");
+          setPendingApprovals((prev) =>
+            prev.filter((a) => a.id !== data.standing_intent_id)
+          );
+          addMessage({
+            role: "assistant",
+            content:
+              json.approved !== false
+                ? "Standing intent approved. We'll notify you when it's ready."
+                : "Standing intent rejected.",
+          });
+        } catch (err) {
+          addMessage({
+            role: "assistant",
+            content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
 
       setLoading(true);
       try {
@@ -420,7 +459,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         setLoading(false);
       }
     },
-    [addMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId]
+    [addMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals]
   );
 
   function handleSubmit(e: React.FormEvent) {
@@ -453,6 +492,47 @@ export function ChatPage(props: ChatPageProps = {}) {
 
       <main className={`flex-1 overflow-y-auto px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""}`}>
         <div className="max-w-3xl mx-auto space-y-6">
+          {pendingApprovals.length > 0 && (
+            <div className="space-y-4">
+              <p className="text-sm text-[var(--muted)] font-medium">Pending approvals</p>
+              {pendingApprovals.map((a) => {
+                const card: Record<string, unknown> = {
+                  type: "AdaptiveCard",
+                  $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+                  version: "1.5",
+                  body: [
+                    { type: "TextBlock", text: "Standing Intent Approval", weight: "Bolder", size: "Medium" },
+                    { type: "TextBlock", text: a.intent_description, wrap: true },
+                  ],
+                  actions: [
+                    {
+                      type: "Action.Submit",
+                      title: "Approve",
+                      data: {
+                        action: STANDING_INTENT_ACTION,
+                        standing_intent_id: a.id,
+                        approved: true,
+                      },
+                    },
+                    {
+                      type: "Action.Submit",
+                      title: "Reject",
+                      data: {
+                        action: STANDING_INTENT_ACTION,
+                        standing_intent_id: a.id,
+                        approved: false,
+                      },
+                    },
+                  ],
+                };
+                return (
+                  <div key={a.id} className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+                    <AdaptiveCardRenderer card={card} onAction={handleAction} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {messages.length === 0 && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
