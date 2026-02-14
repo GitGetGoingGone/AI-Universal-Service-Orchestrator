@@ -28,6 +28,7 @@ class ChatRequest(BaseModel):
     limit: int = Field(20, ge=1, le=100, description="Max products when discover")
     thread_id: Optional[str] = Field(None, description="Chat thread ID for webhook push (ChatGPT/Gemini)")
     platform: Optional[Literal["chatgpt", "gemini"]] = Field(None, description="Platform for webhook push")
+    partner_id: Optional[str] = Field(None, description="Filter products to this partner (for embed/white-label)")
 
 
 @router.post("/chat")
@@ -70,11 +71,12 @@ async def chat(
     async def _resolve(text: str):
         return await resolve_intent_with_fallback(text, user_id)
 
-    async def _discover(query: str, limit: int = 20, location: Optional[str] = None):
+    async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None):
         return await discover_products(
             query=query,
             limit=limit,
             location=location,
+            partner_id=partner_id or body.partner_id,
         )
 
     async def _create_standing_intent(

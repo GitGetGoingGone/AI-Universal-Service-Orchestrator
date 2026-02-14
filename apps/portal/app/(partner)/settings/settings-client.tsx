@@ -138,6 +138,19 @@ export function SettingsClient() {
       </div>
 
       <div className="mt-6 pt-6 border-t border-[rgb(var(--color-border))]">
+        <h2 className="text-lg font-semibold mb-2">Chat Widget</h2>
+        <p className="text-sm text-[rgb(var(--color-text-secondary))] mb-2">
+          Embed the AI chat on your website with white-label theming.
+        </p>
+        <Link
+          href="/settings/chat-widget"
+          className="inline-flex items-center gap-1 text-[rgb(var(--color-primary))] hover:underline"
+        >
+          Chat Widget Settings →
+        </Link>
+      </div>
+
+      <div className="mt-6 pt-6 border-t border-[rgb(var(--color-border))]">
         <h2 className="text-lg font-semibold mb-2">Channels & Integrations</h2>
         <p className="text-sm text-[rgb(var(--color-text-secondary))] mb-2">
           Connect WhatsApp and configure webhooks for order updates.

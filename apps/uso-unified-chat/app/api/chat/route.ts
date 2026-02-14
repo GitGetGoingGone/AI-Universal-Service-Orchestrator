@@ -29,9 +29,11 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { provider, messages } = body as {
+    const { provider, messages, partner_id, user_id } = body as {
       provider?: string;
       messages?: { role: string; content: string }[];
+      partner_id?: string;
+      user_id?: string;
     };
 
     const lastUserMessage =
@@ -39,14 +41,18 @@ export async function POST(req: Request) {
         ?.filter((m) => m.role === "user")
         .pop()?.content || "Find products";
 
+    const payload: Record<string, unknown> = {
+      text: lastUserMessage,
+      limit: 20,
+      platform: provider || "chatgpt",
+    };
+    if (partner_id) payload.partner_id = partner_id;
+    if (user_id) payload.user_id = user_id;
+
     const res = await fetch(`${ORCHESTRATOR_URL}/api/v1/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: lastUserMessage,
-        limit: 20,
-        platform: provider || "chatgpt",
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {

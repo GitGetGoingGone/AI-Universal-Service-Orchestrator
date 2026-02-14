@@ -146,6 +146,25 @@ After connecting ChatGPT to the MCP server:
 - "What's the status of order [order_id]?"
 - "I want to return my order [order_id]"
 
+### 2.3 ChatGPT Custom GPT Actions – Full Checkout Flow
+
+When using `openapi-chatgpt-actions.yaml` with a Custom GPT:
+
+1. **Find products** → `chat` with "find flowers"
+2. **Add to bundle** → `addToBundle` with `product_id`
+3. **Checkout** → `proceedToCheckout` with `bundle_id` → returns `order_id`
+4. **Create payment** → `createPaymentIntent` with `order_id` → returns `client_secret`
+5. **Confirm payment (demo)** → `confirmPayment` with `order_id` → marks order as paid
+
+**Important:** Orders stay `payment_status=pending` until payment is completed. ChatGPT has no Stripe checkout UI. Set `DEMO_PAYMENT=true` on the Payment service so ChatGPT can call `confirmPayment` to mark orders as paid for testing. Without it, orders are created but never show as completed.
+
+```bash
+# After createPaymentIntent, confirm for demo:
+curl -s -X POST "$ORCHESTRATOR_URL/api/v1/payment/confirm" \
+  -H "Content-Type: application/json" \
+  -d '{"order_id": "ORDER_UUID"}' | jq .
+```
+
 ---
 
 ## 3. Unified Web App

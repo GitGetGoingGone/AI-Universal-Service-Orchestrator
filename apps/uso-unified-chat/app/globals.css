@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary-color: #0ea5e9;
+  --primary-foreground: #fff;
+  --secondary-color: #64748b;
+  --secondary-foreground: #fff;
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --card: #1e293b;
+  --card-foreground: #e2e8f0;
+  --muted: #334155;
+  --border: #334155;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Adaptive Cards host overrides */
+.aco-adaptiveCard {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}
+
+.aco-textBlock {
+  color: var(--card-foreground) !important;
+}
+
+.aco-actionSet .ac-pushButton {
+  background: var(--primary-color) !important;
+  color: var(--primary-foreground) !important;
+  border-radius: 8px !important;
+}

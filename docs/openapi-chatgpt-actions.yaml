@@ -325,6 +325,42 @@ paths:
           description: Order not found
         "400":
           description: Order already paid or amount too small
+  /api/v1/payment/confirm:
+    post:
+      operationId: confirmPayment
+      summary: Confirm payment for order (demo mode)
+      description: |
+        Mark order as paid. Use when DEMO_PAYMENT=true on the server (for testing).
+        Call after createPaymentIntent when user says "yes" or "complete payment".
+        In production, payment is completed via Stripe checkout page + webhook.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id]
+              properties:
+                order_id:
+                  type: string
+                  description: Order UUID from checkout
+      responses:
+        "200":
+          description: Payment confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_id: { type: string }
+                  status: { type: string }
+                  message: { type: string }
+        "403":
+          description: Demo mode disabled (DEMO_PAYMENT not set)
+        "404":
+          description: Order not found
+        "400":
+          description: Order already paid
   /api/v1/change-request:
     post:
       operationId: requestChange

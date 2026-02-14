@@ -22,13 +22,40 @@ export async function GET(request: Request) {
       query = query.eq("verification_status", "approved");
     }
 
-    const { data, error } = await query;
+    const { data: partnersData, error } = await query;
 
     if (error) {
       return NextResponse.json({ detail: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ partners: data ?? [] });
+    const partners = partnersData ?? [];
+    const partnerIds = partners.map((p: { id: string }) => p.id);
+    let chatConfigs: { partner_id: string; chat_widget_enabled?: boolean; admin_e2e_enabled?: boolean }[] = [];
+    if (partnerIds.length > 0) {
+      const { data } = await supabase
+        .from("partner_chat_config")
+        .select("partner_id, chat_widget_enabled, admin_e2e_enabled")
+        .in("partner_id", partnerIds);
+      chatConfigs = data ?? [];
+    }
+
+    const configByPartner = chatConfigs.reduce(
+      (acc: Record<string, { chat_widget_enabled: boolean; admin_e2e_enabled: boolean }>, c: { partner_id: string; chat_widget_enabled?: boolean; admin_e2e_enabled?: boolean }) => {
+        acc[c.partner_id] = {
+          chat_widget_enabled: c.chat_widget_enabled ?? true,
+          admin_e2e_enabled: c.admin_e2e_enabled ?? true,
+        };
+        return acc;
+      },
+      {}
+    );
+
+    const partnersWithConfig = partners.map((p: { id: string }) => ({
+      ...p,
+      chat_config: configByPartner[p.id] ?? { chat_widget_enabled: true, admin_e2e_enabled: true },
+    }));
+
+    return NextResponse.json({ partners: partnersWithConfig });
   } catch (err) {
     return NextResponse.json({ detail: "Internal server error" }, { status: 500 });
   }

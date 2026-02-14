@@ -1,0 +1,92 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY;
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const partnerId = searchParams.get("partner_id");
+  if (!partnerId) {
+    return NextResponse.json({ error: "partner_id required" }, { status: 400 });
+  }
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    return NextResponse.json(
+      { error: "Embed config not configured", disabled: true },
+      { status: 503 }
+    );
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  const { data, error } = await supabase
+    .from("partner_chat_config")
+    .select("*")
+    .eq("partner_id", partnerId)
+    .single();
+
+  if (error && error.code !== "PGRST116") {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const config = data ?? {
+    primary_color: "#1976d2",
+    secondary_color: "#424242",
+    font_family: "Inter, sans-serif",
+    logo_url: null,
+    welcome_message: "How can I help you today?",
+    embed_enabled: false,
+    embed_domains: [],
+    e2e_add_to_bundle: true,
+    e2e_checkout: true,
+    e2e_payment: true,
+    chat_widget_enabled: true,
+    admin_e2e_enabled: true,
+  };
+
+  const chatEnabled = config.chat_widget_enabled !== false;
+  const e2eEnabled = config.admin_e2e_enabled !== false;
+
+  if (!chatEnabled) {
+    return NextResponse.json({
+      disabled: true,
+      message: "Chat unavailable",
+    });
+  }
+
+  // Domain allowlist: optional parent_origin from embed iframe query param
+  const parentOrigin = searchParams.get("parent_origin");
+  const embedDomains = Array.isArray(config.embed_domains)
+    ? config.embed_domains
+    : [];
+  if (
+    config.embed_enabled === true &&
+    embedDomains.length > 0 &&
+    parentOrigin
+  ) {
+    const allowed = embedDomains.some(
+      (d: string) =>
+        parentOrigin === d ||
+        parentOrigin.endsWith("." + d) ||
+        d === "*"
+    );
+    if (!allowed) {
+      return NextResponse.json({
+        disabled: true,
+        message: "Embed not allowed for this domain",
+      });
+    }
+  }
+
+  return NextResponse.json({
+    partner_id: partnerId,
+    primary_color: config.primary_color ?? "#1976d2",
+    secondary_color: config.secondary_color ?? "#424242",
+    font_family: config.font_family ?? "Inter, sans-serif",
+    logo_url: config.logo_url ?? null,
+    welcome_message: config.welcome_message ?? "How can I help you today?",
+    e2e_add_to_bundle: e2eEnabled && (config.e2e_add_to_bundle !== false),
+    e2e_checkout: e2eEnabled && (config.e2e_checkout !== false),
+    e2e_payment: e2eEnabled && (config.e2e_payment !== false),
+  });
+}

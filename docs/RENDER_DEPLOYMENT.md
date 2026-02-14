@@ -274,8 +274,11 @@ Deploy these services for the full production flow (no simulator).
 |-----|-------|
 | `STRIPE_SECRET_KEY` | Stripe secret key (sk_test_... or sk_live_...) – from Dashboard → API keys |
 | `STRIPE_WEBHOOK_SECRET` | *(optional)* For webhook verification – from Stripe Webhooks |
+| `DEMO_PAYMENT` | `true` – Enable `confirmPayment` for ChatGPT testing (marks orders as paid without Stripe checkout) |
 
 **Note:** Stripe provides **Publishable key** (pk_...) and **Secret key** (sk_...) in Dashboard → API keys. Use the Secret key for `STRIPE_SECRET_KEY`.
+
+**ChatGPT flow:** Without a Stripe checkout page, orders stay `payment_status=pending`. Set `DEMO_PAYMENT=true` so ChatGPT can call `confirmPayment` after `createPaymentIntent` to mark orders as paid for testing.
 
 **Optional – webhook verification:** To receive and verify Stripe webhook events (payment success/failure), add a webhook endpoint in Stripe Dashboard → Developers → Webhooks with URL `https://uso-payment.onrender.com/webhooks/stripe` and events `payment_intent.succeeded`, `payment_intent.payment_failed`. Stripe then shows a **Signing secret** (whsec_...) for that endpoint – set it as `STRIPE_WEBHOOK_SECRET`. Without it, the service still creates PaymentIntents but will not verify incoming webhook requests.
 

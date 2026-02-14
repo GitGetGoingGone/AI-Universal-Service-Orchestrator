@@ -13,6 +13,7 @@ from clients import (
     remove_from_bundle as remove_from_bundle_client,
     proceed_to_checkout as proceed_to_checkout_client,
     create_payment_intent as create_payment_intent_client,
+    confirm_payment as confirm_payment_client,
     create_change_request as create_change_request_client,
 )
 
@@ -126,6 +127,29 @@ async def create_payment(body: CreatePaymentBody):
             raise HTTPException(status_code=404, detail="Order not found")
         if e.response.status_code == 400:
             raise HTTPException(status_code=400, detail=str(e.response.json().get("detail", "Bad request")))
+        raise HTTPException(status_code=502, detail=f"Payment service error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Payment service error: {e}")
+
+
+class ConfirmPaymentBody(BaseModel):
+    """Request body for confirming payment (demo mode)."""
+
+    order_id: str
+
+
+@router.post("/payment/confirm")
+async def confirm_payment(body: ConfirmPaymentBody):
+    """Confirm payment for order (demo mode). Marks order as paid. Requires DEMO_PAYMENT=true."""
+    try:
+        return await confirm_payment_client(order_id=body.order_id)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if e.response.status_code == 400:
+            raise HTTPException(status_code=400, detail=str(e.response.json().get("detail", "Bad request")))
+        if e.response.status_code == 403:
+            raise HTTPException(status_code=403, detail=str(e.response.json().get("detail", "Demo mode disabled")))
         raise HTTPException(status_code=502, detail=f"Payment service error: {e}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Payment service error: {e}")
