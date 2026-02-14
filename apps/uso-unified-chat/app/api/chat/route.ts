@@ -54,11 +54,11 @@ export async function POST(req: Request) {
     const supabase = getSupabase();
     let resolvedThreadId = thread_id;
 
-    if (supabase && (thread_id || anonymous_id)) {
+    if (supabase && (thread_id || anonymous_id || user_id)) {
       if (thread_id) {
         const { data: thread } = await supabase
           .from("chat_threads")
-          .select("id, anonymous_id")
+          .select("id, anonymous_id, user_id")
           .eq("id", thread_id)
           .single();
         if (!thread) {
@@ -67,12 +67,30 @@ export async function POST(req: Request) {
             { status: 404 }
           );
         }
-        if (anonymous_id && thread.anonymous_id !== anonymous_id) {
+        if (thread.user_id) {
+          if (user_id !== thread.user_id) {
+            return NextResponse.json(
+              { error: "Thread access denied" },
+              { status: 403 }
+            );
+          }
+        } else if (anonymous_id && thread.anonymous_id !== anonymous_id) {
           return NextResponse.json(
             { error: "Thread access denied" },
             { status: 403 }
           );
         }
+      } else if (user_id) {
+        const { data: newThread } = await supabase
+          .from("chat_threads")
+          .insert({
+            user_id,
+            partner_id: partner_id || null,
+            title: lastUserMessage.slice(0, 100) || "New chat",
+          })
+          .select("id")
+          .single();
+        resolvedThreadId = newThread?.id ?? null;
       } else if (anonymous_id) {
         const { data: newThread } = await supabase
           .from("chat_threads")

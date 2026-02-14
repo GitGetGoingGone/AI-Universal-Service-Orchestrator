@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuthState, AuthButtons } from "@/components/AuthWrapper";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
 import { PaymentModal } from "@/components/PaymentModal";
 
@@ -149,6 +150,20 @@ export function ChatPage(props: ChatPageProps = {}) {
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
   const e2eEnabled = e2eProp ?? true;
   const sessionId = useSessionId();
+  const { isSignedIn } = useAuthState();
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setUserId(null);
+      return;
+    }
+    fetch("/api/users/me")
+      .then((r) => r.json())
+      .then((data) => setUserId(data.user_id ?? null))
+      .catch(() => setUserId(null));
+  }, [isSignedIn]);
+
   const {
     threadId,
     anonymousId,
@@ -165,9 +180,15 @@ export function ChatPage(props: ChatPageProps = {}) {
 
   const hasLoadedThreadRef = useRef(false);
   useEffect(() => {
-    if (!hydrated || !threadId || !anonymousId || hasLoadedThreadRef.current) return;
+    if (!hydrated || !threadId || hasLoadedThreadRef.current) return;
+    const authParam = userId
+      ? `user_id=${encodeURIComponent(userId)}`
+      : anonymousId
+        ? `anonymous_id=${encodeURIComponent(anonymousId)}`
+        : null;
+    if (!authParam) return;
     hasLoadedThreadRef.current = true;
-    fetch(`/api/threads/${threadId}?anonymous_id=${encodeURIComponent(anonymousId)}`)
+    fetch(`/api/threads/${threadId}?${authParam}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.error) return;
@@ -184,7 +205,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         setPendingApprovals(data.pending_approvals ?? []);
       })
       .catch(() => {});
-  }, [hydrated, threadId, anonymousId, setBundleId]);
+  }, [hydrated, threadId, anonymousId, userId, setBundleId]);
 
   const addMessage = useCallback(
     (msg: Omit<ChatMessage, "id">) => {
@@ -212,7 +233,10 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (partnerId) payload.partner_id = partnerId;
         if (threadId) {
           payload.thread_id = threadId;
-          payload.anonymous_id = anonymousId;
+          if (userId) payload.user_id = userId;
+          else payload.anonymous_id = anonymousId;
+        } else if (userId) {
+          payload.user_id = userId;
         } else if (anonymousId) {
           payload.anonymous_id = anonymousId;
         } else {
@@ -351,12 +375,15 @@ export function ChatPage(props: ChatPageProps = {}) {
           if (!res.ok) throw new Error(json.error || "Add to bundle failed");
 
           const newBundleId = json.bundle_id ?? json.data?.bundle_id;
-          if (newBundleId && threadId && anonymousId) {
+          if (newBundleId && threadId) {
             setBundleId(newBundleId);
+            const patchBody = userId
+              ? { bundle_id: newBundleId, user_id: userId }
+              : { bundle_id: newBundleId, anonymous_id: anonymousId };
             fetch(`/api/threads/${threadId}`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ bundle_id: newBundleId, anonymous_id: anonymousId }),
+              body: JSON.stringify(patchBody),
             }).catch(() => {});
           } else if (newBundleId) {
             setBundleId(newBundleId);
@@ -459,7 +486,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         setLoading(false);
       }
     },
-    [addMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals]
+    [addMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId]
   );
 
   function handleSubmit(e: React.FormEvent) {
@@ -474,18 +501,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         <header className="flex-shrink-0 border-b border-[var(--border)] px-4 py-3">
           <div className="max-w-3xl mx-auto flex items-center justify-between">
             <h1 className="text-lg font-semibold">USO Unified Chat</h1>
-            <div className="flex items-center gap-3">
-              <label className="text-sm text-slate-400">Provider</label>
-              <select
-                value={provider}
-                onChange={(e) => setProvider(e.target.value as Provider)}
-                disabled={loading}
-                className="bg-[var(--card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm"
-              >
-                <option value="chatgpt">ChatGPT</option>
-                <option value="gemini">Gemini</option>
-              </select>
-            </div>
+            <AuthButtons />
           </div>
         </header>
       )}

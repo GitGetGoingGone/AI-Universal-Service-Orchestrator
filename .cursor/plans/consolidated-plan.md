@@ -61,7 +61,7 @@ todos:
     status: completed
   - id: clerk-unified-chat
     content: Add Clerk to unified chat; SignInButton, resolve user_id for threads
-    status: pending
+    status: completed
   - id: whatsapp-link-account
     content: Extend link-account for WhatsApp; OTP verify phone ownership
     status: pending
@@ -675,10 +675,10 @@ Two parallel tracks. Implement **Track A** and **Track B** independently (or in 
 **Phase 4: Persistence & Identity**
 3. ~~**Return visit UX**~~ — Done. chat_threads, chat_messages schema; persist messages; localStorage thread_id, anonymous_id, bundle_id; load history on return
 4. ~~**Standing intent UX**~~ — Done. thread_id passed to orchestrator; pending approvals in GET thread; approval card in chat
-5. **Sign-in (Clerk)** — Add Clerk to unified chat; resolve user_id; threads by user when signed in
+5. ~~**Sign-in (Clerk)**~~ — Done. ClerkProvider, SignInButton, GET /api/users/me, threads by user_id when signed in
 6. **Cross-channel (WhatsApp)** — Link WhatsApp via OTP; route WhatsApp to orchestrator; unified conversation by user_id
 
-**Track A order:** 1 ✓ → 2 ✓ → 3 ✓ → 4 ✓ → 5 → 6 (standing intent done; next: sign-in, then WhatsApp)
+**Track A order:** 1 ✓ → 2 ✓ → 3 ✓ → 4 ✓ → 5 ✓ → 6 (sign-in done; next: cross-channel WhatsApp)
 
 ---
 

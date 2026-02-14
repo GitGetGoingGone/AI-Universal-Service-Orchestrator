@@ -8,6 +8,7 @@ export async function GET(
   const { id } = await params;
   const { searchParams } = new URL(req.url);
   const anonymousId = searchParams.get("anonymous_id");
+  const userId = searchParams.get("user_id");
 
   const supabase = getSupabase();
   if (!supabase) {
@@ -27,7 +28,15 @@ export async function GET(
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
   }
 
-  if (thread.anonymous_id && anonymousId !== thread.anonymous_id) {
+  if (thread.user_id) {
+    if (userId !== thread.user_id) {
+      return NextResponse.json({ error: "Thread access denied" }, { status: 403 });
+    }
+  } else if (thread.anonymous_id) {
+    if (anonymousId !== thread.anonymous_id) {
+      return NextResponse.json({ error: "Thread access denied" }, { status: 403 });
+    }
+  } else {
     return NextResponse.json({ error: "Thread access denied" }, { status: 403 });
   }
 
@@ -79,21 +88,26 @@ export async function PATCH(
   }
 
   const body = await req.json().catch(() => ({}));
-  const { bundle_id, anonymous_id } = body as {
+  const { bundle_id, anonymous_id, user_id } = body as {
     bundle_id?: string;
     anonymous_id?: string;
+    user_id?: string;
   };
 
   const { data: thread } = await supabase
     .from("chat_threads")
-    .select("anonymous_id")
+    .select("anonymous_id, user_id")
     .eq("id", id)
     .single();
 
   if (!thread) {
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
   }
-  if (thread.anonymous_id && anonymous_id !== thread.anonymous_id) {
+  if (thread.user_id) {
+    if (user_id !== thread.user_id) {
+      return NextResponse.json({ error: "Thread access denied" }, { status: 403 });
+    }
+  } else if (thread.anonymous_id && anonymous_id !== thread.anonymous_id) {
     return NextResponse.json({ error: "Thread access denied" }, { status: 403 });
   }
 
