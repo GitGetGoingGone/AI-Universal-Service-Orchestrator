@@ -55,7 +55,7 @@ todos:
     status: completed
   - id: return-visit-auth
     content: Optional Clerk auth; list threads, cross-device persistence
-    status: pending
+    status: completed
   - id: standing-intent-web-ux
     content: Pending approval card when user returns; or email link to approve
     status: completed

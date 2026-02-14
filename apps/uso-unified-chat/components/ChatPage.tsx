@@ -176,16 +176,17 @@ export function ChatPage(props: ChatPageProps = {}) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const hasLoadedThreadRef = useRef(false);
+  const prevLoadedThreadIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!hydrated || !threadId || hasLoadedThreadRef.current) return;
+    if (!hydrated || !threadId) return;
+    if (prevLoadedThreadIdRef.current === threadId) return;
+    prevLoadedThreadIdRef.current = threadId;
     const authParam = userId
       ? `user_id=${encodeURIComponent(userId)}`
       : anonymousId
         ? `anonymous_id=${encodeURIComponent(anonymousId)}`
         : null;
     if (!authParam) return;
-    hasLoadedThreadRef.current = true;
     fetch(`/api/threads/${threadId}?${authParam}`)
       .then((r) => r.json())
       .then((data) => {
@@ -204,6 +205,30 @@ export function ChatPage(props: ChatPageProps = {}) {
       })
       .catch(() => {});
   }, [hydrated, threadId, anonymousId, userId, setBundleId]);
+
+  const [threads, setThreads] = useState<Array<{ id: string; title: string; updated_at: string }>>([]);
+  const fetchThreads = useCallback(() => {
+    const url = userId ? "/api/threads" : anonymousId ? `/api/threads?anonymous_id=${encodeURIComponent(anonymousId)}` : null;
+    if (!url) return;
+    fetch(url)
+      .then((r) => r.json())
+      .then((d) => setThreads(d.threads ?? []))
+      .catch(() => setThreads([]));
+  }, [userId, anonymousId]);
+  useEffect(() => {
+    if (userId || anonymousId) fetchThreads();
+  }, [userId, anonymousId, fetchThreads]);
+
+  const handleSelectThread = useCallback(
+    (id: string | null) => {
+      prevLoadedThreadIdRef.current = null;
+      setThreadId(id);
+      setMessages([]);
+      setPendingApprovals([]);
+      if (!id) setBundleId(null);
+    },
+    [setThreadId, setBundleId]
+  );
 
   const addMessage = useCallback(
     (msg: Omit<ChatMessage, "id">) => {
@@ -276,7 +301,10 @@ export function ChatPage(props: ChatPageProps = {}) {
             : data.data?.text ?? data.message ?? JSON.stringify(data));
 
         const newThreadId = (data as { thread_id?: string }).thread_id;
-        if (newThreadId && !threadId) setThreadId(newThreadId);
+        if (newThreadId && !threadId) {
+          setThreadId(newThreadId);
+          fetchThreads();
+        }
 
         addMessage({
           role: "assistant",
@@ -291,7 +319,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (fromPrompt) onPromptSent?.();
       }
     },
-    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId]
+    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId, fetchThreads]
   );
 
   const lastSentPromptRef = useRef<string | null>(null);
@@ -496,9 +524,25 @@ export function ChatPage(props: ChatPageProps = {}) {
     <div className={`flex flex-col bg-[var(--background)] text-[var(--foreground)] ${embeddedInLanding ? "min-h-[60vh]" : "h-screen"}`}>
       {!embeddedInLanding && (
         <header className="flex-shrink-0 border-b border-[var(--border)] px-4 py-3">
-          <div className="max-w-3xl mx-auto flex items-center justify-between">
-            <h1 className="text-lg font-semibold">USO Unified Chat</h1>
-            <div className="flex items-center gap-2">
+          <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <h1 className="text-lg font-semibold shrink-0">USO Unified Chat</h1>
+              {(userId || anonymousId) && threads.length > 0 && (
+                <select
+                  value={threadId ?? ""}
+                  onChange={(e) => handleSelectThread(e.target.value || null)}
+                  className="text-sm px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--card)] max-w-[180px] truncate"
+                >
+                  <option value="">New chat</option>
+                  {threads.map((t) => (
+                    <option key={t.id} value={t.id} title={t.title}>
+                      {t.title.length > 24 ? t.title.slice(0, 21) + "…" : t.title}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
               <ConnectWhatsApp />
               <AuthButtons />
             </div>
@@ -508,6 +552,20 @@ export function ChatPage(props: ChatPageProps = {}) {
 
       <main className={`flex-1 overflow-y-auto px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""}`}>
         <div className="max-w-3xl mx-auto space-y-6">
+          {embeddedInLanding && (userId || anonymousId) && threads.length > 0 && (
+            <div className="flex justify-end">
+              <select
+                value={threadId ?? ""}
+                onChange={(e) => handleSelectThread(e.target.value || null)}
+                className="text-sm px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--card)]"
+              >
+                <option value="">New chat</option>
+                {threads.map((t) => (
+                  <option key={t.id} value={t.id}>{t.title.length > 30 ? t.title.slice(0, 27) + "…" : t.title}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {pendingApprovals.length > 0 && (
             <div className="space-y-4">
               <p className="text-sm text-[var(--muted)] font-medium">Pending approvals</p>
