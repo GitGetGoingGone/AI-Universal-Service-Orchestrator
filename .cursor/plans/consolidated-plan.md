@@ -64,13 +64,13 @@ todos:
     status: completed
   - id: whatsapp-link-account
     content: Extend link-account for WhatsApp; OTP verify phone ownership
-    status: pending
+    status: completed
   - id: omnichannel-orchestrator
     content: Route WhatsApp discovery messages to orchestrator; same chat endpoint
-    status: pending
+    status: completed
   - id: unified-conversation-user
     content: Conversation keyed by user_id when signed in; web + WhatsApp append to same
-    status: pending
+    status: completed
   - id: stripe-ui-unified-chat
     content: Add Stripe Elements to unified chat for real card payments; PaymentModal on checkout
     status: completed
@@ -676,9 +676,9 @@ Two parallel tracks. Implement **Track A** and **Track B** independently (or in 
 3. ~~**Return visit UX**~~ — Done. chat_threads, chat_messages schema; persist messages; localStorage thread_id, anonymous_id, bundle_id; load history on return
 4. ~~**Standing intent UX**~~ — Done. thread_id passed to orchestrator; pending approvals in GET thread; approval card in chat
 5. ~~**Sign-in (Clerk)**~~ — Done. ClerkProvider, SignInButton, GET /api/users/me, threads by user_id when signed in
-6. **Cross-channel (WhatsApp)** — Link WhatsApp via OTP; route WhatsApp to orchestrator; unified conversation by user_id
+6. ~~**Cross-channel (WhatsApp)**~~ — Done. link-account provider=whatsapp; POST /api/webhooks/whatsapp (Twilio); Connect WhatsApp UI; unified thread by user_id
 
-**Track A order:** 1 ✓ → 2 ✓ → 3 ✓ → 4 ✓ → 5 ✓ → 6 (sign-in done; next: cross-channel WhatsApp)
+**Track A order:** 1 ✓ → 2 ✓ → 3 ✓ → 4 ✓ → 5 ✓ → 6 ✓ (Track A complete)
 
 ---
 

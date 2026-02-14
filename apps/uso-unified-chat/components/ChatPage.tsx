@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuthState, AuthButtons } from "@/components/AuthWrapper";
+import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
 import { PaymentModal } from "@/components/PaymentModal";
 
@@ -501,7 +502,10 @@ export function ChatPage(props: ChatPageProps = {}) {
         <header className="flex-shrink-0 border-b border-[var(--border)] px-4 py-3">
           <div className="max-w-3xl mx-auto flex items-center justify-between">
             <h1 className="text-lg font-semibold">USO Unified Chat</h1>
-            <AuthButtons />
+            <div className="flex items-center gap-2">
+              <ConnectWhatsApp />
+              <AuthButtons />
+            </div>
           </div>
         </header>
       )}

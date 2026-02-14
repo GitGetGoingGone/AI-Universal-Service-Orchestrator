@@ -23,13 +23,13 @@ from packages.shared.json_ld.error import error_ld
 router = APIRouter(prefix="/api/v1", tags=["Link Account"])
 logger = logging.getLogger(__name__)
 
-Provider = Literal["google", "openai"]
+Provider = Literal["google", "openai", "whatsapp"]
 
 
 class LinkAccountRequest(BaseModel):
     """Request to link a platform identity to the current user."""
 
-    provider: Provider = Field(..., description="Platform: google or openai")
+    provider: Provider = Field(..., description="Platform: google, openai, or whatsapp")
     id_token: Optional[str] = Field(None, description="Google OAuth2 id_token (required for provider=google)")
     platform_user_id: Optional[str] = Field(
         None,
@@ -98,6 +98,53 @@ async def link_account(request: Request, body: LinkAccountRequest):
                 "@type": "Thing",
                 "name": "AccountLink",
                 "description": "Google account linked",
+                "identifier": link.get("id"),
+            },
+            request_id=request_id,
+        )
+
+    if body.provider == "whatsapp":
+        if not body.platform_user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="platform_user_id (phone number) required for provider=whatsapp",
+            )
+        if not body.clerk_user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="clerk_user_id required for provider=whatsapp (user must sign in to link WhatsApp)",
+            )
+        phone = body.platform_user_id.strip().replace(" ", "")
+        if not phone.replace("+", "").replace("0", "").isdigit() or len(phone) < 10:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid phone number for WhatsApp",
+            )
+        user = get_user_by_clerk_id(body.clerk_user_id)
+        if not user:
+            user = upsert_user(clerk_user_id=body.clerk_user_id)
+        if not user:
+            raise HTTPException(status_code=503, detail="Failed to find or create user")
+        user_id = str(user["id"])
+        link = upsert_account_link(
+            user_id=user_id,
+            platform="whatsapp",
+            platform_user_id=phone,
+        )
+        if not link:
+            raise HTTPException(status_code=503, detail="Failed to save account link")
+        return chat_first_response(
+            data={
+                "linked": True,
+                "provider": "whatsapp",
+                "platform_user_id": phone,
+                "user_id": user_id,
+            },
+            machine_readable={
+                "@context": "https://schema.org",
+                "@type": "Thing",
+                "name": "AccountLink",
+                "description": "WhatsApp account linked",
                 "identifier": link.get("id"),
             },
             request_id=request_id,
