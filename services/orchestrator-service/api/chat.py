@@ -13,6 +13,7 @@ from clients import (
     register_thread_mapping,
 )
 from agentic.loop import run_agentic_loop
+from agentic.response import generate_engagement_response
 from packages.shared.utils.api_response import chat_first_response, request_id_from_request
 from packages.shared.json_ld.error import error_ld
 
@@ -142,7 +143,10 @@ async def chat(
             )
             adaptive_card = {**adaptive_card, "body": card_body}
 
-    summary = _build_summary(result)
+    # LLM-generated engagement response; fallback to templated summary
+    summary = await generate_engagement_response(body.text, result)
+    if not summary:
+        summary = _build_summary(result)
     return chat_first_response(
         data=result.get("data", {}),
         machine_readable=result.get("machine_readable", {}),

@@ -1,7 +1,7 @@
 """Agentic decision loop: Observe → Reason → Plan → Execute → Reflect."""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .planner import plan_next_action
 from .tools import execute_tool
@@ -12,6 +12,66 @@ logger = logging.getLogger(__name__)
 def _get_llm_config() -> Dict[str, Any]:
     from api.admin import get_llm_config
     return get_llm_config()
+
+
+async def _discover_composite(
+    search_queries: List[str],
+    experience_name: str,
+    discover_products_fn,
+    limit: int = 20,
+    location: Optional[str] = None,
+    partner_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Call discover_products per query, compose experience bundle."""
+    from packages.shared.adaptive_cards.experience_card import generate_experience_card
+
+    categories: List[Dict[str, Any]] = []
+    all_products: List[Dict[str, Any]] = []
+    item_list_elements: List[Dict[str, Any]] = []
+
+    per_limit = max(5, limit // len(search_queries)) if search_queries else limit
+    for q in search_queries:
+        if not q or not str(q).strip():
+            continue
+        try:
+            resp = await discover_products_fn(
+                query=str(q).strip(),
+                limit=per_limit,
+                location=location,
+                partner_id=partner_id,
+            )
+        except Exception as e:
+            logger.warning("Discover composite query %s failed: %s", q, e)
+            resp = {"data": {"products": [], "count": 0}}
+        products = resp.get("data", resp).get("products", [])
+        categories.append({"query": q, "products": products})
+        all_products.extend(products)
+        for p in products:
+            item_list_elements.append({
+                "@type": "Product",
+                "name": p.get("name", ""),
+                "description": p.get("description", ""),
+                "offers": {"@type": "Offer", "price": float(p.get("price", 0)), "priceCurrency": p.get("currency", "USD")},
+                "identifier": str(p.get("id", "")),
+            })
+
+    adaptive_card = generate_experience_card(experience_name or "experience", categories)
+    machine_readable = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "numberOfItems": len(all_products),
+        "itemListElement": item_list_elements,
+    }
+    return {
+        "data": {
+            "experience_name": experience_name or "experience",
+            "categories": categories,
+            "products": all_products,
+            "count": len(all_products),
+        },
+        "adaptive_card": adaptive_card,
+        "machine_readable": machine_readable,
+    }
 
 
 async def run_agentic_loop(
@@ -104,6 +164,24 @@ async def run_agentic_loop(
 
             if tool_name == "resolve_intent":
                 intent_data = result.get("data", result)
+                # discover_composite: multi-query discovery, compose experience bundle
+                if intent_data and intent_data.get("intent_type") == "discover_composite":
+                    sq = intent_data.get("search_queries") or []
+                    if sq:
+                        exp_name = intent_data.get("experience_name") or "experience"
+                        loc = _extract_location(intent_data)
+                        composed = await _discover_composite(
+                            search_queries=sq,
+                            experience_name=exp_name,
+                            discover_products_fn=discover_products_fn,
+                            limit=limit,
+                            location=loc,
+                        )
+                        products_data = composed.get("data")
+                        adaptive_card = composed.get("adaptive_card")
+                        machine_readable = composed.get("machine_readable")
+                        state["last_tool_result"] = composed
+                        break
             elif tool_name == "discover_products":
                 products_data = result.get("data", result)
                 adaptive_card = result.get("adaptive_card")
@@ -149,7 +227,22 @@ async def _direct_flow(
     adaptive_card = None
     machine_readable = None
 
-    if intent_type == "discover":
+    if intent_type == "discover_composite":
+        sq = intent_data.get("search_queries") or []
+        if sq:
+            exp_name = intent_data.get("experience_name") or "experience"
+            location = _extract_location(intent_data)
+            composed = await _discover_composite(
+                search_queries=sq,
+                experience_name=exp_name,
+                discover_products_fn=discover_products_fn,
+                limit=limit,
+                location=location,
+            )
+            products_data = composed.get("data")
+            adaptive_card = composed.get("adaptive_card")
+            machine_readable = composed.get("machine_readable")
+    elif intent_type == "discover":
         location = _extract_location(intent_data)
         discovery_response = await discover_products_fn(
             query=search_query,
