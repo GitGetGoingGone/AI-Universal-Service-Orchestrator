@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSupabase } from "@/lib/supabase";
 
 const ORCHESTRATOR_URL =
   process.env.ORCHESTRATOR_URL || "http://localhost:8002";
@@ -29,17 +30,71 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { provider, messages, partner_id, user_id } = body as {
+    const {
+      provider,
+      messages,
+      partner_id,
+      user_id,
+      thread_id,
+      anonymous_id,
+    } = body as {
       provider?: string;
       messages?: { role: string; content: string }[];
       partner_id?: string;
       user_id?: string;
+      thread_id?: string;
+      anonymous_id?: string;
     };
 
     const lastUserMessage =
       messages
         ?.filter((m) => m.role === "user")
         .pop()?.content || "Find products";
+
+    const supabase = getSupabase();
+    let resolvedThreadId = thread_id;
+
+    if (supabase && (thread_id || anonymous_id)) {
+      if (thread_id) {
+        const { data: thread } = await supabase
+          .from("chat_threads")
+          .select("id, anonymous_id")
+          .eq("id", thread_id)
+          .single();
+        if (!thread) {
+          return NextResponse.json(
+            { error: "Thread not found" },
+            { status: 404 }
+          );
+        }
+        if (anonymous_id && thread.anonymous_id !== anonymous_id) {
+          return NextResponse.json(
+            { error: "Thread access denied" },
+            { status: 403 }
+          );
+        }
+      } else if (anonymous_id) {
+        const { data: newThread } = await supabase
+          .from("chat_threads")
+          .insert({
+            anonymous_id,
+            partner_id: partner_id || null,
+            title: lastUserMessage.slice(0, 100) || "New chat",
+          })
+          .select("id")
+          .single();
+        resolvedThreadId = newThread?.id ?? null;
+      }
+
+      if (resolvedThreadId) {
+        await supabase.from("chat_messages").insert({
+          thread_id: resolvedThreadId,
+          role: "user",
+          content: lastUserMessage,
+          channel: "web",
+        });
+      }
+    }
 
     const payload: Record<string, unknown> = {
       text: lastUserMessage,
@@ -48,6 +103,10 @@ export async function POST(req: Request) {
     };
     if (partner_id) payload.partner_id = partner_id;
     if (user_id) payload.user_id = user_id;
+    if (resolvedThreadId) {
+      payload.thread_id = resolvedThreadId;
+      payload.platform = "web";
+    }
 
     const res = await fetch(`${ORCHESTRATOR_URL}/api/v1/chat`, {
       method: "POST",
@@ -63,8 +122,22 @@ export async function POST(req: Request) {
       );
     }
 
-    const data = await res.json();
-    return NextResponse.json(data);
+    const data = (await res.json()) as Record<string, unknown>;
+
+    if (supabase && resolvedThreadId) {
+      const assistantContent = (data.summary ?? data.message ?? "") as string;
+      const adaptiveCard = data.adaptive_card ?? null;
+      await supabase.from("chat_messages").insert({
+        thread_id: resolvedThreadId,
+        role: "assistant",
+        content: assistantContent || null,
+        adaptive_card: adaptiveCard,
+        channel: "web",
+      });
+    }
+
+    const response = { ...data, thread_id: resolvedThreadId ?? data.thread_id };
+    return NextResponse.json(response);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Chat failed";
     // Fetch failures (e.g. ECONNREFUSED to localhost) → suggest ORCHESTRATOR_URL

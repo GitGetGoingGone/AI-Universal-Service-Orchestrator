@@ -42,6 +42,61 @@ function filterE2EActions(card: Record<string, unknown>, e2eEnabled: boolean): R
   return filter(out) as Record<string, unknown>;
 }
 
+const STORAGE_KEY_THREAD = "uso_thread_id";
+const STORAGE_KEY_ANONYMOUS = "uso_anonymous_id";
+const STORAGE_KEY_BUNDLE = "uso_bundle_id";
+
+function useThreadPersistence() {
+  const [threadId, setThreadIdState] = useState<string | null>(null);
+  const [anonymousId, setAnonymousIdState] = useState<string | null>(null);
+  const [bundleId, setBundleIdState] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const t = localStorage.getItem(STORAGE_KEY_THREAD);
+    const a = localStorage.getItem(STORAGE_KEY_ANONYMOUS);
+    const b = localStorage.getItem(STORAGE_KEY_BUNDLE);
+    if (t) setThreadIdState(t);
+    if (a) setAnonymousIdState(a);
+    else {
+      const newA =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `anon-${Date.now()}`;
+      setAnonymousIdState(newA);
+      localStorage.setItem(STORAGE_KEY_ANONYMOUS, newA);
+    }
+    if (b) setBundleIdState(b);
+    setHydrated(true);
+  }, []);
+
+  const setThreadId = useCallback((id: string | null) => {
+    setThreadIdState(id);
+    if (typeof window !== "undefined") {
+      if (id) localStorage.setItem(STORAGE_KEY_THREAD, id);
+      else localStorage.removeItem(STORAGE_KEY_THREAD);
+    }
+  }, []);
+
+  const setBundleId = useCallback((id: string | null) => {
+    setBundleIdState(id);
+    if (typeof window !== "undefined") {
+      if (id) localStorage.setItem(STORAGE_KEY_BUNDLE, id);
+      else localStorage.removeItem(STORAGE_KEY_BUNDLE);
+    }
+  }, []);
+
+  return {
+    threadId,
+    anonymousId: anonymousId ?? undefined,
+    bundleId,
+    setThreadId,
+    setBundleId,
+    hydrated,
+  };
+}
+
 function useSessionId() {
   const [id] = useState(() =>
     typeof crypto !== "undefined" && crypto.randomUUID
@@ -90,11 +145,41 @@ export function ChatPage(props: ChatPageProps = {}) {
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
   const e2eEnabled = e2eProp ?? true;
   const sessionId = useSessionId();
+  const {
+    threadId,
+    anonymousId,
+    bundleId,
+    setThreadId,
+    setBundleId,
+    hydrated,
+  } = useThreadPersistence();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const hasLoadedThreadRef = useRef(false);
+  useEffect(() => {
+    if (!hydrated || !threadId || !anonymousId || hasLoadedThreadRef.current) return;
+    hasLoadedThreadRef.current = true;
+    fetch(`/api/threads/${threadId}?anonymous_id=${encodeURIComponent(anonymousId)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) return;
+        const msgs = (data.messages ?? []).map(
+          (m: { id: string; role: string; content?: string; adaptiveCard?: Record<string, unknown> }) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            adaptiveCard: m.adaptiveCard,
+          })
+        );
+        setMessages(msgs);
+        if (data.thread?.bundle_id) setBundleId(data.thread.bundle_id);
+      })
+      .catch(() => {});
+  }, [hydrated, threadId, anonymousId, setBundleId]);
 
   const addMessage = useCallback(
     (msg: Omit<ChatMessage, "id">) => {
@@ -120,7 +205,14 @@ export function ChatPage(props: ChatPageProps = {}) {
           ),
         };
         if (partnerId) payload.partner_id = partnerId;
-        if (sessionId) payload.user_id = sessionId;
+        if (threadId) {
+          payload.thread_id = threadId;
+          payload.anonymous_id = anonymousId;
+        } else if (anonymousId) {
+          payload.anonymous_id = anonymousId;
+        } else {
+          payload.user_id = sessionId;
+        }
 
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -157,6 +249,9 @@ export function ChatPage(props: ChatPageProps = {}) {
             ? `Found ${productList.length} products`
             : data.data?.text ?? data.message ?? JSON.stringify(data));
 
+        const newThreadId = (data as { thread_id?: string }).thread_id;
+        if (newThreadId && !threadId) setThreadId(newThreadId);
+
         addMessage({
           role: "assistant",
           content: assistantContent,
@@ -170,7 +265,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (fromPrompt) onPromptSent?.();
       }
     },
-    [addMessage, loading, messages, partnerId, provider, sessionId, onPromptSent]
+    [addMessage, loading, messages, partnerId, provider, sessionId, threadId, anonymousId, setThreadId, onPromptSent]
   );
 
   const lastSentPromptRef = useRef<string | null>(null);
@@ -203,16 +298,31 @@ export function ChatPage(props: ChatPageProps = {}) {
       setLoading(true);
       try {
         if (action === "add_to_bundle" && data.product_id) {
+          const addPayload: Record<string, string> = {
+            product_id: data.product_id,
+          };
+          if (bundleId) addPayload.bundle_id = bundleId;
+
           const res = await fetch("/api/bundle/add", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              product_id: data.product_id,
-              user_id: sessionId,
-            }),
+            body: JSON.stringify(addPayload),
           });
           const json = await res.json();
           if (!res.ok) throw new Error(json.error || "Add to bundle failed");
+
+          const newBundleId = json.bundle_id ?? json.data?.bundle_id;
+          if (newBundleId && threadId && anonymousId) {
+            setBundleId(newBundleId);
+            fetch(`/api/threads/${threadId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ bundle_id: newBundleId, anonymous_id: anonymousId }),
+            }).catch(() => {});
+          } else if (newBundleId) {
+            setBundleId(newBundleId);
+          }
+
           addMessage({
             role: "assistant",
             content: json.summary || "Added to bundle.",
@@ -310,7 +420,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         setLoading(false);
       }
     },
-    [addMessage, e2eEnabled, sessionId, setPaymentOrderId]
+    [addMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId]
   );
 
   function handleSubmit(e: React.FormEvent) {
