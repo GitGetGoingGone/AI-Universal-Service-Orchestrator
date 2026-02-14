@@ -61,18 +61,24 @@ async def resolve(
     machine_readable = resolve_action_ld(
         intent_type=resolved["intent_type"],
         search_query=resolved.get("search_query"),
+        search_queries=resolved.get("search_queries"),
+        experience_name=resolved.get("experience_name"),
         confidence_score=resolved.get("confidence_score"),
         entities=resolved.get("entities", []),
         intent_id=intent_id,
     )
+    data = {
+        "intent_id": intent_id,
+        "intent_type": resolved["intent_type"],
+        "search_query": resolved.get("search_query"),
+        "entities": resolved.get("entities", []),
+        "confidence_score": resolved.get("confidence_score"),
+    }
+    if resolved.get("intent_type") == "discover_composite":
+        data["search_queries"] = resolved.get("search_queries", [])
+        data["experience_name"] = resolved.get("experience_name", "experience")
     return chat_first_response(
-        data={
-            "intent_id": intent_id,
-            "intent_type": resolved["intent_type"],
-            "search_query": resolved.get("search_query"),
-            "entities": resolved.get("entities", []),
-            "confidence_score": resolved.get("confidence_score"),
-        },
+        data=data,
         machine_readable=machine_readable,
         request_id=request_id,
     )

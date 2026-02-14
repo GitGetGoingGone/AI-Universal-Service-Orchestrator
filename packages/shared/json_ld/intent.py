@@ -36,17 +36,23 @@ def intent_ld(
 def resolve_action_ld(
     intent_type: str,
     search_query: Optional[str] = None,
+    search_queries: Optional[List[str]] = None,
+    experience_name: Optional[str] = None,
     confidence_score: Optional[float] = None,
     entities: Optional[List[Dict[str, Any]]] = None,
     intent_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """ResolveAction with result Intent (machine_readable for intent resolution)."""
-    result = {
+    result: Dict[str, Any] = {
         "@type": "Thing",
         "name": intent_type,
         "description": search_query,
         "identifier": intent_id,
     }
+    if search_queries:
+        result["searchQueries"] = search_queries
+    if experience_name:
+        result["experienceName"] = experience_name
     if confidence_score is not None:
         result["additionalProperty"] = [
             {"@type": "PropertyValue", "name": "confidenceScore", "value": confidence_score}
