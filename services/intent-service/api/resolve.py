@@ -39,7 +39,7 @@ async def resolve(
     Chat-First: Returns JSON-LD and machine-readable structure for AI agents.
     """
     # Resolve intent via LLM (async to avoid blocking)
-    resolved = await resolve_intent(body.text)
+    resolved = await resolve_intent(body.text, user_id=body.user_id)
 
     intent_id = None
     if body.persist and get_supabase():

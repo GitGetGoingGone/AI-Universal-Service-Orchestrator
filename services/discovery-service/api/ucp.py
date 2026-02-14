@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from db import get_partner_by_id
-from packages.shared.discovery import is_browse_query
+from packages.shared.discovery import derive_search_query, is_browse_query
 from protocols.ucp_compliance import _normalize_for_ucp
 from scout_engine import search as scout_search
 
@@ -106,7 +106,9 @@ async def ucp_items(
     if is_browse_query(raw_query) or raw_query in ("products", "items", "browse", "what"):
         search_query = ""
     else:
-        search_parts = [q.strip()]
+        # Action-word stripping: "wanna book limo service" -> "limo"
+        base_query = derive_search_query(q) if " " in (q or "").strip() else (q or "").strip()
+        search_parts = [base_query] if base_query else [q.strip()]
         if occasion and occasion in _OCCASION_KEYWORDS:
             search_parts.append(_OCCASION_KEYWORDS[occasion])
         if recipient_type and recipient_type in _RECIPIENT_KEYWORDS and _RECIPIENT_KEYWORDS[recipient_type]:
