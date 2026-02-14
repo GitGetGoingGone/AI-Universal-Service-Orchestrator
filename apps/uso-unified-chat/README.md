@@ -1,11 +1,10 @@
 # USO Unified Chat
 
-End-user chat app with ChatGPT or Gemini provider switch. Both call the orchestrator backend.
+End-user chat app. Calls the orchestrator backend; LLM provider/model is configured in the admin portal.
 
 ## Features
 
-- Provider selector: ChatGPT or Gemini (backend uses orchestrator)
-- Chat UI: message list, input
+- Chat UI: message list, input, adaptive cards
 - Proxies to `POST /api/v1/chat` on orchestrator
 
 ## Environment

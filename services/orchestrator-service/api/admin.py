@@ -1,7 +1,8 @@
 """Platform admin: kill switch, SLA config."""
 
+import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -10,6 +11,9 @@ from config import settings
 from db import get_supabase
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
+
+_llm_config_cache: Optional[Tuple[float, Dict[str, Any]]] = None
+LLM_CACHE_TTL_SEC = 60
 
 
 class KillSwitchBody(BaseModel):
@@ -42,6 +46,27 @@ def _update_platform_config(updates: Dict[str, Any]) -> bool:
         return True
     except Exception:
         return False
+
+
+def get_llm_config() -> Dict[str, Any]:
+    """Get LLM config from platform_config with 60s TTL cache. Used by planner."""
+    global _llm_config_cache
+    now = time.time()
+    if _llm_config_cache and (now - _llm_config_cache[0]) < LLM_CACHE_TTL_SEC:
+        return _llm_config_cache[1]
+    cfg = _get_platform_config()
+    provider = (cfg or {}).get("llm_provider") or "azure"
+    if provider == "openai":
+        provider = "azure"
+    model = (cfg or {}).get("llm_model") or (
+        settings.azure_openai_deployment if provider == "azure" else "gemini-1.5-flash"
+    )
+    temp = (cfg or {}).get("llm_temperature")
+    temperature = float(temp) if temp is not None else 0.1
+    temperature = max(0.0, min(1.0, temperature))
+    result = {"provider": provider, "model": model, "temperature": temperature}
+    _llm_config_cache = (now, result)
+    return result
 
 
 @router.post("/kill-switch")

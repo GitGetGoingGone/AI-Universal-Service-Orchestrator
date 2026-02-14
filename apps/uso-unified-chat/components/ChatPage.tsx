@@ -7,8 +7,6 @@ import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
 import { PaymentModal } from "@/components/PaymentModal";
 
-type Provider = "chatgpt" | "gemini";
-
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -141,7 +139,6 @@ export function ChatPage(props: ChatPageProps = {}) {
     paymentSuccessOrderId,
     onPaymentSuccessHandled,
   } = props;
-  const [provider, setProvider] = useState<Provider>("chatgpt");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<
     Array<{ id: string; intent_description: string }>
@@ -226,7 +223,6 @@ export function ChatPage(props: ChatPageProps = {}) {
       setLoading(true);
       try {
         const payload: Record<string, unknown> = {
-          provider,
           messages: [...messages, { role: "user", content: userMessage }].map(
             (m) => ({ role: m.role, content: m.content ?? "" })
           ),
@@ -295,7 +291,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (fromPrompt) onPromptSent?.();
       }
     },
-    [addMessage, loading, messages, partnerId, provider, sessionId, threadId, anonymousId, setThreadId, onPromptSent]
+    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId]
   );
 
   const lastSentPromptRef = useRef<string | null>(null);

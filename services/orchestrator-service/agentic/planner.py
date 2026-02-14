@@ -48,11 +48,37 @@ def get_planner_client():
     return (None, None)
 
 
+def _get_planner_client_for_config(llm_config: Dict[str, Any]):
+    """Get planner client based on platform_config. Falls back to env-based get_planner_client."""
+    from config import settings
+
+    preferred = (llm_config or {}).get("provider", "azure")
+    if preferred == "openai":
+        preferred = "azure"
+
+    if preferred == "gemini" and settings.google_ai_configured:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=settings.google_ai_api_key)
+            return ("gemini", genai)
+        except ImportError:
+            pass
+    if preferred in ("azure", "openai") and settings.azure_openai_configured:
+        from openai import AzureOpenAI
+        return ("azure", AzureOpenAI(
+            api_key=settings.azure_openai_api_key,
+            api_version="2024-02-01",
+            azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
+        ))
+    return get_planner_client()
+
+
 async def plan_next_action(
     user_message: str,
     state: Dict[str, Any],
     *,
     max_iterations: int = 5,
+    llm_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Use LLM to plan and execute next action. Returns final result or intermediate state.
@@ -62,10 +88,19 @@ async def plan_next_action(
         "last_tool_result": {...},  # result of last tool call
         "iteration": int,
     }
+    llm_config: Optional override from platform_config. When None, fetched via get_llm_config().
     """
-    provider, client = get_planner_client()
+    if llm_config is None:
+        from api.admin import get_llm_config
+        llm_config = get_llm_config()
+
+    provider, client = _get_planner_client_for_config(llm_config)
     if not client:
         return _fallback_plan(user_message, state)
+
+    model = llm_config.get("model") or ("gpt-4o" if provider == "azure" else "gemini-1.5-flash")
+    temperature = float(llm_config.get("temperature", 0.1))
+    temperature = max(0.0, min(1.0, temperature))
 
     # Build prompt with current state (user message + any prior tool results)
     state_summary = {
@@ -76,8 +111,6 @@ async def plan_next_action(
 
     try:
         if provider == "azure":
-            from config import settings
-
             messages = [
                 {"role": "system", "content": PLANNER_SYSTEM},
                 {"role": "user", "content": user_content},
@@ -86,11 +119,11 @@ async def plan_next_action(
 
             response = await asyncio.to_thread(
                 lambda: client.chat.completions.create(
-                    model=settings.azure_openai_deployment,
+                    model=model,
                     messages=messages,
                     tools=tools,
                     tool_choice="auto",
-                    temperature=0.1,
+                    temperature=temperature,
                     max_tokens=500,
                 )
             )
@@ -118,7 +151,7 @@ async def plan_next_action(
             }
 
         if provider == "gemini":
-            return await _plan_with_gemini(client, user_content)
+            return await _plan_with_gemini(client, user_content, model=model, temperature=temperature)
     except Exception as e:
         logger.warning("Planner LLM failed: %s", e)
         return _fallback_plan(user_message, state)
@@ -126,7 +159,13 @@ async def plan_next_action(
     return _fallback_plan(user_message, state)
 
 
-async def _plan_with_gemini(genai_module, user_content: str) -> Dict[str, Any]:
+async def _plan_with_gemini(
+    genai_module,
+    user_content: str,
+    *,
+    model: str = "gemini-1.5-flash",
+    temperature: float = 0.1,
+) -> Dict[str, Any]:
     """Use Gemini for planning (function calling). Requires google-generativeai."""
     from .tools import TOOL_DEFS
 
@@ -138,17 +177,17 @@ async def _plan_with_gemini(genai_module, user_content: str) -> Dict[str, Any]:
             "parameters": t.get("parameters", {"type": "object", "properties": {}}),
         })
 
-    model = genai_module.GenerativeModel(
-        "gemini-1.5-flash",
+    gen_model = genai_module.GenerativeModel(
+        model,
         tools=[{"function_declarations": declarations}],
     )
 
     prompt = f"{PLANNER_SYSTEM}\n\n{user_content}"
 
     def _call():
-        resp = model.generate_content(
+        resp = gen_model.generate_content(
             prompt,
-            generation_config={"temperature": 0.1, "max_output_tokens": 500},
+            generation_config={"temperature": temperature, "max_output_tokens": 500},
         )
         return resp
 

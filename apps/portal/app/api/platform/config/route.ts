@@ -47,13 +47,42 @@ export async function PATCH(request: Request) {
       updates.enable_chatgpt = Boolean(body.enable_chatgpt);
     if (body.feature_flags != null)
       updates.feature_flags = body.feature_flags;
+    if (body.llm_provider != null)
+      updates.llm_provider = String(body.llm_provider);
+    if (body.llm_model != null)
+      updates.llm_model = String(body.llm_model);
+    if (body.llm_temperature != null) {
+      const t = Number(body.llm_temperature);
+      updates.llm_temperature = Math.max(0, Math.min(1, t));
+    }
 
-    const { data, error } = await supabase
+    const { data: existing } = await supabase
       .from("platform_config")
-      .update(updates)
-      .select()
+      .select("id")
       .limit(1)
       .single();
+
+    let data: unknown;
+    let error: { message: string } | null = null;
+
+    if (existing?.id) {
+      const result = await supabase
+        .from("platform_config")
+        .update(updates)
+        .eq("id", existing.id)
+        .select()
+        .single();
+      data = result.data;
+      error = result.error;
+    } else {
+      const result = await supabase
+        .from("platform_config")
+        .insert(updates)
+        .select()
+        .single();
+      data = result.data;
+      error = result.error;
+    }
 
     if (error) {
       return NextResponse.json({ detail: error.message }, { status: 500 });

@@ -31,14 +31,12 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const {
-      provider,
       messages,
       partner_id,
       user_id,
       thread_id,
       anonymous_id,
     } = body as {
-      provider?: string;
       messages?: { role: string; content: string }[];
       partner_id?: string;
       user_id?: string;
@@ -117,13 +115,12 @@ export async function POST(req: Request) {
     const payload: Record<string, unknown> = {
       text: lastUserMessage,
       limit: 20,
-      platform: provider || "chatgpt",
+      platform: "web",
     };
     if (partner_id) payload.partner_id = partner_id;
     if (user_id) payload.user_id = user_id;
     if (resolvedThreadId) {
       payload.thread_id = resolvedThreadId;
-      payload.platform = "web";
     }
 
     const res = await fetch(`${ORCHESTRATOR_URL}/api/v1/chat`, {

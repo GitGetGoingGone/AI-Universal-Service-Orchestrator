@@ -9,6 +9,11 @@ from .tools import execute_tool
 logger = logging.getLogger(__name__)
 
 
+def _get_llm_config() -> Dict[str, Any]:
+    from api.admin import get_llm_config
+    return get_llm_config()
+
+
 async def run_agentic_loop(
     user_message: str,
     *,
@@ -49,10 +54,14 @@ async def run_agentic_loop(
     adaptive_card = None
     machine_readable = None
 
+    llm_config = _get_llm_config()
+
     for iteration in range(max_iterations):
         state["iteration"] = iteration
 
-        plan = await plan_next_action(user_message, state, max_iterations=max_iterations)
+        plan = await plan_next_action(
+            user_message, state, max_iterations=max_iterations, llm_config=llm_config
+        )
 
         if plan.get("action") == "complete":
             state["agent_reasoning"].append(plan.get("reasoning", ""))
