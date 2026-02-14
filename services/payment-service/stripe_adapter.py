@@ -49,6 +49,41 @@ async def create_payment_intent(
     }
 
 
+async def create_sponsorship_payment_intent(
+    product_id: str,
+    partner_id: str,
+    amount_cents: int,
+    start_at: str,
+    end_at: str,
+    currency: str = "usd",
+) -> Dict[str, Any]:
+    """
+    Create Stripe PaymentIntent for product sponsorship.
+    Metadata includes type=sponsorship for webhook to create product_sponsorships row.
+    Returns { client_secret, payment_intent_id }.
+    """
+    _ensure_stripe_configured()
+    stripe.api_key = settings.stripe_secret_key
+
+    pi = stripe.PaymentIntent.create(
+        amount=amount_cents,
+        currency=currency,
+        metadata={
+            "type": "sponsorship",
+            "product_id": product_id,
+            "partner_id": partner_id,
+            "start_at": start_at,
+            "end_at": end_at,
+            "amount_cents": str(amount_cents),
+        },
+        automatic_payment_methods={"enabled": True},
+    )
+    return {
+        "client_secret": pi.client_secret,
+        "payment_intent_id": pi.id,
+    }
+
+
 async def confirm_payment_intent(payment_intent_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve PaymentIntent (e.g. after confirmation)."""
     _ensure_stripe_configured()

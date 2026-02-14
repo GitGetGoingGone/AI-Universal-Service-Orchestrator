@@ -56,7 +56,7 @@ async def search_products(
             client.table("products")
             .select(
                 "id, name, description, price, currency, capabilities, metadata, partner_id, "
-                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability"
+                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability, created_at"
             )
             .is_("deleted_at", "null")
         )
@@ -109,7 +109,7 @@ async def get_partner_by_id(partner_id: str) -> Optional[Dict[str, Any]]:
             client.table("partners")
             .select(
                 "id, business_name, seller_name, seller_url, return_policy_url, "
-                "privacy_policy_url, terms_url, store_country, target_countries, last_acp_push_at"
+                "privacy_policy_url, terms_url, store_country, target_countries, last_acp_push_at, trust_score"
             )
             .eq("id", partner_id)
             .limit(1)
@@ -118,6 +118,88 @@ async def get_partner_by_id(partner_id: str) -> Optional[Dict[str, Any]]:
         return result.data[0] if result.data else None
     except Exception:
         return None
+
+
+async def get_partners_by_ids(partner_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Get partners by IDs for ranking (includes trust_score)."""
+    if not partner_ids:
+        return {}
+    client = get_supabase()
+    if not client:
+        return {}
+    try:
+        result = (
+            client.table("partners")
+            .select("id, business_name, trust_score")
+            .in_("id", partner_ids)
+            .execute()
+        )
+        return {str(r["id"]): r for r in (result.data or [])}
+    except Exception:
+        return {}
+
+
+async def get_platform_config_ranking() -> Optional[Dict[str, Any]]:
+    """Get platform config for ranking (ranking_enabled, ranking_policy, ranking_edge_cases, sponsorship_pricing)."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("platform_config")
+            .select("ranking_enabled, ranking_policy, ranking_edge_cases, sponsorship_pricing")
+            .limit(1)
+            .execute()
+        )
+        row = result.data[0] if result.data else None
+        if not row:
+            return {"ranking_enabled": True}
+        return dict(row)
+    except Exception:
+        return {"ranking_enabled": True}
+
+
+async def get_partner_ratings_map(partner_ids: List[str]) -> Dict[str, float]:
+    """Get avg_rating per partner from partner_ratings."""
+    if not partner_ids:
+        return {}
+    client = get_supabase()
+    if not client:
+        return {}
+    try:
+        result = (
+            client.table("partner_ratings")
+            .select("partner_id, avg_rating")
+            .in_("partner_id", partner_ids)
+            .execute()
+        )
+        return {str(r["partner_id"]): float(r["avg_rating"]) for r in (result.data or [])}
+    except Exception:
+        return {}
+
+
+async def get_active_sponsorships(product_ids: List[str]) -> set:
+    """Get product IDs with active sponsorships (start_at <= now <= end_at, status=active)."""
+    if not product_ids:
+        return set()
+    client = get_supabase()
+    if not client:
+        return set()
+    try:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        result = (
+            client.table("product_sponsorships")
+            .select("product_id")
+            .in_("product_id", product_ids)
+            .eq("status", "active")
+            .lte("start_at", now)
+            .gte("end_at", now)
+            .execute()
+        )
+        return {str(r["product_id"]) for r in (result.data or [])}
+    except Exception:
+        return set()
 
 
 async def update_partner_last_acp_push(partner_id: str) -> bool:

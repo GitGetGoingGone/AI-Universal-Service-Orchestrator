@@ -7,7 +7,11 @@ import stripe
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from config import settings
-from db import update_payment_status, update_order_payment_status
+from db import (
+    create_product_sponsorship,
+    update_payment_status,
+    update_order_payment_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +41,35 @@ async def stripe_webhook(request: Request):
 
     if event.type == "payment_intent.succeeded":
         pi = event.data.object
-        order_id = (pi.metadata or {}).get("order_id")
-        if order_id:
-            charge_id = getattr(pi, "latest_charge", None)
-            await update_payment_status(pi.id, "succeeded", transaction_id=charge_id)
-            await update_order_payment_status(order_id, "paid")
-            logger.info("Payment succeeded for order %s", order_id)
+        meta = pi.metadata or {}
+
+        if meta.get("type") == "sponsorship":
+            product_id = meta.get("product_id")
+            partner_id = meta.get("partner_id")
+            start_at = meta.get("start_at")
+            end_at = meta.get("end_at")
+            amount_cents = int(meta.get("amount_cents", 0))
+            if product_id and partner_id and start_at and end_at and amount_cents:
+                row = await create_product_sponsorship(
+                    product_id=product_id,
+                    partner_id=partner_id,
+                    start_at=start_at,
+                    end_at=end_at,
+                    amount_cents=amount_cents,
+                    currency="USD",
+                    stripe_payment_intent_id=pi.id,
+                )
+                if row:
+                    logger.info("Sponsorship created for product %s", product_id)
+            else:
+                logger.warning("Sponsorship metadata incomplete: %s", meta)
+        else:
+            order_id = meta.get("order_id")
+            if order_id:
+                charge_id = getattr(pi, "latest_charge", None)
+                await update_payment_status(pi.id, "succeeded", transaction_id=charge_id)
+                await update_order_payment_status(order_id, "paid")
+                logger.info("Payment succeeded for order %s", order_id)
     elif event.type == "payment_intent.payment_failed":
         pi = event.data.object
         order_id = (pi.metadata or {}).get("order_id")

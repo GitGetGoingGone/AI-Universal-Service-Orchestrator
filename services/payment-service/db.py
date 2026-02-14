@@ -49,6 +49,45 @@ async def get_order_with_items(order_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def get_platform_config_sponsorship() -> Optional[Dict[str, Any]]:
+    """Get sponsorship_pricing from platform_config."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("platform_config")
+            .select("sponsorship_pricing")
+            .limit(1)
+            .single()
+            .execute()
+        )
+        if result.data and result.data.get("sponsorship_pricing"):
+            return result.data["sponsorship_pricing"]
+        return {"product_price_per_day_cents": 1000, "sponsorship_enabled": True}
+    except Exception:
+        return {"product_price_per_day_cents": 1000, "sponsorship_enabled": True}
+
+
+async def get_product_partner(product_id: str) -> Optional[Dict[str, Any]]:
+    """Get product with partner_id. Returns None if not found."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("products")
+            .select("id, partner_id")
+            .eq("id", product_id)
+            .is_("deleted_at", None)
+            .single()
+            .execute()
+        )
+        return result.data
+    except Exception:
+        return None
+
+
 async def get_partner_stripe_account(partner_id: str) -> Optional[str]:
     """Get partner's Stripe Connect account ID."""
     client = get_supabase()
@@ -130,6 +169,35 @@ async def update_order_payment_status(order_id: str, status: str) -> bool:
         return True
     except Exception:
         return False
+
+
+async def create_product_sponsorship(
+    product_id: str,
+    partner_id: str,
+    start_at: str,
+    end_at: str,
+    amount_cents: int,
+    currency: str,
+    stripe_payment_intent_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Create product_sponsorships row after successful payment."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = client.table("product_sponsorships").insert({
+            "product_id": product_id,
+            "partner_id": partner_id,
+            "start_at": start_at,
+            "end_at": end_at,
+            "amount_cents": amount_cents,
+            "currency": currency,
+            "status": "active",
+            "stripe_payment_intent_id": stripe_payment_intent_id,
+        }).execute()
+        return result.data[0] if result.data else None
+    except Exception:
+        return None
 
 
 async def create_payment_splits(

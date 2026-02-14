@@ -55,6 +55,14 @@ export async function PATCH(request: Request) {
       const t = Number(body.llm_temperature);
       updates.llm_temperature = Math.max(0, Math.min(1, t));
     }
+    if (body.ranking_enabled != null)
+      updates.ranking_enabled = Boolean(body.ranking_enabled);
+    if (body.ranking_policy != null)
+      updates.ranking_policy = body.ranking_policy;
+    if (body.ranking_edge_cases != null)
+      updates.ranking_edge_cases = body.ranking_edge_cases;
+    if (body.sponsorship_pricing != null)
+      updates.sponsorship_pricing = body.sponsorship_pricing;
 
     const { data: existing } = await supabase
       .from("platform_config")

@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.checkout import router as checkout_router
+from api.sponsorship import router as sponsorship_router
 from webhooks.stripe_webhook import router as stripe_webhook_router
 
 app = FastAPI(
@@ -29,6 +30,7 @@ app.add_middleware(
 )
 
 app.include_router(checkout_router)
+app.include_router(sponsorship_router)
 app.include_router(stripe_webhook_router)
 
 
@@ -40,6 +42,7 @@ async def root():
         "version": "0.1.0",
         "endpoints": {
             "create_payment": "POST /api/v1/payment/create - Create PaymentIntent",
+            "sponsorship_create": "POST /api/v1/sponsorship/create - Create sponsorship PaymentIntent",
             "stripe_webhook": "POST /webhooks/stripe - Stripe webhook",
         },
     }
