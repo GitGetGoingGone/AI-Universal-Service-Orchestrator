@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
+import { PaymentModal } from "@/components/PaymentModal";
 
 type Provider = "chatgpt" | "gemini";
 
@@ -50,18 +51,43 @@ function useSessionId() {
   return id;
 }
 
+const STRIPE_CONFIGURED = !!(
+  typeof process !== "undefined" &&
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+);
+
 export type ChatPageProps = {
   partnerId?: string;
   e2eEnabled?: boolean;
   welcomeMessage?: string;
+  /** When set, programmatically send this prompt. Cleared via onPromptSent. */
+  promptToSend?: string;
+  /** Called after promptToSend has been sent. Parent should clear promptToSend. */
+  onPromptSent?: () => void;
+  /** Hide header when embedded in landing page */
+  embeddedInLanding?: boolean;
+  /** When user returns from Stripe with payment_success, add confirmation message */
+  paymentSuccessOrderId?: string | null;
+  /** Called after payment success message is shown. Parent should clear URL params. */
+  onPaymentSuccessHandled?: () => void;
 };
 
 export function ChatPage(props: ChatPageProps = {}) {
-  const { partnerId, e2eEnabled: e2eProp, welcomeMessage } = props;
+  const {
+    partnerId,
+    e2eEnabled: e2eProp,
+    welcomeMessage,
+    promptToSend,
+    onPromptSent,
+    embeddedInLanding,
+    paymentSuccessOrderId,
+    onPaymentSuccessHandled,
+  } = props;
   const [provider, setProvider] = useState<Provider>("chatgpt");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
   const e2eEnabled = e2eProp ?? true;
   const sessionId = useSessionId();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -79,6 +105,94 @@ export function ChatPage(props: ChatPageProps = {}) {
     },
     []
   );
+
+  const sendMessage = useCallback(
+    async (userMessage: string, fromPrompt = false) => {
+      if (!userMessage.trim() || loading) return;
+      setInput("");
+      addMessage({ role: "user", content: userMessage });
+      setLoading(true);
+      try {
+        const payload: Record<string, unknown> = {
+          provider,
+          messages: [...messages, { role: "user", content: userMessage }].map(
+            (m) => ({ role: m.role, content: m.content ?? "" })
+          ),
+        };
+        if (partnerId) payload.partner_id = partnerId;
+        if (sessionId) payload.user_id = sessionId;
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        type ChatResponse = {
+          data?: {
+            products?: { products?: Array<{ name?: string; price?: number }>; count?: number };
+            text?: string;
+            error?: string;
+          };
+          summary?: string;
+          message?: string;
+          error?: string;
+          adaptive_card?: Record<string, unknown>;
+        };
+        let data: ChatResponse;
+        try {
+          data = (await res.json()) as ChatResponse;
+        } catch {
+          throw new Error(res.ok ? "Invalid response" : `HTTP ${res.status}`);
+        }
+        if (!res.ok) {
+          const errMsg = data?.error || `HTTP ${res.status}`;
+          throw new Error(errMsg);
+        }
+
+        const productList = data.data?.products?.products ?? [];
+        const assistantContent =
+          data.summary ??
+          (productList.length > 0
+            ? `Found ${productList.length} products`
+            : data.data?.text ?? data.message ?? JSON.stringify(data));
+
+        addMessage({
+          role: "assistant",
+          content: assistantContent,
+          adaptiveCard: data.adaptive_card,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        addMessage({ role: "assistant", content: `Error: ${msg}` });
+      } finally {
+        setLoading(false);
+        if (fromPrompt) onPromptSent?.();
+      }
+    },
+    [addMessage, loading, messages, partnerId, provider, sessionId, onPromptSent]
+  );
+
+  const lastSentPromptRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prompt = promptToSend?.trim();
+    if (!prompt || prompt === lastSentPromptRef.current) return;
+    lastSentPromptRef.current = prompt;
+    sendMessage(prompt, true);
+  }, [promptToSend, sendMessage]);
+  useEffect(() => {
+    if (!promptToSend?.trim()) lastSentPromptRef.current = null;
+  }, [promptToSend]);
+
+  useEffect(() => {
+    if (paymentSuccessOrderId) {
+      addMessage({
+        role: "assistant",
+        content: "Payment confirmed! Thank you for your order.",
+      });
+      onPaymentSuccessHandled?.();
+    }
+  }, [paymentSuccessOrderId, addMessage, onPaymentSuccessHandled]);
 
   const handleAction = useCallback(
     async (data: ActionPayload) => {
@@ -151,6 +265,10 @@ export function ChatPage(props: ChatPageProps = {}) {
         }
 
         if (action === "complete_checkout" && data.order_id) {
+          if (STRIPE_CONFIGURED) {
+            setPaymentOrderId(data.order_id);
+            return;
+          }
           const res = await fetch("/api/payment/confirm", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -192,97 +310,38 @@ export function ChatPage(props: ChatPageProps = {}) {
         setLoading(false);
       }
     },
-    [addMessage, e2eEnabled, sessionId]
+    [addMessage, e2eEnabled, sessionId, setPaymentOrderId]
   );
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!input.trim() || loading) return;
-
-    const userMessage = input.trim();
-    setInput("");
-    addMessage({ role: "user", content: userMessage });
-    setLoading(true);
-
-    try {
-      const payload: Record<string, unknown> = {
-        provider,
-        messages: [...messages, { role: "user", content: userMessage }].map(
-          (m) => ({ role: m.role, content: m.content ?? "" })
-        ),
-      };
-      if (partnerId) payload.partner_id = partnerId;
-      if (sessionId) payload.user_id = sessionId;
-
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      type ChatResponse = {
-        data?: {
-          products?: { products?: Array<{ name?: string; price?: number }>; count?: number };
-          text?: string;
-          error?: string;
-        };
-        summary?: string;
-        message?: string;
-        error?: string;
-        adaptive_card?: Record<string, unknown>;
-      };
-      let data: ChatResponse;
-      try {
-        data = (await res.json()) as ChatResponse;
-      } catch {
-        throw new Error(res.ok ? "Invalid response" : `HTTP ${res.status}`);
-      }
-      if (!res.ok) {
-        const errMsg = data?.error || `HTTP ${res.status}`;
-        throw new Error(errMsg);
-      }
-
-      const productList = data.data?.products?.products ?? [];
-      const assistantContent =
-        data.summary ??
-        (productList.length > 0
-          ? `Found ${productList.length} products`
-          : data.data?.text ?? data.message ?? JSON.stringify(data));
-
-      addMessage({
-        role: "assistant",
-        content: assistantContent,
-        adaptiveCard: data.adaptive_card,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      addMessage({ role: "assistant", content: `Error: ${msg}` });
-    } finally {
-      setLoading(false);
-    }
+    sendMessage(input.trim(), false);
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[var(--background)] text-[var(--foreground)]">
-      <header className="flex-shrink-0 border-b border-[var(--border)] px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <h1 className="text-lg font-semibold">USO Unified Chat</h1>
-          <div className="flex items-center gap-3">
-            <label className="text-sm text-slate-400">Provider</label>
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as Provider)}
-              disabled={loading}
-              className="bg-[var(--card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm"
-            >
-              <option value="chatgpt">ChatGPT</option>
-              <option value="gemini">Gemini</option>
-            </select>
+    <div className={`flex flex-col bg-[var(--background)] text-[var(--foreground)] ${embeddedInLanding ? "min-h-[60vh]" : "h-screen"}`}>
+      {!embeddedInLanding && (
+        <header className="flex-shrink-0 border-b border-[var(--border)] px-4 py-3">
+          <div className="max-w-3xl mx-auto flex items-center justify-between">
+            <h1 className="text-lg font-semibold">USO Unified Chat</h1>
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-slate-400">Provider</label>
+              <select
+                value={provider}
+                onChange={(e) => setProvider(e.target.value as Provider)}
+                disabled={loading}
+                className="bg-[var(--card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm"
+              >
+                <option value="chatgpt">ChatGPT</option>
+                <option value="gemini">Gemini</option>
+              </select>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
-      <main className="flex-1 overflow-y-auto px-4 py-6">
+      <main className={`flex-1 overflow-y-auto px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""}`}>
         <div className="max-w-3xl mx-auto space-y-6">
           {messages.length === 0 && (
             <motion.div
@@ -347,6 +406,20 @@ export function ChatPage(props: ChatPageProps = {}) {
           <div ref={bottomRef} />
         </div>
       </main>
+
+      {paymentOrderId && (
+        <PaymentModal
+          orderId={paymentOrderId}
+          onClose={() => setPaymentOrderId(null)}
+          onSuccess={() => {
+            addMessage({
+              role: "assistant",
+              content: "Payment confirmed! Thank you for your order.",
+            });
+            setPaymentOrderId(null);
+          }}
+        />
+      )}
 
       <footer className="flex-shrink-0 border-t border-[var(--border)] px-4 py-4">
         <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">

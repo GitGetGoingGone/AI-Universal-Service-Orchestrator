@@ -93,6 +93,19 @@ User Flows by Persona:
 
 ---
 
+## 📦 Consolidated Feature Plan
+
+**[consolidated-plan.md](./consolidated-plan.md)** — Single plan for all feature work. Two parallel tracks: **Track A** (Core UX + Persistence & Identity), **Track B** (Discovery & LLM + Partner Platform).
+- Part 1: Unified Chat E2E (completed) + Landing page (done) + Stripe UI for real payments (done)
+- Part 2: LLM Strategy and Admin Config (provider/model/temperature in admin, remove web app provider dropdown)
+- Part 3: Experience Bundling (action-word stripping, composite intent, multi-query discovery, experience card, conversation history)
+- Part 4: Partner Ranking and Sponsorship (schema, ranking module, discovery integration, admin UI, partner payment flow)
+- Part 5: Return Visit and Standing Intent UX (chat_threads, persist messages, localStorage, pending approvals)
+
+Supersedes: llm_choice_openai_vs_gemini, admin_llm_config (in ~/.cursor/plans/)
+
+---
+
 ## 🚀 Quick Start
 
 **For a single view of what’s planned and current status:**  
