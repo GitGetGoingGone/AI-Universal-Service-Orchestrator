@@ -613,7 +613,7 @@ export function ChatPage(props: ChatPageProps = {}) {
       )}
 
       <main
-        className={`flex-1 min-h-0 overflow-y-auto px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""} ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}
+        className={`h-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""} ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}
       >
         <div className={`mx-auto space-y-6 ${messages.length === 0 ? "flex w-full max-w-2xl flex-col items-center" : "max-w-3xl"}`}>
           {embeddedInLanding && (userId || anonymousId) && threads.length > 0 && (
@@ -888,11 +888,11 @@ export function ChatPage(props: ChatPageProps = {}) {
           hasUserOrAnonymous={!!(userId || anonymousId)}
           anonymousId={anonymousId ?? undefined}
         />
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-w-0 flex-1 flex-col min-h-0 overflow-hidden">
           <header className="flex flex-shrink-0 items-center justify-end border-b border-[var(--border)] px-4 py-3">
             <AuthButtons />
           </header>
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {chatContent}
           </div>
         </div>
