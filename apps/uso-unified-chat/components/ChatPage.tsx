@@ -54,6 +54,40 @@ type ChatMessage = {
 const E2E_ACTIONS = ["add_to_bundle", "view_bundle", "remove_from_bundle", "checkout", "complete_checkout"];
 const STANDING_INTENT_ACTION = "approve_standing_intent";
 
+function extractFirstProductFromCard(card: Record<string, unknown> | null): { product_id: string; product_name?: string } | null {
+  if (!card || typeof card !== "object") return null;
+  const checkActions = (actions: unknown[]): { product_id: string; product_name?: string } | null => {
+    for (const a of actions) {
+      const d = (a as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+      const pid = d?.product_id;
+      if (pid && typeof pid === "string") {
+        return { product_id: pid, product_name: d.product_name as string | undefined };
+      }
+    }
+    return null;
+  };
+  const walk = (obj: unknown): { product_id: string; product_name?: string } | null => {
+    if (!obj || typeof obj !== "object") return null;
+    const o = obj as Record<string, unknown>;
+    const actions = o.actions;
+    if (Array.isArray(actions)) {
+      const found = checkActions(actions);
+      if (found) return found;
+    }
+    for (const key of ["body", "items"] as const) {
+      const arr = o[key];
+      if (Array.isArray(arr)) {
+        for (const item of arr) {
+          const found = walk(item);
+          if (found) return found;
+        }
+      }
+    }
+    return null;
+  };
+  return walk(card);
+}
+
 function filterE2EActions(card: Record<string, unknown>, e2eEnabled: boolean): Record<string, unknown> {
   if (e2eEnabled) return card;
   const out = JSON.parse(JSON.stringify(card)) as Record<string, unknown>;
@@ -189,6 +223,7 @@ export function ChatPage(props: ChatPageProps = {}) {
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
   const [pendingPhoneOrderId, setPendingPhoneOrderId] = useState<string | null>(null);
   const [showPostCheckoutSignInBanner, setShowPostCheckoutSignInBanner] = useState(false);
+  const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "like" | "dislike">>({});
   const e2eEnabled = e2eProp ?? true;
   const sessionId = useSessionId();
   const { isSignedIn } = useAuthState();
@@ -616,6 +651,45 @@ export function ChatPage(props: ChatPageProps = {}) {
     [addMessage, persistMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId, setShowPostCheckoutSignInBanner, setPendingPhoneOrderId]
   );
 
+  const submitFeedback = useCallback(
+    async (messageId: string, rating: "like" | "dislike", productIds?: string[]) => {
+      if (!threadId) return;
+      setFeedbackByMessage((prev) => ({ ...prev, [messageId]: rating }));
+      const payload: Record<string, unknown> = {
+        thread_id: threadId,
+        rating,
+        context: productIds?.length ? { product_ids: productIds } : {},
+      };
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (uuidRegex.test(messageId)) payload.message_id = messageId;
+      if (!userId && anonymousId) payload.anonymous_id = anonymousId;
+      try {
+        const res = await fetch("/api/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          console.warn("Feedback failed:", data.error);
+          setFeedbackByMessage((prev) => {
+            const next = { ...prev };
+            delete next[messageId];
+            return next;
+          });
+        }
+      } catch (err) {
+        console.warn("Feedback failed:", err);
+        setFeedbackByMessage((prev) => {
+          const next = { ...prev };
+          delete next[messageId];
+          return next;
+        });
+      }
+    },
+    [threadId, userId, anonymousId]
+  );
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!input.trim() || loading) return;
@@ -815,54 +889,123 @@ export function ChatPage(props: ChatPageProps = {}) {
                     )}
                   </div>
                   {m.role === "assistant" && (
-                    <div className="flex items-center gap-1 pl-1">
+                    <div className="flex items-center gap-1 pl-1 flex-wrap">
+                      {e2eEnabled && (() => {
+                        const product = extractFirstProductFromCard(m.adaptiveCard ?? null);
+                        const hasProduct = !!product?.product_id;
+                        const hasBundle = !!bundleId;
+                        return (
+                          <>
+                            {hasProduct && (
+                              <>
+                                <button
+                                  type="button"
+                                  aria-label="Add to favorites"
+                                  title="Add to favorites"
+                                  onClick={() => handleAction({ action: "add_to_favorites", product_id: product!.product_id, product_name: product!.product_name })}
+                                  className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-[var(--primary-color)]"
+                                >
+                                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label="Add to bundle"
+                                  title="Add to bundle"
+                                  onClick={() => handleAction({ action: "add_to_bundle", product_id: product!.product_id })}
+                                  className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-[var(--primary-color)]"
+                                >
+                                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                  </svg>
+                                </button>
+                              </>
+                            )}
+                            {hasBundle && (
+                              <>
+                                <button
+                                  type="button"
+                                  aria-label="View bundle"
+                                  title="View bundle"
+                                  onClick={() => handleAction({ action: "view_bundle", bundle_id: bundleId! })}
+                                  className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-[var(--primary-color)]"
+                                >
+                                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label="Checkout"
+                                  title="Checkout"
+                                  onClick={() => handleAction({ action: "checkout", bundle_id: bundleId! })}
+                                  className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-[var(--primary-color)]"
+                                >
+                                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                                  </svg>
+                                </button>
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
                       <button
                         type="button"
                         aria-label="Like"
-                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
+                        title="Like this suggestion"
+                        onClick={() => {
+                          const product = extractFirstProductFromCard(m.adaptiveCard ?? null);
+                          submitFeedback(m.id, "like", product?.product_id ? [product.product_id] : undefined);
+                        }}
+                        className={`rounded p-1.5 transition-colors hover:bg-[var(--border)] ${
+                          feedbackByMessage[m.id] === "like"
+                            ? "text-[var(--primary-color)]"
+                            : "text-slate-400 hover:text-white"
+                        }`}
                       >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg
+                          className="h-4 w-4"
+                          fill={feedbackByMessage[m.id] === "like" ? "currentColor" : "none"}
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
                         </svg>
                       </button>
                       <button
                         type="button"
                         aria-label="Dislike"
-                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
+                        title="Dislike this suggestion"
+                        onClick={() => {
+                          const product = extractFirstProductFromCard(m.adaptiveCard ?? null);
+                          submitFeedback(m.id, "dislike", product?.product_id ? [product.product_id] : undefined);
+                        }}
+                        className={`rounded p-1.5 transition-colors hover:bg-[var(--border)] ${
+                          feedbackByMessage[m.id] === "dislike"
+                            ? "text-red-400"
+                            : "text-slate-400 hover:text-white"
+                        }`}
                       >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg
+                          className="h-4 w-4"
+                          fill={feedbackByMessage[m.id] === "dislike" ? "currentColor" : "none"}
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
                         </svg>
                       </button>
                       <button
                         type="button"
-                        aria-label="Regenerate"
+                        aria-label="Look for more options"
+                        title="Look for more options"
+                        onClick={() => sendMessage("Show me more options", false)}
                         className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Copy"
-                        onClick={() => {
-                          const text = m.content || (m.adaptiveCard ? JSON.stringify(m.adaptiveCard) : "");
-                          if (text) navigator.clipboard?.writeText(text);
-                        }}
-                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
-                      >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="More options"
-                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
-                      >
-                        <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
                         </svg>
                       </button>
                     </div>
@@ -948,6 +1091,30 @@ export function ChatPage(props: ChatPageProps = {}) {
             exit={{ opacity: 0 }}
             className="flex-shrink-0 border-t border-[var(--border)] bg-[var(--background)] px-4 py-4"
           >
+          {e2eEnabled && bundleId && (
+            <div className="mx-auto max-w-3xl flex items-center gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => handleAction({ action: "view_bundle", bundle_id: bundleId })}
+                className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--card-foreground)] hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                </svg>
+                View bundle
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAction({ action: "checkout", bundle_id: bundleId })}
+                className="flex items-center gap-2 rounded-lg border border-[var(--primary-color)] bg-[var(--primary-color)]/20 px-3 py-2 text-sm text-[var(--primary-color)] hover:bg-[var(--primary-color)]/30"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                Checkout
+              </button>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
             <div className="flex gap-2">
             <input
