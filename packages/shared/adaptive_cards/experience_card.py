@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List
 
-from .base import _filter_empty, container, create_card, text_block
+from .base import _filter_empty, container, create_card, strip_html, text_block
 
 
 def generate_experience_card(
@@ -33,7 +33,7 @@ def generate_experience_card(
             name = p.get("name", "Unknown")
             price = p.get("price", 0)
             currency = p.get("currency", "USD")
-            description = (p.get("description") or "")[:100]
+            description = strip_html(p.get("description") or "")[:100]
             image_url = p.get("image_url") or p.get("image")
             capabilities = p.get("capabilities") or []
             caps_str = ", ".join(capabilities) if isinstance(capabilities, list) else ""
@@ -50,7 +50,7 @@ def generate_experience_card(
                 items.insert(1, {"type": "Image", "url": image_url, "size": "Medium"})
 
             actions = [
-                {"type": "Action.Submit", "title": "Add to Bundle", "data": {"action": "add_to_bundle", "product_id": str(p.get("id", ""))}},
+                {"type": "Action.Submit", "title": "Add to Cart", "data": {"action": "add_to_bundle", "product_id": str(p.get("id", ""))}},
                 {"type": "Action.Submit", "title": "View Details", "data": {"action": "view_details", "product_id": str(p.get("id", ""))}},
             ]
             body.append(container(_filter_empty(items), style="emphasis", actions=actions))

@@ -1,6 +1,14 @@
 """Base utilities for Adaptive Card generation."""
 
+import re
 from typing import Any, Dict, List, Optional
+
+
+def strip_html(text: str) -> str:
+    """Remove HTML tags from text for plain display in Adaptive Cards."""
+    if not text or not isinstance(text, str):
+        return ""
+    return re.sub(r"<[^>]+>", "", text).strip()
 
 
 CARD_SCHEMA = "http://adaptivecards.io/schemas/adaptive-card.json"
@@ -74,18 +82,24 @@ def fact_set(facts: List[Dict[str, str]], **kwargs: Any) -> Dict[str, Any]:
     return {"type": "FactSet", "facts": facts, **kwargs}
 
 
+def action_set(actions: List[Dict[str, Any]], **kwargs: Any) -> Dict[str, Any]:
+    """Create an ActionSet element (displays action buttons). Container does not support actions; use ActionSet."""
+    return {"type": "ActionSet", "actions": actions, **kwargs}
+
+
 def container(
     items: List[Dict[str, Any]],
     style: Optional[str] = None,
     actions: Optional[List[Dict[str, Any]]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Create a Container element."""
-    elem: Dict[str, Any] = {"type": "Container", "items": items}
+    """Create a Container element. If actions provided, appends an ActionSet (Container doesn't support actions)."""
+    elem_items = list(items)
+    if actions:
+        elem_items.append(action_set(actions))
+    elem: Dict[str, Any] = {"type": "Container", "items": elem_items}
     if style:
         elem["style"] = style
-    if actions:
-        elem["actions"] = actions
     elem.update(kwargs)
     return elem
 

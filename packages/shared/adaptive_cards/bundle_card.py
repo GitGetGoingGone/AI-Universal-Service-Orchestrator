@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from .base import create_card, fact_set, text_block
+from .base import action_set, create_card, fact_set, text_block
 
 
 def generate_bundle_card(
@@ -47,9 +47,9 @@ def generate_bundle_card(
                     "items": [
                         text_block(name, weight="Bolder"),
                         text_block(f"{currency} {price:.2f}", size="Small"),
-                    ],
-                    "actions": [
-                        {"type": "Action.Submit", "title": "Remove", "data": {"action": "remove_from_bundle", "item_id": str(item.get("id", ""))}},
+                        action_set([
+                            {"type": "Action.Submit", "title": "Remove", "data": {"action": "remove_from_bundle", "item_id": str(item.get("id", ""))}},
+                        ]),
                     ],
                 }
             )
