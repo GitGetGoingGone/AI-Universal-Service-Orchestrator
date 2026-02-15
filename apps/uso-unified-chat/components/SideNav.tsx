@@ -136,31 +136,35 @@ export function SideNav({
         )}
       </div>
 
-      {/* Thread list */}
-      {hasUserOrAnonymous && threads.length > 0 && (
+      {/* Thread list - always visible when user has identity */}
+      {hasUserOrAnonymous && (
         <div className="flex-1 overflow-y-auto px-2">
           <div className="space-y-0.5 py-2">
-            {threads.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => onSelectThread?.(t.id)}
-                className={`w-full rounded-lg px-3 py-2 text-left text-sm truncate transition-colors ${
-                  threadId === t.id
-                    ? "bg-[var(--primary-color)]/20 text-[var(--primary-color)]"
-                    : "text-[var(--muted)] hover:bg-[var(--background)] hover:text-[var(--card-foreground)]"
-                }`}
-                title={t.title}
-              >
-                {t.title.length > 24 ? t.title.slice(0, 21) + "…" : t.title}
-              </button>
-            ))}
+            {threads.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-[var(--muted)]">No conversations yet</p>
+            ) : (
+              threads.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => onSelectThread?.(t.id)}
+                  className={`w-full rounded-lg px-3 py-2 text-left text-sm truncate transition-colors ${
+                    threadId === t.id
+                      ? "bg-[var(--primary-color)]/20 text-[var(--primary-color)]"
+                      : "text-[var(--muted)] hover:bg-[var(--background)] hover:text-[var(--card-foreground)]"
+                  }`}
+                  title={t.title}
+                >
+                  {t.title.length > 24 ? t.title.slice(0, 21) + "…" : t.title}
+                </button>
+              ))
+            )}
           </div>
         </div>
       )}
 
-      {/* Bottom: Connect, Settings (Settings last) */}
-      <div className="flex flex-col gap-1 border-t border-[var(--border)] p-3">
+      {/* Bottom: Connect, Settings (Settings last) - fixed at bottom left */}
+      <div className="mt-auto flex-shrink-0 flex flex-col gap-1 border-t border-[var(--border)] p-3">
         <ConnectWhatsApp />
         <Link
           href="/settings"

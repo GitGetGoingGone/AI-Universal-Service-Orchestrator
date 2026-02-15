@@ -41,6 +41,10 @@ async def chat(
         True,
         description="Use agentic AI planning (LLM-based). Falls back to direct flow when disabled or LLM unavailable.",
     ),
+    adaptive_cards: Optional[bool] = Query(
+        None,
+        description="Override adaptive cards: true=show, false=conversational only. If omitted, uses platform/partner/user settings.",
+    ),
 ):
     """
     AI Agents Chat Entry Point + Agentic AI.
@@ -125,8 +129,22 @@ async def chat(
             summary=f"Sorry, I couldn't complete your request: {result['error']}",
         )
 
+    # Response style control: conversational only vs adaptive cards
+    use_adaptive_cards = True
+    if adaptive_cards is not None:
+        use_adaptive_cards = adaptive_cards
+    else:
+        try:
+            from db import get_adaptive_cards_setting
+            use_adaptive_cards = await get_adaptive_cards_setting(
+                partner_id=body.partner_id,
+                user_id=user_id,
+            )
+        except Exception:
+            pass
+
     # Enrich adaptive card with agent reasoning when present (no header label)
-    adaptive_card = result.get("adaptive_card")
+    adaptive_card = result.get("adaptive_card") if use_adaptive_cards else None
     agent_reasoning = result.get("agent_reasoning", [])
     if adaptive_card and agent_reasoning:
         reasoning_text = " • ".join(r for r in agent_reasoning if r)

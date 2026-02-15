@@ -265,8 +265,9 @@ export function ChatPage(props: ChatPageProps = {}) {
       setMessages([]);
       setPendingApprovals([]);
       if (!id) setBundleId(null);
+      fetchThreads(); // Refresh list so previous conversation appears when switching to new chat
     },
-    [setThreadId, setBundleId]
+    [setThreadId, setBundleId, fetchThreads]
   );
 
   const addMessage = useCallback(

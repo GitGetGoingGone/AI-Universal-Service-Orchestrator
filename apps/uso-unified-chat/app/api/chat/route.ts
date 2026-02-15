@@ -109,6 +109,13 @@ export async function POST(req: Request) {
           content: lastUserMessage,
           channel: "web",
         });
+        await supabase
+          .from("chat_threads")
+          .update({
+            updated_at: new Date().toISOString(),
+            title: lastUserMessage.slice(0, 100) || "New chat",
+          })
+          .eq("id", resolvedThreadId);
       }
     }
 
@@ -152,6 +159,10 @@ export async function POST(req: Request) {
         adaptive_card: adaptiveCard,
         channel: "web",
       });
+      await supabase
+        .from("chat_threads")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", resolvedThreadId);
     }
 
     const response = { ...data, thread_id: resolvedThreadId ?? data.thread_id };

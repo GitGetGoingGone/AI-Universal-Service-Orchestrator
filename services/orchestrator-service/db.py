@@ -185,6 +185,60 @@ def upsert_account_link(
         return None
 
 
+async def get_adaptive_cards_setting(
+    partner_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> bool:
+    """
+    Resolve adaptive_cards_enabled: platform default, partner override, user override.
+    Precedence: user > partner > platform. Returns True if adaptive cards should be shown.
+    """
+    client = get_supabase()
+    if not client:
+        return True  # Default when DB not configured
+
+    try:
+        # 1. Platform default
+        platform_row = client.table("platform_config").select("adaptive_cards_enabled").limit(1).execute()
+        use_cards = True
+        if platform_row.data and platform_row.data[0] is not None:
+            val = platform_row.data[0].get("adaptive_cards_enabled")
+            if val is not None:
+                use_cards = bool(val)
+
+        # 2. Partner override
+        if partner_id:
+            partner_row = (
+                client.table("partners")
+                .select("adaptive_cards_enabled")
+                .eq("id", partner_id)
+                .limit(1)
+                .execute()
+            )
+            if partner_row.data and partner_row.data[0] is not None:
+                val = partner_row.data[0].get("adaptive_cards_enabled")
+                if val is not None:
+                    use_cards = bool(val)
+
+        # 3. User override (users.metadata->>'adaptive_cards_enabled')
+        if user_id:
+            user_row = (
+                client.table("users")
+                .select("metadata")
+                .eq("id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if user_row.data and user_row.data[0]:
+                meta = user_row.data[0].get("metadata") or {}
+                if isinstance(meta, dict) and "adaptive_cards_enabled" in meta:
+                    use_cards = bool(meta["adaptive_cards_enabled"])
+
+        return use_cards
+    except Exception:
+        return True
+
+
 def get_user_id_by_platform_user(platform: str, platform_user_id: str) -> Optional[str]:
     """Resolve our user_id from a linked platform identity (e.g. for chat thread mapping)."""
     client = get_supabase()
