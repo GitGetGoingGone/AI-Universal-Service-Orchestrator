@@ -2,6 +2,40 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+
+const FLIP_WORDS = ["Discover", "Bundle", "Plan", "Payment"];
+const SUGGESTIONS = [
+  "Find flowers for delivery",
+  "Plan a date night",
+  "Best birthday gifts under $50",
+  "Show me chocolates",
+];
+
+function FlipWord() {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => {
+      setIndex((i) => (i + 1) % FLIP_WORDS.length);
+    }, 2000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="relative h-12 overflow-hidden sm:h-14">
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={FLIP_WORDS[index]}
+          initial={{ y: 24, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: -24, opacity: 0 }}
+          transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          className="absolute inset-x-0 flex items-center justify-center text-2xl font-semibold text-[var(--primary-color)] sm:text-3xl"
+        >
+          {FLIP_WORDS[index]}
+        </motion.span>
+      </AnimatePresence>
+    </div>
+  );
+}
 import { useAuthState, AuthButtons } from "@/components/AuthWrapper";
 import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
@@ -555,8 +589,10 @@ export function ChatPage(props: ChatPageProps = {}) {
         </header>
       )}
 
-      <main className={`flex-1 overflow-y-auto px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""}`}>
-        <div className="max-w-3xl mx-auto space-y-6">
+      <main
+        className={`flex-1 overflow-y-auto px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""} ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}
+      >
+        <div className={`mx-auto space-y-6 ${messages.length === 0 ? "flex w-full max-w-2xl flex-col items-center" : "max-w-3xl"}`}>
           {embeddedInLanding && (userId || anonymousId) && threads.length > 0 && (
             <div className="flex justify-end">
               <select
@@ -614,34 +650,52 @@ export function ChatPage(props: ChatPageProps = {}) {
           )}
           {messages.length === 0 && (
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center justify-center py-12 text-center"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.4 }}
+              className="flex w-full flex-col items-center text-center"
             >
               <h2 className="text-3xl font-bold tracking-tight text-[var(--foreground)] sm:text-4xl md:text-5xl">
                 Discover, bundle, and order —{" "}
                 <span className="text-[var(--primary-color)]">in one conversation</span>
               </h2>
-              <p className="mt-4 text-lg text-[var(--muted)]">
+              <p className="mt-2 text-lg text-[var(--muted)]">
                 {welcomeMessage ?? "Find products, add to cart, and pay — all through chat."}
               </p>
-              <div className="mt-8 flex w-full max-w-2xl gap-3 overflow-x-auto pb-2 scroll-smooth">
-                {[
-                  { label: "Discover", prompt: "Find products" },
-                  { label: "Bundle", prompt: "Add items to bundle" },
-                  { label: "Plan", prompt: "Plan a date night" },
-                  { label: "Payment", prompt: "Checkout" },
-                ].map(({ label, prompt }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => sendMessage(prompt, true)}
-                    className="shrink-0 rounded-full border border-[var(--border)] bg-[var(--card)] px-5 py-2.5 text-sm font-medium text-[var(--card-foreground)] transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
-                  >
-                    {label}
-                  </button>
-                ))}
+              <div className="mt-6">
+                <FlipWord />
               </div>
+              <form onSubmit={handleSubmit} className="mt-8 w-full max-w-xl">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Type a message..."
+                    disabled={loading}
+                    className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="rounded-xl bg-[var(--primary-color)] px-6 py-3 text-sm font-medium text-[var(--primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                </div>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {SUGGESTIONS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => sendMessage(prompt, true)}
+                      className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm text-[var(--card-foreground)] transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </form>
             </motion.div>
           )}
 
@@ -710,25 +764,28 @@ export function ChatPage(props: ChatPageProps = {}) {
         />
       )}
 
-      <footer className="flex-shrink-0 border-t border-[var(--border)] px-4 py-4">
-        <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
-          {messages.length === 0 && (
+      <AnimatePresence>
+        {messages.length > 0 && (
+          <motion.footer
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="flex-shrink-0 border-t border-[var(--border)] px-4 py-4"
+          >
+          <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
             <div className="mb-3 flex flex-wrap justify-center gap-2">
-              {["Find flowers for delivery", "Plan a date night", "Best birthday gifts under $50", "Show me chocolates"].map(
-                (prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => sendMessage(prompt, true)}
-                    className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm text-[var(--card-foreground)] transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
-                  >
-                    {prompt}
-                  </button>
-                )
-              )}
+              {SUGGESTIONS.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => sendMessage(prompt, true)}
+                  className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm text-[var(--card-foreground)] transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
+                >
+                  {prompt}
+                </button>
+              ))}
             </div>
-          )}
-          <div className="flex gap-2">
+            <div className="flex gap-2">
             <input
               type="text"
               value={input}
@@ -740,13 +797,15 @@ export function ChatPage(props: ChatPageProps = {}) {
             <button
               type="submit"
               disabled={loading}
-              className="px-6 py-3 bg-[var(--primary-color)] text-[var(--primary-foreground)] rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="rounded-xl bg-[var(--primary-color)] px-6 py-3 text-sm font-medium text-[var(--primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               Send
             </button>
           </div>
         </form>
-      </footer>
+          </motion.footer>
+        )}
+      </AnimatePresence>
     </div>
   );
 
