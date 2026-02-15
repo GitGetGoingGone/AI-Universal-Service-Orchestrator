@@ -44,13 +44,40 @@ body {
   color: #ffffff;
 }
 
-.chat-window .aco-adaptiveCard {
+/* Adaptive cards - force dark theme (override library defaults) */
+.chat-window .aco-adaptiveCard,
+.chat-window .ac-adaptiveCard,
+.chat-window .ac-container,
+.chat-window .ac-columnSet,
+.chat-window .ac-column {
   background: var(--card) !important;
   border-color: var(--border) !important;
+  color: var(--card-foreground) !important;
 }
 
-.chat-window .aco-textBlock {
+.chat-window .aco-textBlock,
+.chat-window .ac-textBlock {
   color: var(--card-foreground) !important;
+}
+
+.chat-window .ac-factSet .ac-factTitle,
+.chat-window .ac-factSet .ac-factValue {
+  color: var(--card-foreground) !important;
+}
+
+.chat-window .ac-image {
+  background: transparent !important;
+}
+
+/* Force dark backgrounds on all card structure elements */
+.chat-window .ac-adaptiveCard,
+.chat-window .aco-adaptiveCard,
+.chat-window .ac-container,
+.chat-window .ac-columnSet,
+.chat-window .ac-column,
+.chat-window .ac-actionSet {
+  background-color: var(--card) !important;
+  background: var(--card) !important;
 }
 
 /* Typing animation - staggered bounce for dots */
