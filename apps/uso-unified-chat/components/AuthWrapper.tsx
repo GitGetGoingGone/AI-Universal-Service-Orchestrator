@@ -3,7 +3,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { SignInButton, SignOutButton, useUser } from "@clerk/nextjs";
 
-const hasClerk = !!(
+export const hasClerk = !!(
   typeof process !== "undefined" &&
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 );

@@ -9,9 +9,18 @@ End-user chat app. Calls the orchestrator backend; LLM provider/model is configu
 
 ## Environment
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ORCHESTRATOR_URL` | http://localhost:8002 | Orchestrator service URL |
+### Vercel (Project → Settings → Environment Variables)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ORCHESTRATOR_URL` | Yes | Orchestrator service URL (e.g. https://uso-orchestrator.onrender.com) |
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL (for thread persistence) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase service role key (server-side, bypasses RLS) |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | For payments | Stripe publishable key (pk_test_... or pk_live_...) — enables PaymentModal |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | For auth | Clerk publishable key — enables sign-in and cross-device threads |
+| `CLERK_SECRET_KEY` | For auth | Clerk secret key (server-side) |
+
+**Note:** `NEXT_PUBLIC_*` vars are exposed to the browser. Never put secrets there.
 
 ## Run
 
@@ -23,4 +32,4 @@ npm run dev
 
 ## Deploy
 
-Deploy to Vercel. Set `ORCHESTRATOR_URL` to your staging/production orchestrator URL.
+Deploy to Vercel. Add the environment variables above in **Project → Settings → Environment Variables**. Redeploy after changing env vars.

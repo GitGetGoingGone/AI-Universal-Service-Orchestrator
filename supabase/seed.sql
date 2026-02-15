@@ -40,7 +40,7 @@ INSERT INTO partners (
   'Flower Shop Demo',
   'retail',
   'partner@example.com',
-  'verified',
+  'approved',
   85,
   true,
   NOW(),

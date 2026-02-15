@@ -36,10 +36,12 @@ function FlipWord() {
     </div>
   );
 }
-import { useAuthState, AuthButtons } from "@/components/AuthWrapper";
+import { useAuthState, AuthButtons, hasClerk } from "@/components/AuthWrapper";
+import { SignInButton } from "@clerk/nextjs";
 import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
 import { PaymentModal } from "@/components/PaymentModal";
+import { PhoneModal } from "@/components/PhoneModal";
 import { SideNav } from "@/components/SideNav";
 
 type ChatMessage = {
@@ -185,6 +187,8 @@ export function ChatPage(props: ChatPageProps = {}) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
+  const [pendingPhoneOrderId, setPendingPhoneOrderId] = useState<string | null>(null);
+  const [showPostCheckoutSignInBanner, setShowPostCheckoutSignInBanner] = useState(false);
   const e2eEnabled = e2eProp ?? true;
   const sessionId = useSessionId();
   const { isSignedIn } = useAuthState();
@@ -258,6 +262,10 @@ export function ChatPage(props: ChatPageProps = {}) {
     if (userId || anonymousId) fetchThreads();
   }, [userId, anonymousId, fetchThreads]);
 
+  useEffect(() => {
+    if (userId) setShowPostCheckoutSignInBanner(false);
+  }, [userId]);
+
   const handleSelectThread = useCallback(
     (id: string | null) => {
       prevLoadedThreadIdRef.current = null;
@@ -278,6 +286,33 @@ export function ChatPage(props: ChatPageProps = {}) {
       ]);
     },
     []
+  );
+
+  const persistMessage = useCallback(
+    (msg: { role: "user" | "assistant"; content?: string; adaptiveCard?: Record<string, unknown> }) => {
+      if (!threadId) return;
+      const authParam = userId
+        ? { user_id: userId }
+        : anonymousId
+          ? { anonymous_id: anonymousId }
+          : null;
+      if (!authParam) return;
+      fetch(`/api/threads/${threadId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: msg.role,
+              content: msg.content ?? null,
+              adaptive_card: msg.adaptiveCard ?? null,
+            },
+          ],
+          ...authParam,
+        }),
+      }).catch(() => {});
+    },
+    [threadId, userId, anonymousId]
   );
 
   const sendMessage = useCallback(
@@ -373,15 +408,16 @@ export function ChatPage(props: ChatPageProps = {}) {
     if (!promptToSend?.trim()) lastSentPromptRef.current = null;
   }, [promptToSend]);
 
+  const paymentSuccessHandledRef = useRef(false);
   useEffect(() => {
-    if (paymentSuccessOrderId) {
-      addMessage({
-        role: "assistant",
-        content: "Payment confirmed! Thank you for your order.",
-      });
-      onPaymentSuccessHandled?.();
-    }
-  }, [paymentSuccessOrderId, addMessage, onPaymentSuccessHandled]);
+    if (!paymentSuccessOrderId || !hydrated || paymentSuccessHandledRef.current) return;
+    const content = "Payment confirmed! Thank you for your order.";
+    addMessage({ role: "assistant", content });
+    persistMessage({ role: "assistant", content });
+    if (!userId) setShowPostCheckoutSignInBanner(true);
+    paymentSuccessHandledRef.current = true;
+    onPaymentSuccessHandled?.();
+  }, [paymentSuccessOrderId, hydrated, threadId, addMessage, persistMessage, onPaymentSuccessHandled, userId]);
 
   const handleAction = useCallback(
     async (data: ActionPayload) => {
@@ -405,18 +441,16 @@ export function ChatPage(props: ChatPageProps = {}) {
           setPendingApprovals((prev) =>
             prev.filter((a) => a.id !== data.standing_intent_id)
           );
-          addMessage({
-            role: "assistant",
-            content:
+          const content =
               json.approved !== false
                 ? "Standing intent approved. We'll notify you when it's ready."
-                : "Standing intent rejected.",
-          });
+                : "Standing intent rejected.";
+          addMessage({ role: "assistant", content });
+          persistMessage({ role: "assistant", content });
         } catch (err) {
-          addMessage({
-            role: "assistant",
-            content: `Error: ${err instanceof Error ? err.message : String(err)}`,
-          });
+          const content = `Error: ${err instanceof Error ? err.message : String(err)}`;
+          addMessage({ role: "assistant", content });
+          persistMessage({ role: "assistant", content });
         } finally {
           setLoading(false);
         }
@@ -454,11 +488,9 @@ export function ChatPage(props: ChatPageProps = {}) {
             setBundleId(newBundleId);
           }
 
-          addMessage({
-            role: "assistant",
-            content: json.summary || "Added to bundle.",
-            adaptiveCard: json.adaptive_card,
-          });
+          const addMsg = { role: "assistant" as const, content: json.summary || "Added to bundle.", adaptiveCard: json.adaptive_card };
+          addMessage(addMsg);
+          persistMessage(addMsg);
           if (json.adaptive_card) return;
         }
 
@@ -466,11 +498,9 @@ export function ChatPage(props: ChatPageProps = {}) {
           const res = await fetch(`/api/bundles/${data.bundle_id}`);
           const json = await res.json();
           if (!res.ok) throw new Error(json.error || "Bundle not found");
-          addMessage({
-            role: "assistant",
-            content: json.summary,
-            adaptiveCard: json.adaptive_card,
-          });
+          const addMsg = { role: "assistant" as const, content: json.summary, adaptiveCard: json.adaptive_card };
+          addMessage(addMsg);
+          persistMessage(addMsg);
           return;
         }
 
@@ -482,10 +512,9 @@ export function ChatPage(props: ChatPageProps = {}) {
           });
           const json = await res.json();
           if (!res.ok) throw new Error(json.error || "Remove failed");
-          addMessage({
-            role: "assistant",
-            content: json.summary || "Item removed.",
-          });
+          const addMsg = { role: "assistant" as const, content: json.summary || "Item removed." };
+          addMessage(addMsg);
+          persistMessage(addMsg);
           return;
         }
 
@@ -497,38 +526,41 @@ export function ChatPage(props: ChatPageProps = {}) {
           });
           const json = await res.json();
           if (!res.ok) throw new Error(json.error || "Checkout failed");
-          addMessage({
-            role: "assistant",
-            content: json.summary,
-            adaptiveCard: json.adaptive_card,
-          });
+          const addMsg = { role: "assistant" as const, content: json.summary, adaptiveCard: json.adaptive_card };
+          addMessage(addMsg);
+          persistMessage(addMsg);
           return;
         }
 
         if (action === "complete_checkout" && data.order_id) {
-          if (STRIPE_CONFIGURED) {
-            setPaymentOrderId(data.order_id);
+          const orderId = data.order_id;
+          if (userId) {
+            // Signed-in user: proceed directly
+            if (STRIPE_CONFIGURED) {
+              setPaymentOrderId(orderId);
+              return;
+            }
+            const res = await fetch("/api/payment/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ order_id: orderId }),
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || "Payment failed");
+            const addMsg = { role: "assistant" as const, content: json.message || "Payment confirmed! Thank you for your order." };
+            addMessage(addMsg);
+            persistMessage(addMsg);
             return;
           }
-          const res = await fetch("/api/payment/confirm", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ order_id: data.order_id }),
-          });
-          const json = await res.json();
-          if (!res.ok) throw new Error(json.error || "Payment failed");
-          addMessage({
-            role: "assistant",
-            content: json.message || "Payment confirmed! Thank you for your order.",
-          });
+          // Anonymous user: collect phone before payment
+          setPendingPhoneOrderId(orderId);
           return;
         }
 
         if (action === "add_more") {
-          addMessage({
-            role: "assistant",
-            content: "What else would you like to add? Try searching for more products.",
-          });
+          const addMsg = { role: "assistant" as const, content: "What else would you like to add? Try searching for more products." };
+          addMessage(addMsg);
+          persistMessage(addMsg);
           return;
         }
 
@@ -536,44 +568,52 @@ export function ChatPage(props: ChatPageProps = {}) {
           const res = await fetch(`/api/products/${data.product_id}`);
           const json = await res.json();
           if (!res.ok) throw new Error(json.error || "Product not found");
-          addMessage({
-            role: "assistant",
-            content: `${json.data?.name || "Product"} — ${json.data?.currency || "USD"} ${Number(json.data?.price || 0).toFixed(2)}`,
-          });
+          const addMsg = { role: "assistant" as const, content: `${json.data?.name || "Product"} — ${json.data?.currency || "USD"} ${Number(json.data?.price || 0).toFixed(2)}` };
+          addMessage(addMsg);
+          persistMessage(addMsg);
           return;
         }
 
         if (action === "add_to_favorites" && data.product_id) {
+          if (!userId) {
+            const addMsg = { role: "assistant" as const, content: "Sign in to save favorites." };
+            addMessage(addMsg);
+            persistMessage(addMsg);
+            return;
+          }
           const favPayload: Record<string, string> = {
             item_type: "product",
             item_id: data.product_id,
             item_name: typeof data.product_name === "string" ? data.product_name : "",
           };
-          if (!userId && anonymousId) favPayload.anonymous_id = anonymousId;
           const res = await fetch("/api/my-stuff/favorites", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(favPayload),
           });
-          const json = await res.json();
+          const text = await res.text();
+          let json: { error?: string } = {};
+          try {
+            json = text ? (JSON.parse(text) as { error?: string }) : {};
+          } catch {
+            json = { error: "Invalid response" };
+          }
           if (!res.ok) throw new Error(json.error || "Failed to save");
-          addMessage({
-            role: "assistant",
-            content: "Saved to My Stuff!",
-          });
+          const addMsg = { role: "assistant" as const, content: "Saved to My Stuff!" };
+          addMessage(addMsg);
+          persistMessage(addMsg);
           window.dispatchEvent(new Event("my-stuff-refresh"));
           return;
         }
       } catch (err) {
-        addMessage({
-          role: "assistant",
-          content: `Error: ${err instanceof Error ? err.message : String(err)}`,
-        });
+        const content = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        addMessage({ role: "assistant", content });
+        persistMessage({ role: "assistant", content });
       } finally {
         setLoading(false);
       }
     },
-    [addMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId]
+    [addMessage, persistMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId, setShowPostCheckoutSignInBanner, setPendingPhoneOrderId]
   );
 
   function handleSubmit(e: React.FormEvent) {
@@ -628,6 +668,28 @@ export function ChatPage(props: ChatPageProps = {}) {
                   <option key={t.id} value={t.id}>{t.title.length > 30 ? t.title.slice(0, 27) + "…" : t.title}</option>
                 ))}
               </select>
+            </div>
+          )}
+          {showPostCheckoutSignInBanner && !userId && hasClerk && (
+            <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-center justify-between gap-4">
+              <p className="text-sm text-[var(--foreground)]">
+                Sign in to save your order and conversation history — access them from any device.
+              </p>
+              <div className="flex items-center gap-2 shrink-0">
+                <SignInButton mode="modal">
+                  <button className="px-4 py-2 rounded-lg bg-[var(--primary-color)] text-[var(--primary-foreground)] text-sm font-medium hover:opacity-90">
+                    Sign in
+                  </button>
+                </SignInButton>
+                <button
+                  type="button"
+                  onClick={() => setShowPostCheckoutSignInBanner(false)}
+                  className="p-2 rounded-lg text-[var(--muted)] hover:bg-[var(--border)] hover:text-[var(--foreground)]"
+                  aria-label="Dismiss"
+                >
+                  ×
+                </button>
+              </div>
             </div>
           )}
           {pendingApprovals.length > 0 && (
@@ -743,10 +805,11 @@ export function ChatPage(props: ChatPageProps = {}) {
                       <p className="text-sm whitespace-pre-wrap">{m.content}</p>
                     )}
                     {m.adaptiveCard && (
-                      <div className="mt-3">
+                      <div className="mt-3 w-full min-w-0">
                         <AdaptiveCardRenderer
                           card={filterE2EActions(m.adaptiveCard, e2eEnabled)}
                           onAction={handleAction}
+                          className="w-full"
                         />
                       </div>
                     )}
@@ -829,6 +892,39 @@ export function ChatPage(props: ChatPageProps = {}) {
           <div ref={bottomRef} />
         </div>
       </main>
+
+      {pendingPhoneOrderId && (
+        <PhoneModal
+          orderId={pendingPhoneOrderId}
+          onClose={() => setPendingPhoneOrderId(null)}
+          onComplete={(orderId) => {
+            setPendingPhoneOrderId(null);
+            if (STRIPE_CONFIGURED) {
+              setPaymentOrderId(orderId);
+            } else {
+              setLoading(true);
+              fetch("/api/payment/confirm", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ order_id: orderId }),
+              })
+                .then((r) => r.json())
+                .then((json) => {
+                  if (!json.error) {
+                    const addMsg = { role: "assistant" as const, content: json.message || "Payment confirmed! Thank you for your order." };
+                    addMessage(addMsg);
+                    persistMessage(addMsg);
+                    setShowPostCheckoutSignInBanner(true);
+                  } else {
+                    addMessage({ role: "assistant", content: json.error || "Payment failed." });
+                  }
+                })
+                .catch(() => addMessage({ role: "assistant", content: "Payment failed." }))
+                .finally(() => setLoading(false));
+            }
+          }}
+        />
+      )}
 
       {paymentOrderId && (
         <PaymentModal

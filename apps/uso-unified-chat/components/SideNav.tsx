@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
+import { AuthButtons } from "@/components/AuthWrapper";
 
 export type MyStuff = {
   favorites: Array<{ id: string; item_type: string; item_id: string; item_name: string | null; created_at: string }>;
@@ -163,9 +164,12 @@ export function SideNav({
         </div>
       )}
 
-      {/* Bottom: Connect, Settings (Settings last) - fixed at bottom left */}
+      {/* Bottom: Connect, Sign in, Settings - fixed at bottom left */}
       <div className="mt-auto flex-shrink-0 flex flex-col gap-1 border-t border-[var(--border)] p-3">
         <ConnectWhatsApp />
+        <div className="px-3 py-2">
+          <AuthButtons />
+        </div>
         <Link
           href="/settings"
           className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-[var(--background)] ${

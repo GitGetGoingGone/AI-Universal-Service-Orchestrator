@@ -5,6 +5,9 @@ import * as AdaptiveCards from "adaptivecards";
 import "adaptivecards/dist/adaptivecards.css";
 
 const darkHostConfig = new AdaptiveCards.HostConfig({
+  actions: {
+    actionsOrientation: AdaptiveCards.Enums.Orientation.Vertical,
+  },
   containerStyles: {
     default: {
       backgroundColor: "#1e293b",

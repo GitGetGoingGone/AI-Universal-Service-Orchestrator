@@ -21,7 +21,7 @@ def generate_product_card(products: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     for p in products:
         name = p.get("name", "Unknown")
-        description = strip_html(p.get("description") or "")[:100]
+        description = strip_html(p.get("description") or "")[:80]
         price = p.get("price", 0)
         currency = p.get("currency", "USD")
         capabilities = p.get("capabilities") or []
@@ -40,17 +40,17 @@ def generate_product_card(products: List[Dict[str, Any]]) -> Dict[str, Any]:
             items.insert(1, {"type": "Image", "url": image_url, "size": "Medium"})
 
         actions = [
-            {"type": "Action.Submit", "title": "Add to Cart", "data": {"action": "add_to_bundle", "product_id": str(p.get("id", ""))}},
-            {"type": "Action.Submit", "title": "Save to Favorites", "data": {"action": "add_to_favorites", "product_id": str(p.get("id", "")), "product_name": name}},
-            {"type": "Action.Submit", "title": "View Details", "data": {"action": "view_details", "product_id": str(p.get("id", ""))}},
+            {"type": "Action.Submit", "title": "Add to Bundle", "data": {"action": "add_to_bundle", "product_id": str(p.get("id", ""))}},
+            {"type": "Action.Submit", "title": "Favorite", "data": {"action": "add_to_favorites", "product_id": str(p.get("id", "")), "product_name": name}},
+            {"type": "Action.Submit", "title": "Details", "data": {"action": "view_details", "product_id": str(p.get("id", ""))}},
         ]
 
-        body.append(
-            container(
-                _filter_empty(items),
-                style="emphasis",
-                actions=actions,
-            )
+        product_container = container(
+            _filter_empty(items),
+            style="emphasis",
+            actions=actions,
         )
+        product_container["minHeight"] = "140px"
+        body.append(product_container)
 
     return create_card(body=body)

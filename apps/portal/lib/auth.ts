@@ -54,9 +54,10 @@ export async function getPartnerStatus(): Promise<{
       .limit(1)
       .single();
     if (data) {
+      const vs = data.verification_status;
       return {
         partnerId: data.id,
-        status: data.verification_status === "approved" ? "approved" : "pending",
+        status: vs === "approved" || vs === "verified" ? "approved" : "pending",
       };
     }
   }
@@ -76,9 +77,10 @@ export async function getPartnerStatus(): Promise<{
         .select("verification_status")
         .eq("id", pm.partner_id)
         .single();
+      const vs = p?.verification_status;
       return {
         partnerId: pm.partner_id,
-        status: p?.verification_status === "approved" ? "approved" : "pending",
+        status: vs === "approved" || vs === "verified" ? "approved" : "pending",
       };
     }
   }
