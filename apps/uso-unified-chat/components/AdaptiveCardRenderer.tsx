@@ -6,7 +6,7 @@ import "adaptivecards/dist/adaptivecards.css";
 
 const darkHostConfig = new AdaptiveCards.HostConfig({
   actions: {
-    actionsOrientation: AdaptiveCards.Enums.Orientation.Vertical,
+    actionsOrientation: "vertical",
   },
   containerStyles: {
     default: {
