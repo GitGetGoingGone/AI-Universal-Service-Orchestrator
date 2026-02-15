@@ -88,7 +88,7 @@ async def discover_products(
             "numberOfItems": len(products),
             "itemListElement": item_list_elements,
         },
-        "adaptive_card": generate_product_card(products),
+        "adaptive_card": generate_product_card(products[:5]),
         "metadata": {
             "api_version": "v1",
             "timestamp": datetime.utcnow().isoformat() + "Z",

@@ -54,6 +54,39 @@ type ChatMessage = {
 const E2E_ACTIONS = ["add_to_bundle", "view_bundle", "remove_from_bundle", "checkout", "complete_checkout"];
 const STANDING_INTENT_ACTION = "approve_standing_intent";
 
+const MAX_DISCOVERY_CYCLE = 5;
+
+function extractProductContainersFromCard(card: Record<string, unknown> | null): unknown[] {
+  if (!card || typeof card !== "object") return [];
+  const body = (card as Record<string, unknown>).body;
+  if (!Array.isArray(body)) return [];
+  const containers = body.filter((item) => {
+    const c = item as Record<string, unknown>;
+    return c?.type === "Container" && c?.style === "emphasis" && Array.isArray(c.items);
+  });
+  return containers.slice(0, MAX_DISCOVERY_CYCLE);
+}
+
+function buildCycledProductCard(
+  card: Record<string, unknown>,
+  productContainers: unknown[],
+  cycleIndex: number
+): Record<string, unknown> {
+  if (productContainers.length === 0) return card;
+  const body = (card as Record<string, unknown>).body as unknown[];
+  const headerItems = body.filter((item) => {
+    const c = item as Record<string, unknown>;
+    return c?.type !== "Container" || c?.style !== "emphasis";
+  });
+  const idx = cycleIndex % productContainers.length;
+  const cycledBody = [
+    ...headerItems,
+    { type: "TextBlock", text: `Option ${idx + 1} of ${productContainers.length}`, size: "Small", isSubtle: true, wrap: true },
+    productContainers[idx],
+  ];
+  return { ...card, body: cycledBody };
+}
+
 function extractFirstProductFromCard(card: Record<string, unknown> | null): { product_id: string; product_name?: string } | null {
   if (!card || typeof card !== "object") return null;
   const checkActions = (actions: unknown[]): { product_id: string; product_name?: string } | null => {
@@ -224,6 +257,7 @@ export function ChatPage(props: ChatPageProps = {}) {
   const [pendingPhoneOrderId, setPendingPhoneOrderId] = useState<string | null>(null);
   const [showPostCheckoutSignInBanner, setShowPostCheckoutSignInBanner] = useState(false);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "like" | "dislike">>({});
+  const [discoveryCycleIndex, setDiscoveryCycleIndex] = useState<Record<string, number>>({});
   const e2eEnabled = e2eProp ?? true;
   const sessionId = useSessionId();
   const { isSignedIn } = useAuthState();
@@ -878,15 +912,24 @@ export function ChatPage(props: ChatPageProps = {}) {
                     {m.content && (
                       <p className="text-sm whitespace-pre-wrap">{m.content}</p>
                     )}
-                    {m.adaptiveCard && (
-                      <div className="mt-3 w-full min-w-0">
-                        <AdaptiveCardRenderer
-                          card={filterE2EActions(m.adaptiveCard, e2eEnabled)}
-                          onAction={handleAction}
-                          className="w-full"
-                        />
-                      </div>
-                    )}
+                    {m.adaptiveCard && (() => {
+                      const rawCard = filterE2EActions(m.adaptiveCard, e2eEnabled);
+                      const productContainers = extractProductContainersFromCard(rawCard);
+                      const canCycle = productContainers.length >= 2 && productContainers.length <= MAX_DISCOVERY_CYCLE;
+                      const cycleIdx = canCycle ? (discoveryCycleIndex[m.id] ?? 0) % productContainers.length : 0;
+                      const displayCard = canCycle
+                        ? buildCycledProductCard(rawCard as Record<string, unknown>, productContainers, cycleIdx)
+                        : rawCard;
+                      return (
+                        <div className="mt-3 w-full min-w-0">
+                          <AdaptiveCardRenderer
+                            card={displayCard}
+                            onAction={handleAction}
+                            className="w-full"
+                          />
+                        </div>
+                      );
+                    })()}
                   </div>
                   {m.role === "assistant" && (
                     <div className="flex items-center gap-1 pl-1 flex-wrap">
@@ -1001,7 +1044,18 @@ export function ChatPage(props: ChatPageProps = {}) {
                         type="button"
                         aria-label="Look for more options"
                         title="Look for more options"
-                        onClick={() => sendMessage("Show me more options", false)}
+                        onClick={() => {
+                          const productContainers = extractProductContainersFromCard(m.adaptiveCard ?? null);
+                          const canCycle = productContainers.length >= 2 && productContainers.length <= MAX_DISCOVERY_CYCLE;
+                          if (canCycle) {
+                            setDiscoveryCycleIndex((prev) => {
+                              const idx = (prev[m.id] ?? 0) + 1;
+                              return { ...prev, [m.id]: idx % productContainers.length };
+                            });
+                          } else {
+                            sendMessage("Show me more options", false);
+                          }
+                        }}
                         className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
