@@ -3,16 +3,17 @@
 @tailwind utilities;
 
 :root {
-  --primary-color: #0ea5e9;
+  /* Default: summer theme */
+  --primary-color: #f59e0b;
   --primary-foreground: #fff;
   --secondary-color: #64748b;
   --secondary-foreground: #fff;
   --background: #0f172a;
-  --foreground: #f8fafc;
+  --foreground: #fef3c7;
   --card: #1e293b;
-  --card-foreground: #e2e8f0;
-  --muted: #334155;
-  --border: #334155;
+  --card-foreground: #fef3c7;
+  --muted: #64748b;
+  --border: #475569;
 }
 
 body {

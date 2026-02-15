@@ -13,11 +13,11 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function useTheme() {
   const ctx = useContext(ThemeContext);
-  return ctx ?? { theme: "winter" as ThemeId, setTheme: () => {} };
+  return ctx ?? { theme: "summer" as ThemeId, setTheme: () => {} };
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeId>("winter");
+  const [theme, setThemeState] = useState<ThemeId>("summer");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {

@@ -546,7 +546,7 @@ export function ChatPage(props: ChatPageProps = {}) {
           const favPayload: Record<string, string> = {
             item_type: "product",
             item_id: data.product_id,
-            item_name: data.product_name || undefined,
+            item_name: typeof data.product_name === "string" ? data.product_name : "",
           };
           if (!userId && anonymousId) favPayload.anonymous_id = anonymousId;
           const res = await fetch("/api/my-stuff/favorites", {

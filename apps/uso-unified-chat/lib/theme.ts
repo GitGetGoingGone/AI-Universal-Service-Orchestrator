@@ -53,9 +53,9 @@ export const THEMES: Record<
 const STORAGE_KEY = "uso_theme";
 
 export function getStoredTheme(): ThemeId {
-  if (typeof window === "undefined") return "winter";
+  if (typeof window === "undefined") return "summer";
   const v = localStorage.getItem(STORAGE_KEY) as ThemeId | null;
-  return v && THEMES[v] ? v : "winter";
+  return v && THEMES[v] ? v : "summer";
 }
 
 export function setStoredTheme(id: ThemeId): void {

@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     userId = user?.id ?? null;
   }
 
-  if (!userId && !anonymousId) {
+  if (!userId && !anonymous_id) {
     return NextResponse.json(
       { error: "Sign in or provide anonymous_id" },
       { status: 400 }
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     item_metadata: {},
   };
   if (userId) row.user_id = userId;
-  else row.anonymous_id = anonymousId;
+  else row.anonymous_id = anonymous_id;
 
   const { data, error } = await supabase
     .from("user_favorites")
