@@ -81,6 +81,8 @@ function EmbedContent() {
         partnerId={partnerId}
         e2eEnabled={e2eEnabled ?? true}
         welcomeMessage={config?.welcome_message}
+        embeddedInLanding
+        showSideNav={false}
       />
     </div>
   );

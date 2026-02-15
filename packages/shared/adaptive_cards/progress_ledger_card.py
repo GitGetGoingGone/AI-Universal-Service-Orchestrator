@@ -40,14 +40,13 @@ def generate_progress_ledger_card(
         text_block(narrative, weight="Bolder", size="Medium"),
     ]
 
-    # Agent Reasoning section
+    # Agent Reasoning section (content only, no header)
     if agent_reasoning:
         body.append(
             {
                 "type": "Container",
                 "style": "default",
                 "items": [
-                    text_block("🤔 Agent Reasoning", weight="Bolder", color="Accent", size="Small"),
                     text_block(agent_reasoning, size="Small", wrap=True),
                 ],
                 "spacing": "Medium",

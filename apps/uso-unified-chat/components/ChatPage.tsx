@@ -6,6 +6,7 @@ import { useAuthState, AuthButtons } from "@/components/AuthWrapper";
 import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
 import { PaymentModal } from "@/components/PaymentModal";
+import { SideNav } from "@/components/SideNav";
 
 type ChatMessage = {
   id: string;
@@ -122,6 +123,8 @@ export type ChatPageProps = {
   onPromptSent?: () => void;
   /** Hide header when embedded in landing page */
   embeddedInLanding?: boolean;
+  /** Show left nav pane (Gemini-style). Default true when not embedded. */
+  showSideNav?: boolean;
   /** When user returns from Stripe with payment_success, add confirmation message */
   paymentSuccessOrderId?: string | null;
   /** Called after payment success message is shown. Parent should clear URL params. */
@@ -136,9 +139,11 @@ export function ChatPage(props: ChatPageProps = {}) {
     promptToSend,
     onPromptSent,
     embeddedInLanding,
+    showSideNav: showSideNavProp,
     paymentSuccessOrderId,
     onPaymentSuccessHandled,
   } = props;
+  const showSideNav = showSideNavProp ?? !embeddedInLanding;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<
     Array<{ id: string; intent_description: string }>
@@ -520,9 +525,9 @@ export function ChatPage(props: ChatPageProps = {}) {
     sendMessage(input.trim(), false);
   }
 
-  return (
-    <div className={`flex flex-col bg-[var(--background)] text-[var(--foreground)] ${embeddedInLanding ? "min-h-[60vh]" : "h-screen"}`}>
-      {!embeddedInLanding && (
+  const chatContent = (
+    <div className={`flex flex-col bg-[var(--background)] text-[var(--foreground)] ${showSideNav ? "min-h-0 flex-1" : embeddedInLanding ? "min-h-[60vh]" : "h-screen"}`}>
+      {!embeddedInLanding && !showSideNav && (
         <header className="flex-shrink-0 border-b border-[var(--border)] px-4 py-3">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
@@ -611,12 +616,32 @@ export function ChatPage(props: ChatPageProps = {}) {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="text-center py-12 text-slate-400"
+              className="flex flex-col items-center justify-center py-12 text-center"
             >
-              <p className="text-lg mb-2">{welcomeMessage ?? "How can I help you today?"}</p>
-              <p className="text-sm">
-                Try: &quot;Find me flowers&quot; or &quot;I want chocolates&quot;
+              <h2 className="text-3xl font-bold tracking-tight text-[var(--foreground)] sm:text-4xl md:text-5xl">
+                Discover, bundle, and order —{" "}
+                <span className="text-[var(--primary-color)]">in one conversation</span>
+              </h2>
+              <p className="mt-4 text-lg text-[var(--muted)]">
+                {welcomeMessage ?? "Find products, add to cart, and pay — all through chat."}
               </p>
+              <div className="mt-8 flex w-full max-w-2xl gap-3 overflow-x-auto pb-2 scroll-smooth">
+                {[
+                  { label: "Discover", prompt: "Find products" },
+                  { label: "Bundle", prompt: "Add items to bundle" },
+                  { label: "Plan", prompt: "Plan a date night" },
+                  { label: "Payment", prompt: "Checkout" },
+                ].map(({ label, prompt }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => sendMessage(prompt, true)}
+                    className="shrink-0 rounded-full border border-[var(--border)] bg-[var(--card)] px-5 py-2.5 text-sm font-medium text-[var(--card-foreground)] transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </motion.div>
           )}
 
@@ -686,7 +711,23 @@ export function ChatPage(props: ChatPageProps = {}) {
       )}
 
       <footer className="flex-shrink-0 border-t border-[var(--border)] px-4 py-4">
-        <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
+        <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
+          {messages.length === 0 && (
+            <div className="mb-3 flex flex-wrap justify-center gap-2">
+              {["Find flowers for delivery", "Plan a date night", "Best birthday gifts under $50", "Show me chocolates"].map(
+                (prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => sendMessage(prompt, true)}
+                    className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm text-[var(--card-foreground)] transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
+                  >
+                    {prompt}
+                  </button>
+                )
+              )}
+            </div>
+          )}
           <div className="flex gap-2">
             <input
               type="text"
@@ -708,4 +749,23 @@ export function ChatPage(props: ChatPageProps = {}) {
       </footer>
     </div>
   );
+
+  if (showSideNav) {
+    return (
+      <div className="flex h-screen bg-[var(--background)]">
+        <SideNav
+          threadId={threadId}
+          threads={threads}
+          onNewChat={() => handleSelectThread(null)}
+          onSelectThread={handleSelectThread}
+          hasUserOrAnonymous={!!(userId || anonymousId)}
+        />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {chatContent}
+        </div>
+      </div>
+    );
+  }
+
+  return chatContent;
 }

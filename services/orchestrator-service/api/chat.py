@@ -125,7 +125,7 @@ async def chat(
             summary=f"Sorry, I couldn't complete your request: {result['error']}",
         )
 
-    # Enrich adaptive card with agent reasoning when present
+    # Enrich adaptive card with agent reasoning when present (no header label)
     adaptive_card = result.get("adaptive_card")
     agent_reasoning = result.get("agent_reasoning", [])
     if adaptive_card and agent_reasoning:
@@ -138,7 +138,6 @@ async def chat(
                     "type": "Container",
                     "style": "default",
                     "items": [
-                        {"type": "TextBlock", "text": "🤔 Agent reasoning", "weight": "Bolder", "size": "Small"},
                         {"type": "TextBlock", "text": reasoning_text[:200], "size": "Small", "wrap": True},
                     ],
                 },
