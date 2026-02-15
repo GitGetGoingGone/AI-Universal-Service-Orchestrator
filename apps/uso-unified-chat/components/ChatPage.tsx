@@ -820,7 +820,12 @@ export function ChatPage(props: ChatPageProps = {}) {
           hasUserOrAnonymous={!!(userId || anonymousId)}
         />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {chatContent}
+          <header className="flex flex-shrink-0 items-center justify-end border-b border-[var(--border)] px-4 py-3">
+            <AuthButtons />
+          </header>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {chatContent}
+          </div>
         </div>
       </div>
     );
