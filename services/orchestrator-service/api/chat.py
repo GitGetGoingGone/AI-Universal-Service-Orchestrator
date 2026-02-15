@@ -29,7 +29,7 @@ class ChatRequest(BaseModel):
     platform_user_id: Optional[str] = Field(None, description="Platform identity (e.g. ChatGPT/Gemini user id); resolved to user_id via account_links")
     limit: int = Field(20, ge=1, le=100, description="Max products when discover")
     thread_id: Optional[str] = Field(None, description="Chat thread ID for webhook push (ChatGPT/Gemini)")
-    platform: Optional[Literal["chatgpt", "gemini"]] = Field(None, description="Platform for webhook push")
+    platform: Optional[Literal["chatgpt", "gemini", "web"]] = Field(None, description="Platform for webhook push (web = unified chat app)")
     partner_id: Optional[str] = Field(None, description="Filter products to this partner (for embed/white-label)")
 
 

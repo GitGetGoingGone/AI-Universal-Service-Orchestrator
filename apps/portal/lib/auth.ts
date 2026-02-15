@@ -6,14 +6,18 @@ export type PartnerStatus = "approved" | "pending" | null;
 /** Returns true if the given Clerk user ID is a platform admin. */
 export async function isPlatformAdminByUserId(userId: string | null): Promise<boolean> {
   if (!userId) return false;
-  const supabase = createSupabaseServerClient();
-  const { data } = await supabase
-    .from("platform_admins")
-    .select("id")
-    .eq("clerk_user_id", userId)
-    .limit(1)
-    .single();
-  return !!data;
+  try {
+    const supabase = createSupabaseServerClient();
+    const { data } = await supabase
+      .from("platform_admins")
+      .select("id")
+      .eq("clerk_user_id", userId)
+      .limit(1)
+      .single();
+    return !!data;
+  } catch {
+    return false;
+  }
 }
 
 /** Returns true if the current user is a platform admin. */

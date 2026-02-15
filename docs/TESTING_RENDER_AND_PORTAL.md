@@ -9,14 +9,18 @@ End-to-end testing for the full stack: backend services on **Render**, Partner P
 1. **Deploy backend on Render**  
    Follow [RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md) through Step 7 so you have:
    - uso-discovery, uso-intent, uso-orchestrator, uso-webhook (required)
-   - uso-omnichannel-broker, uso-resourcing, uso-payment (optional for core chat)
+   - uso-payment (required for checkout and product sponsorship)
+   - uso-omnichannel-broker, uso-resourcing (optional for core chat)
    - uso-task-queue, uso-hub-negotiator, uso-hybrid-response (optional; Phase 2 modules)
    - uso-durable (optional)
 
 2. **Apply migrations**  
-   Run these on your Supabase project:
+   Run these on your Supabase project (in order):
    - `supabase/migrations/20240128000012_link_account_support.sql` (adds `users.clerk_user_id`)
    - `supabase/migrations/20240128100003_task_queue_hub_negotiator_hybrid.sql` (for Task Queue, HubNegotiator, Hybrid Response)
+   - `supabase/migrations/20250128000008_chat_threads.sql` (chat_threads, chat_messages for unified chat persistence)
+   - `supabase/migrations/20250128000009_platform_config_llm.sql` (llm_provider, llm_model, llm_temperature)
+   - `supabase/migrations/20250128000010_partner_ranking.sql` (ranking_policy, sponsorship_pricing, product_sponsorships)
 
 3. **Orchestrator env (Render)**  
    On **uso-orchestrator** → Environment, set:
@@ -28,8 +32,17 @@ End-to-end testing for the full stack: backend services on **Render**, Partner P
    - Without `CHATGPT_WEBHOOK_URL` / `GEMINI_WEBHOOK_URL` / Twilio: push to chat/WhatsApp returns **503** (expected; no stubs).
    - To test successful push: set `CHATGPT_WEBHOOK_URL` or `GEMINI_WEBHOOK_URL` to a URL that accepts POST (e.g. a request bin or your real webhook endpoint).
 
-5. **Portal on Vercel**  
+5. **Payment service env (Render)**  
+   On **uso-payment** → Environment:
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (or `SUPABASE_SECRET_KEY`) – required for orders and product_sponsorships
+   - `STRIPE_SECRET_KEY` – required for checkout and sponsorship PaymentIntents
+   - `STRIPE_WEBHOOK_SECRET` – required for payment_intent.succeeded (creates product_sponsorships for sponsorship payments)
+
+6. **Portal on Vercel**  
    Deploy `apps/portal` to Vercel per [RENDER_DEPLOYMENT.md § Partner Portal](./RENDER_DEPLOYMENT.md#partner-portal-vercel). Set env vars (see **Portal environment variables** below).
+
+7. **Unified Chat on Vercel (optional)**  
+   Deploy `apps/uso-unified-chat` to Vercel for discovery chat with E2E checkout. Set env vars (see **Unified Chat environment variables** in section 9b).
 
 ---
 
@@ -42,7 +55,9 @@ export ORCHESTRATOR="https://uso-orchestrator.onrender.com"
 export DISCOVERY="https://uso-discovery.onrender.com"
 export INTENT="https://uso-intent.onrender.com"
 export WEBHOOK="https://uso-webhook.onrender.com"
+export PAYMENT="https://uso-payment.onrender.com"
 export PORTAL_URL="https://your-portal.vercel.app"   # if using Vercel
+export UNIFIED_CHAT_URL="https://your-unified-chat.vercel.app"   # if using unified chat
 
 # Optional: Phase 2 modules (Task Queue, HubNegotiator, Hybrid Response)
 export TASK_QUEUE="https://uso-task-queue.onrender.com"
@@ -73,6 +88,7 @@ curl -s --max-time 90 "$ORCHESTRATOR/health"
 curl -s --max-time 90 "$DISCOVERY/health"
 curl -s --max-time 90 "$INTENT/health"
 curl -s --max-time 90 "$WEBHOOK/health"
+curl -s --max-time 90 "$PAYMENT/health"
 # Optional: Phase 2 modules
 curl -s --max-time 90 "$TASK_QUEUE/health"
 curl -s --max-time 90 "$HUB_NEGOTIATOR/health"
@@ -333,6 +349,30 @@ Expected: consent returns scope and allowed_actions; handoff returns `configured
 
 ---
 
+## 8a. Payment service (checkout and sponsorship)
+
+**8a.1 Health**
+
+```bash
+curl -s "$PAYMENT/health" | jq .
+```
+
+Expected: `{"status": "ok"}`.
+
+**8a.2 Sponsorship create (requires valid product_id and partner_id)**
+
+Replace `PRODUCT_UUID` and `PARTNER_UUID` with real ids (product must belong to partner):
+
+```bash
+curl -s -X POST "$PAYMENT/api/v1/sponsorship/create" \
+  -H "Content-Type: application/json" \
+  -d '{"product_id":"PRODUCT_UUID","partner_id":"PARTNER_UUID","duration_days":7}' | jq .
+```
+
+Expected: `client_secret`, `payment_intent_id`, `amount_cents`, `amount`, `currency`, `start_at`, `end_at`, `duration_days`. With invalid product or partner: **404** or **403**.
+
+---
+
 ## 8b. Phase 2 modules (Task Queue, HubNegotiator, Hybrid Response)
 
 Requires migration `20240128100003_task_queue_hub_negotiator_hybrid.sql` and deployed services. Set `$TASK_QUEUE`, `$HUB_NEGOTIATOR`, `$HYBRID_RESPONSE` as in section 1.
@@ -433,8 +473,12 @@ Use the same names in **Vercel** (and in local `apps/portal/.env.local`) so conf
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/publishable key (client, RLS) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server, bypasses RLS) |
 | `DISCOVERY_SERVICE_URL` | Discovery service base URL (for validate-discovery and feed push proxy; e.g. `https://uso-discovery.onrender.com`) |
+| `ORCHESTRATOR_SERVICE_URL` | Orchestrator service (for payment create proxy; e.g. `https://uso-orchestrator.onrender.com`) |
+| `PAYMENT_SERVICE_URL` | Payment service (for product sponsorship create; e.g. `https://uso-payment.onrender.com`) |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe publishable key (for payment page and sponsorship modal) |
 | `TASK_QUEUE_SERVICE_URL` | Task Queue service (for partner Tasks page; e.g. `https://uso-task-queue.onrender.com`) |
 | `HUB_NEGOTIATOR_SERVICE_URL` | Hub Negotiator service (for partner Hub RFPs and platform RFPs; e.g. `https://uso-hub-negotiator.onrender.com`) |
+| `HYBRID_RESPONSE_SERVICE_URL` | Hybrid Response service (for Support / classify-and-route; e.g. `https://uso-hybrid-response.onrender.com`) |
 
 The portal also accepts these **alternate names** (so existing `.env.local` with the older names still works): `SUPABASE_PUBLISHABLE_KEY` instead of `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SECRET_KEY` instead of `SUPABASE_SERVICE_ROLE_KEY`. For new setups and Vercel, prefer the names in the table above (same as [RENDER_DEPLOYMENT.md § Partner Portal](./RENDER_DEPLOYMENT.md#partner-portal-vercel)).
 
@@ -529,6 +573,58 @@ Using your discovery base URL (`$DISCOVERY`) and a real `PARTNER_UUID` / `PRODUC
 8. **Link Account from portal (optional)**  
    If you add a “Link ChatGPT” or “Link Google” button on the portal, it would call `POST $ORCHESTRATOR/api/v1/link-account` with the appropriate `id_token` or `platform_user_id` and `clerk_user_id` (from Clerk session). Testing that is the same as step 7 (Link Account API), with `clerk_user_id` taken from your Clerk user id in the browser.
 
+### Platform Admin config (requires platform admin)
+
+If your user is in `platform_admins` (by `clerk_user_id`), you can access **Platform** → **Config** to edit:
+
+| Section | Settings | Purpose |
+|---------|----------|---------|
+| **LLM Settings** | Provider (Azure/Gemini), Model, Creativity (0–1) | Orchestrator planner uses these for LLM calls |
+| **Partner Ranking** | Enable ranking, strategy, weights (price, rating, commission, trust), price direction | Discovery applies ranking when `ranking_enabled` is true |
+| **Sponsorship** | Enable sponsorship, price per day (cents), max sponsored per query | Product sponsorship pricing and limits |
+
+**Test:** Sign in as platform admin → Platform → Config → edit LLM/ranking/sponsorship → Save. Verify orchestrator uses LLM config (e.g. switch provider) and discovery applies ranking.
+
+### Product sponsorship (partner portal)
+
+1. Sign in as a partner (user linked to a partner).
+2. Go to **Products** → open a product.
+3. Scroll to **Sponsor this product**.
+4. Choose duration (7, 14, or 30 days) and click **Sponsor product**.
+5. Complete payment via Stripe (requires `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` and `PAYMENT_SERVICE_URL`).
+6. On success, the product gets a sponsorship boost in discovery ranking.
+
+**Prerequisites:** `PAYMENT_SERVICE_URL` set; payment service has `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`; migration `20250128000010_partner_ranking.sql` applied (creates `product_sponsorships` table).
+
+---
+
+## 9b. Unified Chat app (Vercel)
+
+The unified chat app (`apps/uso-unified-chat`) is a standalone Next.js app for discovery chat with E2E checkout. Deploy to Vercel separately from the portal.
+
+### Unified Chat environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `ORCHESTRATOR_URL` | Orchestrator service (e.g. `https://uso-orchestrator.onrender.com`) |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (for chat_threads, chat_messages) |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe publishable key (for PaymentModal on checkout) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (optional; enables sign-in and cross-device threads) |
+| `CLERK_SECRET_KEY` | Clerk secret key (optional; for /api/users/me) |
+
+### Unified Chat test steps
+
+1. **Open the app** at your Vercel URL.
+2. **Chat** – Send "find flowers" or "plan a date night"; expect product cards and adaptive cards.
+3. **Thread persistence** – Messages persist; return later (same device) to see history (localStorage `thread_id`).
+4. **Sign in (optional)** – Click Sign in; use Clerk. After sign-in, threads are keyed by `user_id` (cross-device).
+5. **Recent threads** – When signed in or with anonymous_id, a "Recent" dropdown appears in the header; switch between threads.
+6. **Checkout** – Add products to bundle, proceed to checkout; if Stripe configured, PaymentModal opens for real payment.
+7. **Standing intents** – Say "notify me when roses go on sale"; approve/reject the pending approval card when it appears.
+
+**Prerequisites:** Migrations `20250128000008_chat_threads.sql` (chat_threads, chat_messages) applied; Supabase env vars set.
+
 ---
 
 ## 10. One-shot script (copy-paste)
@@ -540,6 +636,7 @@ ORCHESTRATOR="https://uso-orchestrator.onrender.com"
 DISCOVERY="https://uso-discovery.onrender.com"
 INTENT="https://uso-intent.onrender.com"
 WEBHOOK="https://uso-webhook.onrender.com"
+PAYMENT="${PAYMENT:-https://uso-payment.onrender.com}"
 TASK_QUEUE="${TASK_QUEUE:-https://uso-task-queue.onrender.com}"
 HUB_NEGOTIATOR="${HUB_NEGOTIATOR:-https://uso-hub-negotiator.onrender.com}"
 HYBRID_RESPONSE="${HYBRID_RESPONSE:-https://uso-hybrid-response.onrender.com}"
@@ -549,6 +646,7 @@ curl -s --max-time 90 "$ORCHESTRATOR/health" > /dev/null
 curl -s --max-time 90 "$DISCOVERY/health" > /dev/null
 curl -s --max-time 90 "$INTENT/health" > /dev/null
 curl -s --max-time 90 "$WEBHOOK/health" > /dev/null
+curl -s --max-time 90 "$PAYMENT/health" > /dev/null || true
 curl -s --max-time 90 "$TASK_QUEUE/health" > /dev/null || true
 curl -s --max-time 90 "$HUB_NEGOTIATOR/health" > /dev/null || true
 curl -s --max-time 90 "$HYBRID_RESPONSE/health" > /dev/null || true
@@ -609,6 +707,9 @@ curl -s -X POST "$HYBRID_RESPONSE/api/v1/classify-and-route" -H "Content-Type: a
 | Portal Commerce profile | Settings → Commerce profile | Form loads; PATCH /api/partners/me saves seller fields |
 | Portal Push (Products) | Products → Push to AI catalog + table Last pushed/Status | Push to ChatGPT/Gemini/both; 15-min throttle; per-product status |
 | Portal product ACP/UCP | Product edit → URL, brand, eligibility, Validate, Push | Fields persist; validate shows ACP/UCP result; push works (scope=single) |
+| Platform Admin config | Platform → Config (LLM, Ranking, Sponsorship) | LLM/ranking/sponsorship settings save; orchestrator and discovery use them |
+| Product sponsorship | Product edit → Sponsor this product | Duration selector; Stripe payment; product_sponsorships created on success |
+| Unified Chat | Chat, threads, checkout, standing intents | Chat works; threads persist; Recent dropdown; checkout with Stripe; approval cards |
 | Task Queue (Module 11) | POST /api/v1/orders/{id}/tasks, GET /api/v1/tasks, start/complete | Creates tasks from order legs; partner list; start/complete updates status |
 | HubNegotiator (Module 10) | RFPs, bids, select-winner, hub-capacity | Create RFP; submit bid; select winner; add capacity |
 | Hybrid Response (Module 13) | POST /api/v1/classify-and-route, escalations assign/resolve | routine→AI, complex/dispute/damage→human; support_escalations CRUD |
