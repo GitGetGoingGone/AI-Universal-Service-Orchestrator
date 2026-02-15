@@ -677,11 +677,11 @@ export function ChatPage(props: ChatPageProps = {}) {
               transition={{ duration: 0.4 }}
               className="flex w-full flex-col items-center text-center"
             >
-              <h2 className="text-3xl font-bold tracking-tight text-slate-800 sm:text-4xl md:text-5xl">
+              <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl md:text-5xl">
                 Discover, bundle, and order —{" "}
                 <span className="text-[var(--primary-color)]">in one conversation</span>
               </h2>
-              <p className="mt-2 text-lg text-slate-500">
+              <p className="mt-2 text-lg text-slate-300">
                 {welcomeMessage ?? "Find products, add to cart, and pay — all through chat."}
               </p>
               <div className="mt-6">
@@ -695,7 +695,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                     onChange={(e) => setInput(e.target.value)}
                     placeholder="Type a message..."
                     disabled={loading}
-                    className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]"
+                    className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]"
                   />
                   <button
                     type="submit"
@@ -711,7 +711,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                       key={prompt}
                       type="button"
                       onClick={() => sendMessage(prompt, true)}
-                      className="rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm text-slate-700 transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
+                      className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm text-[var(--card-foreground)] transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
                     >
                       {prompt}
                     </button>
@@ -735,7 +735,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                     className={`max-w-[85%] rounded-2xl px-4 py-3 ${
                       m.role === "user"
                         ? "bg-[var(--primary-color)] text-[var(--primary-foreground)]"
-                        : "bg-slate-100 border border-slate-200 text-slate-800"
+                        : "bg-[var(--card)] border border-[var(--border)] text-[var(--card-foreground)]"
                     }`}
                   >
                     {m.content && (
@@ -755,7 +755,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                       <button
                         type="button"
                         aria-label="Like"
-                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
@@ -764,7 +764,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                       <button
                         type="button"
                         aria-label="Dislike"
-                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
@@ -773,7 +773,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                       <button
                         type="button"
                         aria-label="Regenerate"
-                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -786,7 +786,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                           const text = m.content || (m.adaptiveCard ? JSON.stringify(m.adaptiveCard) : "");
                           if (text) navigator.clipboard?.writeText(text);
                         }}
-                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -795,7 +795,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                       <button
                         type="button"
                         aria-label="More options"
-                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                        className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
                       >
                         <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                           <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
@@ -815,12 +815,12 @@ export function ChatPage(props: ChatPageProps = {}) {
               transition={{ duration: 0.2 }}
               className="flex justify-start"
             >
-              <div className="rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
                 <div className="flex items-center gap-1">
-                  <span className="inline-block h-2 w-2 animate-typing-1 rounded-full bg-slate-500" />
-                  <span className="inline-block h-2 w-2 animate-typing-2 rounded-full bg-slate-500" />
-                  <span className="inline-block h-2 w-2 animate-typing-3 rounded-full bg-slate-500" />
-                  <span className="ml-1 h-4 w-0.5 animate-pulse rounded-sm bg-slate-500" aria-hidden />
+                  <span className="inline-block h-2 w-2 animate-typing-1 rounded-full bg-slate-400" />
+                  <span className="inline-block h-2 w-2 animate-typing-2 rounded-full bg-slate-400" />
+                  <span className="inline-block h-2 w-2 animate-typing-3 rounded-full bg-slate-400" />
+                  <span className="ml-1 h-4 w-0.5 animate-pulse rounded-sm bg-slate-400" aria-hidden />
                 </div>
               </div>
             </motion.div>
@@ -849,7 +849,7 @@ export function ChatPage(props: ChatPageProps = {}) {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="chat-window flex-shrink-0 border-t border-slate-200 bg-white px-4 py-4"
+            className="chat-window flex-shrink-0 border-t border-[var(--border)] px-4 py-4"
           >
           <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
             <div className="mb-3 flex flex-wrap justify-center gap-2">
@@ -858,7 +858,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                   key={prompt}
                   type="button"
                   onClick={() => sendMessage(prompt, true)}
-                  className="rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm text-slate-700 transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
+                  className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm text-[var(--card-foreground)] transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
                 >
                   {prompt}
                 </button>
@@ -871,7 +871,7 @@ export function ChatPage(props: ChatPageProps = {}) {
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type a message..."
               disabled={loading}
-              className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]"
+              className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]"
             />
             <button
               type="submit"

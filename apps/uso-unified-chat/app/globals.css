@@ -38,19 +38,19 @@ body {
   border-radius: 8px !important;
 }
 
-/* Chat window white background */
+/* Chat window - dark theme, white text */
 .chat-window {
-  background: #ffffff;
-  color: #1e293b;
+  background: var(--background);
+  color: #ffffff;
 }
 
 .chat-window .aco-adaptiveCard {
-  background: #f8fafc !important;
-  border-color: #e2e8f0 !important;
+  background: var(--card) !important;
+  border-color: var(--border) !important;
 }
 
 .chat-window .aco-textBlock {
-  color: #1e293b !important;
+  color: var(--card-foreground) !important;
 }
 
 /* Typing animation - staggered bounce for dots */
