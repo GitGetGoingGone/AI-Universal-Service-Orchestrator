@@ -583,7 +583,7 @@ export function ChatPage(props: ChatPageProps = {}) {
   }
 
   const chatContent = (
-    <div className={`flex flex-col bg-[var(--background)] text-[var(--foreground)] ${showSideNav ? "min-h-0 flex-1" : embeddedInLanding ? "min-h-[60vh]" : "h-screen"}`}>
+    <div className={`flex flex-col bg-[var(--background)] text-[var(--foreground)] ${showSideNav ? "min-h-0 flex-1 overflow-hidden" : embeddedInLanding ? "min-h-[60vh]" : "h-screen"}`}>
       {!embeddedInLanding && !showSideNav && (
         <header className="flex-shrink-0 border-b border-[var(--border)] px-4 py-3">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
@@ -613,7 +613,7 @@ export function ChatPage(props: ChatPageProps = {}) {
       )}
 
       <main
-        className={`chat-window flex-1 overflow-y-auto px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""} ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}
+        className={`flex-1 min-h-0 overflow-y-auto px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""} ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}
       >
         <div className={`mx-auto space-y-6 ${messages.length === 0 ? "flex w-full max-w-2xl flex-col items-center" : "max-w-3xl"}`}>
           {embeddedInLanding && (userId || anonymousId) && threads.length > 0 && (
@@ -850,21 +850,9 @@ export function ChatPage(props: ChatPageProps = {}) {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="chat-window flex-shrink-0 border-t border-[var(--border)] px-4 py-4"
+            className="flex-shrink-0 border-t border-[var(--border)] bg-[var(--background)] px-4 py-4"
           >
           <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
-            <div className="mb-3 flex flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  onClick={() => sendMessage(prompt, true)}
-                  className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm text-[var(--card-foreground)] transition-colors hover:border-[var(--primary-color)]/50 hover:bg-[var(--primary-color)]/10"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
             <div className="flex gap-2">
             <input
               type="text"

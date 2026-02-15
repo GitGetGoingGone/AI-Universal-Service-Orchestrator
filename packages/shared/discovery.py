@@ -87,6 +87,8 @@ _ACTION_FILLER_WORDS: Set[str] = {
     "rental",
     "hire",
     "hiring",
+    "delivery",
+    "deliver",
 }
 
 
