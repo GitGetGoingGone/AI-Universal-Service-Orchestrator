@@ -61,8 +61,23 @@ async def resolve_intent(
 
 
 # Retry 429 from Discovery (e.g. Render free-tier rate limits): max attempts, base delay seconds
-DISCOVERY_RETRY_ATTEMPTS = 3
-DISCOVERY_RETRY_BASE_DELAY = 15
+DISCOVERY_RETRY_ATTEMPTS = 4
+DISCOVERY_RETRY_BASE_DELAY = 20
+
+
+def _empty_discovery_fallback(query: str) -> Dict[str, Any]:
+    """Return empty discovery result when rate limited or unavailable."""
+    return {
+        "data": {"products": [], "count": 0},
+        "machine_readable": {
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            "numberOfItems": 0,
+            "itemListElement": [],
+        },
+        "adaptive_card": {"type": "AdaptiveCard", "version": "1.5", "body": []},
+        "metadata": {"api_version": "v1", "rate_limited": True},
+    }
 
 
 async def discover_products(
@@ -94,6 +109,9 @@ async def discover_products(
                 )
                 await asyncio.sleep(delay)
                 continue
+            if r.status_code == 429:
+                logger.warning("Discovery rate limited (429) after %s retries, returning empty", DISCOVERY_RETRY_ATTEMPTS)
+                return _empty_discovery_fallback(query)
             r.raise_for_status()
             return r.json()
 
