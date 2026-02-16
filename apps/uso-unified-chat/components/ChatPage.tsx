@@ -813,28 +813,6 @@ export function ChatPage(props: ChatPageProps = {}) {
               </select>
             </div>
           )}
-          {showPostCheckoutSignInBanner && !userId && hasClerk && (
-            <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-center justify-between gap-4">
-              <p className="text-sm text-[var(--foreground)]">
-                Sign in to save your order and conversation history — access them from any device.
-              </p>
-              <div className="flex items-center gap-2 shrink-0">
-                <SignInButton mode="modal">
-                  <button className="px-4 py-2 rounded-lg bg-[var(--primary-color)] text-[var(--primary-foreground)] text-sm font-medium hover:opacity-90">
-                    Sign in
-                  </button>
-                </SignInButton>
-                <button
-                  type="button"
-                  onClick={() => setShowPostCheckoutSignInBanner(false)}
-                  className="p-2 rounded-lg text-[var(--muted)] hover:bg-[var(--border)] hover:text-[var(--foreground)]"
-                  aria-label="Dismiss"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-          )}
           {pendingApprovals.length > 0 && (
             <div className="space-y-4">
               <p className="text-sm text-[var(--muted)] font-medium">Pending approvals</p>
@@ -1237,6 +1215,31 @@ export function ChatPage(props: ChatPageProps = {}) {
           </motion.footer>
         )}
       </AnimatePresence>
+
+      {showPostCheckoutSignInBanner && !userId && hasClerk && (
+        <div className="fixed bottom-20 left-4 right-4 z-50 mx-auto max-w-2xl md:left-1/2 md:right-auto md:-translate-x-1/2">
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-center justify-between gap-4 shadow-lg">
+            <p className="text-sm text-[var(--foreground)]">
+              Sign in to save your order and conversation history — access them from any device.
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              <SignInButton mode="modal">
+                <button className="px-4 py-2 rounded-lg bg-[var(--primary-color)] text-[var(--primary-foreground)] text-sm font-medium hover:opacity-90">
+                  Sign in
+                </button>
+              </SignInButton>
+              <button
+                type="button"
+                onClick={() => setShowPostCheckoutSignInBanner(false)}
+                className="p-2 rounded-lg text-[var(--muted)] hover:bg-[var(--border)] hover:text-[var(--foreground)]"
+                aria-label="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
