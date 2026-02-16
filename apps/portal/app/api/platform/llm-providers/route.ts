@@ -47,10 +47,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const validTypes = ["azure", "gemini", "openrouter", "custom"];
+    const validTypes = ["azure", "gemini", "openrouter", "custom", "openai"];
     if (!validTypes.includes(provider_type)) {
       return NextResponse.json(
-        { detail: "provider_type must be azure, gemini, openrouter, or custom" },
+        { detail: "provider_type must be azure, gemini, openrouter, custom, or openai" },
         { status: 400 }
       );
     }

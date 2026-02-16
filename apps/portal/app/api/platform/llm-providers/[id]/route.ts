@@ -22,7 +22,7 @@ export async function PATCH(
 
     if (name != null) updates.name = String(name);
     if (provider_type != null) {
-      const valid = ["azure", "gemini", "openrouter", "custom"];
+      const valid = ["azure", "gemini", "openrouter", "custom", "openai"];
       if (!valid.includes(provider_type)) {
         return NextResponse.json({ detail: "Invalid provider_type" }, { status: 400 });
       }
@@ -74,13 +74,19 @@ export async function DELETE(
 
     const { data: cfg } = await supabase
       .from("platform_config")
-      .select("active_llm_provider_id")
+      .select("active_llm_provider_id, active_image_provider_id")
       .limit(1)
       .single();
 
     if (cfg?.active_llm_provider_id === id) {
       return NextResponse.json(
         { detail: "Cannot delete the active LLM provider. Set another as active first." },
+        { status: 400 }
+      );
+    }
+    if (cfg?.active_image_provider_id === id) {
+      return NextResponse.json(
+        { detail: "Cannot delete the active image provider. Set another as active first." },
         { status: 400 }
       );
     }

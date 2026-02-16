@@ -118,6 +118,7 @@ type Config = {
   enable_chatgpt?: boolean;
   feature_flags?: Record<string, boolean>;
   active_llm_provider_id?: string | null;
+  active_image_provider_id?: string | null;
   llm_provider?: string;
   llm_model?: string;
   llm_temperature?: number;
@@ -133,6 +134,7 @@ export function ConfigEditor() {
   const [saving, setSaving] = useState(false);
   const [modelSettingsExpanded, setModelSettingsExpanded] = useState(true);
   const [llmProvidersExpanded, setLlmProvidersExpanded] = useState(true);
+  const [imageProvidersExpanded, setImageProvidersExpanded] = useState(true);
   const [rankingExpanded, setRankingExpanded] = useState(true);
   const [sponsorshipExpanded, setSponsorshipExpanded] = useState(true);
   const [llmProviders, setLlmProviders] = useState<LLMProvider[]>([]);
@@ -172,6 +174,7 @@ export function ConfigEditor() {
           enable_chatgpt: data.enable_chatgpt ?? true,
           feature_flags: data.feature_flags ?? {},
           active_llm_provider_id: data.active_llm_provider_id ?? null,
+          active_image_provider_id: data.active_image_provider_id ?? null,
           llm_provider: data.llm_provider ?? "azure",
           llm_model: data.llm_model ?? "gpt-4o",
           llm_temperature: Number(data.llm_temperature ?? 0.1),
@@ -252,6 +255,7 @@ export function ConfigEditor() {
       model,
     };
     if (provider_type === "azure" || provider_type === "custom") payload.endpoint = endpoint ?? "";
+    if (provider_type === "openai") payload.endpoint = null;
     if (api_key) payload.api_key = api_key;
 
     try {
@@ -292,6 +296,7 @@ export function ConfigEditor() {
           enable_chatgpt: config.enable_chatgpt,
           feature_flags: config.feature_flags,
           active_llm_provider_id: config.active_llm_provider_id ?? null,
+          active_image_provider_id: config.active_image_provider_id ?? null,
           llm_temperature: config.llm_temperature,
           ranking_enabled: config.ranking_enabled,
           ranking_policy: config.ranking_policy,
@@ -458,6 +463,7 @@ export function ConfigEditor() {
                     className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
                   >
                     <option value="azure">Azure OpenAI</option>
+                    <option value="openai">OpenAI (direct)</option>
                     <option value="gemini">Google Gemini</option>
                     <option value="openrouter">OpenRouter</option>
                     <option value="custom">Custom (OpenAI-compatible)</option>
@@ -558,6 +564,70 @@ export function ConfigEditor() {
               >
                 + Add another provider
               </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
+        <button
+          type="button"
+          onClick={() => setImageProvidersExpanded((e) => !e)}
+          className="flex items-center justify-between w-full text-left font-medium"
+        >
+          Image Generation
+          <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+            {imageProvidersExpanded ? "−" : "+"}
+          </span>
+        </button>
+        {imageProvidersExpanded && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Select which provider to use for image generation (e.g. DALL-E 3). Add providers above
+              with model <code className="rounded bg-[rgb(var(--color-border))]/50 px-1">dall-e-3</code>{" "}
+              or similar.
+            </p>
+            {llmProviders.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between gap-4 rounded border border-[rgb(var(--color-border))] p-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">{p.name}</span>
+                  <span className="ml-2 text-sm text-[rgb(var(--color-text-secondary))]">
+                    {p.provider_type} · {p.model}
+                  </span>
+                  {config.active_image_provider_id === p.id && (
+                    <span className="ml-2 rounded bg-[rgb(var(--color-primary))]/20 px-2 py-0.5 text-xs">
+                      Active for images
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setConfig((c) => ({ ...c, active_image_provider_id: p.id }));
+                    try {
+                      await fetch("/api/platform/config", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ active_image_provider_id: p.id }),
+                      });
+                    } catch {
+                      alert("Failed to set image provider");
+                    }
+                  }}
+                  className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                >
+                  Use for images
+                </button>
+              </div>
+            ))}
+            {llmProviders.length === 0 && (
+              <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+                Add an LLM provider above with an image model (e.g. dall-e-3) to enable image
+                generation.
+              </p>
             )}
           </div>
         )}

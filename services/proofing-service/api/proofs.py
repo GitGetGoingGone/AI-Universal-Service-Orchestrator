@@ -5,7 +5,6 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from config import settings
 from db import (
     create_proof_state,
     get_proof_state,
@@ -74,11 +73,42 @@ def get_proof(proof_id: str) -> Dict[str, Any]:
     return proof
 
 
+def _create_image_client(cfg: Dict[str, Any]):
+    """Create OpenAI-compatible client for image generation from platform config."""
+    try:
+        from openai import OpenAI, AzureOpenAI
+    except ImportError:
+        raise HTTPException(status_code=503, detail="openai package required for image generation; pip install openai")
+
+    provider = (cfg.get("provider") or "openai").lower()
+    api_key = cfg.get("api_key")
+    model = cfg.get("model") or "dall-e-3"
+    endpoint = cfg.get("endpoint")
+
+    if not api_key:
+        return None, None
+
+    if provider == "azure" and endpoint:
+        client = AzureOpenAI(
+            azure_endpoint=endpoint.rstrip("/") if endpoint else None,
+            api_key=api_key,
+            api_version="2024-02-15-preview",
+        )
+        return client, model
+    if provider in ("openrouter", "custom") and endpoint:
+        base = endpoint.rstrip("/")
+        client = OpenAI(api_key=api_key, base_url=base)
+        return client, model
+    # openai (direct) or fallback
+    client = OpenAI(api_key=api_key)
+    return client, model
+
+
 @router.post("/proofs/{proof_id}/generate")
 def generate_preview(proof_id: str, body: GenerateBody) -> Dict[str, Any]:
     """
-    Generate DALL-E 3 preview for proof. Sets proof_ready with image URL.
-    Requires OPENAI_API_KEY or Azure OpenAI config.
+    Generate image preview for proof. Sets proof_ready with image URL.
+    Uses Platform Config active_image_provider_id (DALL-E 3, etc.).
     """
     proof = get_proof_state(proof_id)
     if not proof:
@@ -89,29 +119,34 @@ def generate_preview(proof_id: str, body: GenerateBody) -> Dict[str, Any]:
     set_in_progress(proof_id)
     image_url = None
 
-    if settings.dalle_configured:
-        try:
-            try:
-                from openai import OpenAI
-            except ImportError:
-                raise HTTPException(status_code=503, detail="openai package required for DALL-E; pip install openai")
+    from db import get_supabase
+    from packages.shared.platform_llm import get_platform_image_config
 
-            client = OpenAI(api_key=settings.openai_api_key)
-            resp = client.images.generate(
-                model="dall-e-3",
-                prompt=body.prompt[:4000],
-                n=1,
-                size="1024x1024",
-            )
-            if resp.data and len(resp.data) > 0:
-                image_url = resp.data[0].url or (getattr(resp.data[0], "b64_json", None) and f"data:image/png;base64,{resp.data[0].b64_json}")
+    supabase = get_supabase()
+    img_cfg = get_platform_image_config(supabase) if supabase else None
+
+    if img_cfg:
+        try:
+            client, model = _create_image_client(img_cfg)
+            if client:
+                resp = client.images.generate(
+                    model=model,
+                    prompt=body.prompt[:4000],
+                    n=1,
+                    size="1024x1024",
+                )
+                if resp.data and len(resp.data) > 0:
+                    image_url = resp.data[0].url or (
+                        getattr(resp.data[0], "b64_json", None)
+                        and f"data:image/png;base64,{resp.data[0].b64_json}"
+                    )
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"DALL-E generation failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
 
     if not image_url:
-        image_url = "https://placehold.co/1024x1024?text=No+DALL-E+config"
-        if not settings.dalle_configured:
-            pass
+        image_url = "https://placehold.co/1024x1024?text=No+image+provider+configured"
 
     proof = set_proof_ready(proof_id, image_url)
     if not proof:

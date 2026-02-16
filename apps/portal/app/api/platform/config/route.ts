@@ -57,6 +57,8 @@ export async function PATCH(request: Request) {
     }
     if (body.active_llm_provider_id !== undefined)
       updates.active_llm_provider_id = body.active_llm_provider_id ? String(body.active_llm_provider_id) : null;
+    if (body.active_image_provider_id !== undefined)
+      updates.active_image_provider_id = body.active_image_provider_id ? String(body.active_image_provider_id) : null;
     if (body.ranking_enabled != null)
       updates.ranking_enabled = Boolean(body.ranking_enabled);
     if (body.ranking_policy != null)
