@@ -42,6 +42,7 @@ import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
 import { PaymentModal } from "@/components/PaymentModal";
 import { PhoneModal } from "@/components/PhoneModal";
+import { PreCheckoutModal } from "@/components/PreCheckoutModal";
 import { SideNav } from "@/components/SideNav";
 
 type ChatMessage = {
@@ -255,6 +256,7 @@ export function ChatPage(props: ChatPageProps = {}) {
   const [loading, setLoading] = useState(false);
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
   const [pendingPhoneOrderId, setPendingPhoneOrderId] = useState<string | null>(null);
+  const [preCheckoutOrderId, setPreCheckoutOrderId] = useState<string | null>(null);
   const [showPostCheckoutSignInBanner, setShowPostCheckoutSignInBanner] = useState(false);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "like" | "dislike">>({});
   const [discoveryCycleIndex, setDiscoveryCycleIndex] = useState<Record<string, number>>({});
@@ -383,6 +385,55 @@ export function ChatPage(props: ChatPageProps = {}) {
     },
     [threadId, userId, anonymousId]
   );
+
+  // Save conversation when user signs in (link anonymous thread to user)
+  useEffect(() => {
+    if (!isSignedIn || !threadId || !anonymousId) return;
+    fetch(`/api/threads/${threadId}/link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ anonymous_id: anonymousId }),
+    }).catch(() => {});
+  }, [isSignedIn, threadId, anonymousId]);
+
+  // When user signs in from PreCheckoutModal: check order phone, proceed to payment
+  useEffect(() => {
+    if (!preCheckoutOrderId || !isSignedIn) return;
+    const orderId = preCheckoutOrderId;
+    setPreCheckoutOrderId(null);
+    fetch(`/api/orders/${orderId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const hasPhone = !!data?.customer_phone;
+        if (hasPhone) {
+          if (STRIPE_CONFIGURED) {
+            setPaymentOrderId(orderId);
+          } else {
+            setLoading(true);
+            fetch("/api/payment/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ order_id: orderId }),
+            })
+              .then((r) => r.json())
+              .then((json) => {
+                if (!json.error) {
+                  const addMsg = { role: "assistant" as const, content: json.message || "Payment confirmed! Thank you for your order." };
+                  addMessage(addMsg);
+                  persistMessage(addMsg);
+                } else {
+                  addMessage({ role: "assistant", content: json.error || "Payment failed." });
+                }
+              })
+              .catch(() => addMessage({ role: "assistant", content: "Payment failed." }))
+              .finally(() => setLoading(false));
+          }
+        } else {
+          setPendingPhoneOrderId(orderId);
+        }
+      })
+      .catch(() => setPendingPhoneOrderId(orderId));
+  }, [preCheckoutOrderId, isSignedIn, addMessage, persistMessage]);
 
   const sendMessage = useCallback(
     async (userMessage: string, fromPrompt = false) => {
@@ -604,7 +655,14 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (action === "complete_checkout" && data.order_id) {
           const orderId = data.order_id;
           if (userId) {
-            // Signed-in user: proceed directly
+            // Signed-in user: check if phone needed, then proceed
+            const orderRes = await fetch(`/api/orders/${orderId}`);
+            const orderData = await orderRes.json().catch(() => ({}));
+            const hasPhone = !!orderData?.customer_phone;
+            if (!hasPhone) {
+              setPendingPhoneOrderId(orderId);
+              return;
+            }
             if (STRIPE_CONFIGURED) {
               setPaymentOrderId(orderId);
               return;
@@ -621,8 +679,12 @@ export function ChatPage(props: ChatPageProps = {}) {
             persistMessage(addMsg);
             return;
           }
-          // Anonymous user: collect phone before payment
-          setPendingPhoneOrderId(orderId);
+          // Anonymous user: show sign-in before checkout (or phone if no Clerk)
+          if (hasClerk) {
+            setPreCheckoutOrderId(orderId);
+          } else {
+            setPendingPhoneOrderId(orderId);
+          }
           return;
         }
 
@@ -682,7 +744,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         setLoading(false);
       }
     },
-    [addMessage, persistMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId, setShowPostCheckoutSignInBanner, setPendingPhoneOrderId]
+    [addMessage, persistMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId, setShowPostCheckoutSignInBanner, setPendingPhoneOrderId, setPreCheckoutOrderId]
   );
 
   const submitFeedback = useCallback(
@@ -1090,6 +1152,18 @@ export function ChatPage(props: ChatPageProps = {}) {
         </div>
       </main>
 
+      {preCheckoutOrderId && hasClerk && (
+        <PreCheckoutModal
+          orderId={preCheckoutOrderId}
+          onClose={() => setPreCheckoutOrderId(null)}
+          onSignIn={() => {}}
+          onContinueWithPhone={() => {
+            setPendingPhoneOrderId(preCheckoutOrderId);
+            setPreCheckoutOrderId(null);
+          }}
+        />
+      )}
+
       {pendingPhoneOrderId && (
         <PhoneModal
           orderId={pendingPhoneOrderId}
@@ -1128,10 +1202,9 @@ export function ChatPage(props: ChatPageProps = {}) {
           orderId={paymentOrderId}
           onClose={() => setPaymentOrderId(null)}
           onSuccess={() => {
-            addMessage({
-              role: "assistant",
-              content: "Payment confirmed! Thank you for your order.",
-            });
+            const confirmMsg = { role: "assistant" as const, content: "Payment confirmed! Thank you for your order." };
+            addMessage(confirmMsg);
+            persistMessage(confirmMsg);
             setPaymentOrderId(null);
           }}
         />
