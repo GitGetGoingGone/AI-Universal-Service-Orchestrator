@@ -1,7 +1,95 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+
+type LLMProvider = {
+  id: string;
+  name: string;
+  provider_type: string;
+  endpoint: string | null;
+  model: string;
+  display_order: number;
+  has_key: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type OpenRouterModel = {
+  id: string;
+  name: string;
+  pricing?: { prompt?: string; completion?: string };
+  supported_parameters?: string[];
+};
+
+function formatPricing(p?: { prompt?: string; completion?: string }): string {
+  if (!p) return "";
+  const prompt = parseFloat(p.prompt ?? "0");
+  const completion = parseFloat(p.completion ?? "0");
+  if (prompt === 0 && completion === 0) return "Free";
+  const pPerM = (prompt * 1e6).toFixed(2);
+  const cPerM = (completion * 1e6).toFixed(2);
+  return `$${pPerM}/$${cPerM} per 1M tokens`;
+}
+
+function OpenRouterModelSelect({
+  models,
+  value,
+  onChange,
+}: {
+  models: OpenRouterModel[];
+  value: string;
+  onChange: (model: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
+  const filtered = models.filter(
+    (m) =>
+      m.name.toLowerCase().includes(search.toLowerCase()) ||
+      m.id.toLowerCase().includes(search.toLowerCase())
+  );
+  const selected = models.find((m) => m.id === value);
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={open ? search : (selected?.name ?? value || "Select model...")}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Search by name or ID..."
+        className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+      />
+      {open && (
+        <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] py-1">
+          {filtered.slice(0, 50).map((m) => (
+            <li
+              key={m.id}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(m.id);
+                setSearch("");
+                setOpen(false);
+              }}
+              className="cursor-pointer px-3 py-2 hover:bg-[rgb(var(--color-border))]/50 text-sm"
+            >
+              <span className="font-medium">{m.name}</span>
+              <span className="text-[rgb(var(--color-text-secondary))]"> — {m.id}</span>
+              {m.pricing && (
+                <span className="ml-2 text-xs text-[rgb(var(--color-text-secondary))]">
+                  · {formatPricing(m.pricing)}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 type RankingPolicy = {
   strategy?: string;
@@ -29,6 +117,7 @@ type Config = {
   enable_self_registration?: boolean;
   enable_chatgpt?: boolean;
   feature_flags?: Record<string, boolean>;
+  active_llm_provider_id?: string | null;
   llm_provider?: string;
   llm_model?: string;
   llm_temperature?: number;
@@ -43,8 +132,30 @@ export function ConfigEditor() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [llmExpanded, setLlmExpanded] = useState(true);
+  const [llmProvidersExpanded, setLlmProvidersExpanded] = useState(true);
   const [rankingExpanded, setRankingExpanded] = useState(true);
   const [sponsorshipExpanded, setSponsorshipExpanded] = useState(true);
+  const [llmProviders, setLlmProviders] = useState<LLMProvider[]>([]);
+  const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null);
+  const [addingNew, setAddingNew] = useState(false);
+  const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
+  const [providerForm, setProviderForm] = useState<Partial<LLMProvider> & { api_key?: string }>({
+    name: "",
+    provider_type: "azure",
+    endpoint: "",
+    model: "",
+    api_key: "",
+  });
+
+  const fetchLlms = useCallback(async () => {
+    try {
+      const res = await fetch("/api/platform/llm-providers");
+      const data = await res.json();
+      if (!data.detail) setLlmProviders(Array.isArray(data) ? data : []);
+    } catch {
+      setLlmProviders([]);
+    }
+  }, []);
 
   useEffect(() => {
     fetch("/api/platform/config")
@@ -60,6 +171,7 @@ export function ConfigEditor() {
           enable_self_registration: data.enable_self_registration ?? true,
           enable_chatgpt: data.enable_chatgpt ?? true,
           feature_flags: data.feature_flags ?? {},
+          active_llm_provider_id: data.active_llm_provider_id ?? null,
           llm_provider: data.llm_provider ?? "azure",
           llm_model: data.llm_model ?? "gpt-4o",
           llm_temperature: Number(data.llm_temperature ?? 0.1),
@@ -91,6 +203,82 @@ export function ConfigEditor() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!loading) fetchLlms();
+  }, [loading, fetchLlms]);
+
+  useEffect(() => {
+    if (providerForm.provider_type === "openrouter" && openRouterModels.length === 0) {
+      fetch("/api/platform/llm-providers/openrouter-models")
+        .then((r) => r.json())
+        .then((d) => setOpenRouterModels(d.data ?? []))
+        .catch(() => setOpenRouterModels([]));
+    }
+  }, [providerForm.provider_type]);
+
+  async function setActiveProvider(id: string) {
+    setConfig((c) => ({ ...c, active_llm_provider_id: id }));
+    try {
+      await fetch("/api/platform/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active_llm_provider_id: id }),
+      });
+    } catch {
+      alert("Failed to set active provider");
+    }
+  }
+
+  async function deleteProvider(id: string) {
+    if (!confirm("Delete this LLM provider?")) return;
+    try {
+      const res = await fetch(`/api/platform/llm-providers/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail ?? "Failed");
+      }
+      await fetchLlms();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to delete");
+    }
+  }
+
+  async function saveProvider() {
+    const { name, provider_type, endpoint, model, api_key } = providerForm;
+    if (!name || !model) return;
+    const payload: Record<string, unknown> = {
+      name,
+      provider_type: provider_type ?? "azure",
+      model,
+    };
+    if (provider_type === "azure" || provider_type === "custom") payload.endpoint = endpoint ?? "";
+    if (api_key) payload.api_key = api_key;
+
+    try {
+      if (editingProvider) {
+        const res = await fetch(`/api/platform/llm-providers/${editingProvider.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error("Failed");
+        setEditingProvider(null);
+      } else {
+        const res = await fetch("/api/platform/llm-providers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error("Failed");
+        setAddingNew(false);
+      }
+      setProviderForm({ name: "", provider_type: "azure", endpoint: "", model: "", api_key: "" });
+      await fetchLlms();
+    } catch {
+      alert("Failed to save provider");
+    }
+  }
+
   async function onSave() {
     setSaving(true);
     try {
@@ -103,6 +291,7 @@ export function ConfigEditor() {
           enable_self_registration: config.enable_self_registration,
           enable_chatgpt: config.enable_chatgpt,
           feature_flags: config.feature_flags,
+          active_llm_provider_id: config.active_llm_provider_id ?? null,
           llm_provider: config.llm_provider,
           llm_model: config.llm_model,
           llm_temperature: config.llm_temperature,
@@ -186,10 +375,203 @@ export function ConfigEditor() {
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
+          onClick={() => setLlmProvidersExpanded((e) => !e)}
+          className="flex items-center justify-between w-full text-left font-medium"
+        >
+          LLM Providers
+          <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+            {llmProvidersExpanded ? "−" : "+"}
+          </span>
+        </button>
+        {llmProvidersExpanded && (
+          <div className="mt-4 space-y-4">
+            {llmProviders.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between gap-4 rounded border border-[rgb(var(--color-border))] p-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">{p.name}</span>
+                  <span className="ml-2 text-sm text-[rgb(var(--color-text-secondary))]">
+                    {p.provider_type} · {p.model}
+                  </span>
+                  {config.active_llm_provider_id === p.id && (
+                    <span className="ml-2 rounded bg-[rgb(var(--color-primary))]/20 px-2 py-0.5 text-xs">
+                      Active
+                    </span>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveProvider(p.id)}
+                    className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                  >
+                    Use this
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingProvider(p);
+                      setProviderForm({
+                        name: p.name,
+                        provider_type: p.provider_type,
+                        endpoint: p.endpoint ?? "",
+                        model: p.model,
+                        api_key: "",
+                      });
+                    }}
+                    className="text-sm text-[rgb(var(--color-text-secondary))] hover:underline"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteProvider(p.id)}
+                    className="text-sm text-red-600 hover:underline"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+            {(editingProvider || addingNew || llmProviders.length === 0) && (
+              <div className="rounded border border-[rgb(var(--color-border))] p-4 space-y-4">
+                <h4 className="font-medium">
+                  {editingProvider ? "Edit provider" : "Add LLM provider"}
+                </h4>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Production Azure"
+                    value={providerForm.name ?? ""}
+                    onChange={(e) => setProviderForm((f) => ({ ...f, name: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Provider type</label>
+                  <select
+                    value={providerForm.provider_type ?? "azure"}
+                    onChange={(e) =>
+                      setProviderForm((f) => ({ ...f, provider_type: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  >
+                    <option value="azure">Azure OpenAI</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="custom">Custom (OpenAI-compatible)</option>
+                  </select>
+                </div>
+                {(providerForm.provider_type === "azure" ||
+                  providerForm.provider_type === "custom") && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Endpoint</label>
+                    <input
+                      type="url"
+                      placeholder="https://..."
+                      value={providerForm.endpoint ?? ""}
+                      onChange={(e) =>
+                        setProviderForm((f) => ({ ...f, endpoint: e.target.value }))
+                      }
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium mb-1">API Key</label>
+                  <input
+                    type="password"
+                    placeholder={editingProvider?.has_key ? "Leave blank to keep existing" : ""}
+                    value={providerForm.api_key ?? ""}
+                    onChange={(e) =>
+                      setProviderForm((f) => ({ ...f, api_key: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  />
+                </div>
+                {providerForm.provider_type === "openrouter" ? (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Model</label>
+                    <OpenRouterModelSelect
+                      models={openRouterModels}
+                      value={providerForm.model ?? ""}
+                      onChange={(model) => setProviderForm((f) => ({ ...f, model }))}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Model</label>
+                    <input
+                      type="text"
+                      placeholder="gpt-4o, gemini-1.5-flash, etc."
+                      value={providerForm.model ?? ""}
+                      onChange={(e) =>
+                        setProviderForm((f) => ({ ...f, model: e.target.value }))
+                      }
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    onClick={saveProvider}
+                    disabled={!providerForm.name || !providerForm.model}
+                  >
+                    {editingProvider ? "Update" : "Add"}
+                  </Button>
+                  {(editingProvider || addingNew) && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setEditingProvider(null);
+                        setAddingNew(false);
+                        setProviderForm({
+                          name: "",
+                          provider_type: "azure",
+                          endpoint: "",
+                          model: "",
+                          api_key: "",
+                        });
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+            {!editingProvider && !addingNew && llmProviders.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAddingNew(true);
+                  setProviderForm({
+                    name: "",
+                    provider_type: "azure",
+                    endpoint: "",
+                    model: "",
+                    api_key: "",
+                  });
+                }}
+                className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+              >
+                + Add another provider
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
+        <button
+          type="button"
           onClick={() => setLlmExpanded((e) => !e)}
           className="flex items-center justify-between w-full text-left font-medium"
         >
-          LLM Settings
+          LLM Settings (legacy)
           <span className="text-sm text-[rgb(var(--color-text-secondary))]">
             {llmExpanded ? "−" : "+"}
           </span>

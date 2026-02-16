@@ -13,6 +13,9 @@ pydantic>=2.0.0
 # Intent service (Azure OpenAI)
 openai>=1.0.0
 
+# Orchestrator (LLM key decryption)
+cryptography>=42.0.0
+
 # Payment service
 stripe>=7.0.0
 

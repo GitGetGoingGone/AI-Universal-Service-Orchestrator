@@ -55,6 +55,8 @@ export async function PATCH(request: Request) {
       const t = Number(body.llm_temperature);
       updates.llm_temperature = Math.max(0, Math.min(1, t));
     }
+    if (body.active_llm_provider_id !== undefined)
+      updates.active_llm_provider_id = body.active_llm_provider_id ? String(body.active_llm_provider_id) : null;
     if (body.ranking_enabled != null)
       updates.ranking_enabled = Boolean(body.ranking_enabled);
     if (body.ranking_policy != null)

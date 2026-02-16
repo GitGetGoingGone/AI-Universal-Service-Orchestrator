@@ -49,12 +49,48 @@ def _update_platform_config(updates: Dict[str, Any]) -> bool:
 
 
 def get_llm_config() -> Dict[str, Any]:
-    """Get LLM config from platform_config with 60s TTL cache. Used by planner."""
+    """Get LLM config from platform_config or llm_providers with 60s TTL cache. Used by planner."""
     global _llm_config_cache
     now = time.time()
     if _llm_config_cache and (now - _llm_config_cache[0]) < LLM_CACHE_TTL_SEC:
         return _llm_config_cache[1]
+
     cfg = _get_platform_config()
+    active_id = (cfg or {}).get("active_llm_provider_id")
+
+    if active_id:
+        client = get_supabase()
+        if client:
+            try:
+                r = client.table("llm_providers").select("*").eq("id", active_id).limit(1).execute()
+                row = r.data[0] if r.data else None
+                if row:
+                    api_key = None
+                    enc = row.get("api_key_encrypted")
+                    if enc:
+                        try:
+                            from encrypt import decrypt_llm_key
+                            api_key = decrypt_llm_key(enc)
+                        except Exception:
+                            pass
+                    provider = (row.get("provider_type") or "azure").lower()
+                    if provider == "openai":
+                        provider = "azure"
+                    temp = (cfg or {}).get("llm_temperature")
+                    temperature = float(temp) if temp is not None else 0.1
+                    temperature = max(0.0, min(1.0, temperature))
+                    result = {
+                        "provider": provider,
+                        "model": row.get("model") or "gpt-4o",
+                        "temperature": temperature,
+                        "endpoint": row.get("endpoint"),
+                        "api_key": api_key,
+                    }
+                    _llm_config_cache = (now, result)
+                    return result
+            except Exception:
+                pass
+
     provider = (cfg or {}).get("llm_provider") or "azure"
     if provider == "openai":
         provider = "azure"

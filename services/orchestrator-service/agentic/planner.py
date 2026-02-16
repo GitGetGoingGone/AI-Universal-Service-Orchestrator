@@ -50,27 +50,59 @@ def get_planner_client():
 
 
 def _get_planner_client_for_config(llm_config: Dict[str, Any]):
-    """Get planner client based on platform_config. Falls back to env-based get_planner_client."""
+    """Get planner client based on platform_config or llm_providers. Falls back to env-based get_planner_client."""
     from config import settings
+    from openai import OpenAI
 
-    preferred = (llm_config or {}).get("provider", "azure")
+    cfg = llm_config or {}
+    preferred = cfg.get("provider", "azure")
     if preferred == "openai":
         preferred = "azure"
+    api_key = cfg.get("api_key")
+    endpoint = cfg.get("endpoint")
 
-    if preferred == "gemini" and settings.google_ai_configured:
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=settings.google_ai_api_key)
-            return ("gemini", genai)
-        except ImportError:
-            pass
-    if preferred in ("azure", "openai") and settings.azure_openai_configured:
-        from openai import AzureOpenAI
-        return ("azure", AzureOpenAI(
-            api_key=settings.azure_openai_api_key,
-            api_version="2024-02-01",
-            azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
-        ))
+    if preferred == "openrouter" and api_key:
+        return ("openrouter", OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key))
+
+    if preferred == "custom" and endpoint and api_key:
+        base = endpoint.rstrip("/")
+        if not base.endswith("/v1"):
+            base = f"{base}/v1"
+        return ("custom", OpenAI(base_url=base, api_key=api_key))
+
+    if preferred == "gemini":
+        key = api_key or settings.google_ai_api_key
+        if key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=key)
+                return ("gemini", genai)
+            except ImportError:
+                pass
+        if settings.google_ai_configured:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=settings.google_ai_api_key)
+                return ("gemini", genai)
+            except ImportError:
+                pass
+
+    if preferred in ("azure", "openai"):
+        if endpoint and api_key:
+            from openai import AzureOpenAI
+            return ("azure", AzureOpenAI(
+                api_key=api_key,
+                api_version="2024-02-01",
+                azure_endpoint=endpoint.rstrip("/"),
+            ))
+        if settings.azure_openai_configured:
+            from openai import AzureOpenAI
+            return ("azure", AzureOpenAI(
+                api_key=settings.azure_openai_api_key,
+                api_version="2024-02-01",
+                azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
+            ))
+
     return get_planner_client()
 
 
@@ -112,7 +144,7 @@ async def plan_next_action(
     user_content = f"User message: {user_message}\n\nCurrent state: {json.dumps(state_summary, default=str)[:1200]}"
 
     try:
-        if provider == "azure":
+        if provider in ("azure", "openrouter", "custom"):
             messages = [
                 {"role": "system", "content": PLANNER_SYSTEM},
                 {"role": "user", "content": user_content},
