@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from packages.shared.discovery import derive_search_query
@@ -24,6 +25,7 @@ Rules:
 - search_query should be product/category terms only, e.g. "limo", "flowers", "dinner"
 - For discover_composite: search_queries = ["flowers","dinner","limo"] for "date night"; experience_name = "date night"
 - Strip action words like "wanna book", "looking for", "find me" - keep the product term
+- Extract budget when user says "under $X", "under X dollars", "within $X", "max $X" → entities: [{"type":"budget","value":X_in_cents}]
 - Return valid JSON: {"intent_type":"...","search_query":"...","search_queries":[],"experience_name":"","entities":[],"confidence_score":0.0-1.0}
   Use search_queries and experience_name only for discover_composite.
 """
@@ -70,7 +72,7 @@ async def resolve_intent(text: str, user_id: Optional[str] = None, last_suggesti
         except Exception as e:
             logger.warning("Intent LLM failed, falling back to heuristics: %s", e)
 
-    return _heuristic_resolve(text)
+    return _heuristic_resolve(text, last_suggestion)
 
 
 async def _llm_resolve(
@@ -152,7 +154,7 @@ async def _llm_resolve(
         return None
 
 
-def _heuristic_resolve(text: str) -> Dict[str, Any]:
+def _heuristic_resolve(text: str, last_suggestion: Optional[str] = None) -> Dict[str, Any]:
     """Heuristic fallback using action-word stripping."""
     text_lower = text.strip().lower()
     if not text_lower or text_lower in ("hi", "hello", "hey", "help"):
@@ -170,6 +172,24 @@ def _heuristic_resolve(text: str) -> Dict[str, Any]:
         return {"intent_type": "track", "search_query": "", "entities": [], "confidence_score": 0.7}
     if any(w in text_lower for w in ("support", "help", "complaint", "refund")):
         return {"intent_type": "support", "search_query": "", "entities": [], "confidence_score": 0.7}
+
+    # discover_composite: follow-up to probing (last_suggestion asked for date/budget/dietary/location)
+    if last_suggestion:
+        ls_lower = (last_suggestion or "").lower()
+        if any(k in ls_lower for k in ("date night", "plan a date", "birthday party", "budget", "dietary", "preferences")):
+            # User is answering our probing questions (budget, location, dietary, etc.)
+            detail_indicators = ["$", "dollar", "budget", "vegetarian", "vegan", "around", "dallas", "nyc", "location", "casual", "romantic", "adventurous"]
+            if any(k in text_lower for k in detail_indicators):
+                entities = []
+                if "dallas" in text_lower or "dallas" in text:
+                    entities.append({"type": "location", "value": "Dallas"})
+                return {
+                    "intent_type": "discover_composite",
+                    "search_queries": ["flowers", "dinner", "movies"],
+                    "experience_name": "date night",
+                    "entities": entities,
+                    "confidence_score": 0.75,
+                }
 
     # discover_composite: heuristic detection for common experience phrases
     if "date night" in text_lower or ("plan" in text_lower and "date" in text_lower):
@@ -204,9 +224,17 @@ def _heuristic_resolve(text: str) -> Dict[str, Any]:
     derived = derive_search_query(text)
     if "gift" in text_lower:
         derived = "gifts" if not derived else "gifts"
+
+    # Extract budget: "under $50", "under 50", "within $100", "max 25"
+    entities: List[Dict[str, Any]] = []
+    budget_match = re.search(r"(?:under|within|max|below|less than)\s*\$?\s*(\d+)", text_lower)
+    if budget_match:
+        dollars = int(budget_match.group(1))
+        entities.append({"type": "budget", "value": dollars * 100})  # value in cents
+
     return {
         "intent_type": "discover",
         "search_query": derived if derived else "browse",
-        "entities": [],
+        "entities": entities,
         "confidence_score": 0.6,
     }

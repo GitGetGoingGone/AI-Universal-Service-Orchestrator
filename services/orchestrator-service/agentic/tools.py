@@ -33,13 +33,14 @@ TOOL_DEFS = [
     },
     {
         "name": "discover_products",
-        "description": "Search for products by query. Use when intent is 'discover' or user wants to find/browse products.",
+        "description": "Search for products by query. Use when intent is 'discover' and user has provided details or explicitly asks for options. For generic requests like 'show me chocolates' with no preferences/occasion/budget, prefer complete with probing questions first.",
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query (e.g. cakes, flowers)"},
                 "limit": {"type": "integer", "description": "Max products to return", "default": 20},
                 "location": {"type": "string", "description": "Optional location filter"},
+                "budget_max": {"type": "integer", "description": "Max price in cents (e.g. 5000 for $50)"},
             },
             "required": ["query"],
         },
@@ -53,6 +54,7 @@ TOOL_DEFS = [
                 "search_queries": {"type": "array", "items": {"type": "string"}, "description": "Product categories to search (e.g. [flowers, dinner, movies])"},
                 "experience_name": {"type": "string", "description": "Experience name (e.g. date night)", "default": "experience"},
                 "location": {"type": "string", "description": "Optional location filter"},
+                "budget_max": {"type": "integer", "description": "Max price in cents (e.g. 5000 for $50)"},
             },
             "required": ["search_queries"],
         },
@@ -203,6 +205,7 @@ async def execute_tool(
             query=params.get("query", ""),
             limit=params.get("limit", 20),
             location=params.get("location"),
+            budget_max=params.get("budget_max"),
         )
 
     if name == "discover_composite":
@@ -215,6 +218,7 @@ async def execute_tool(
             search_queries=sq,
             experience_name=params.get("experience_name", "experience"),
             location=params.get("location"),
+            budget_max=params.get("budget_max"),
         )
 
     if name == "start_orchestration":

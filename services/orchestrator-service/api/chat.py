@@ -77,12 +77,13 @@ async def chat(
     async def _resolve(text: str, last_suggestion: Optional[str] = None):
         return await resolve_intent_with_fallback(text, user_id=user_id, last_suggestion=last_suggestion)
 
-    async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None):
+    async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None, budget_max: Optional[int] = None):
         return await discover_products(
             query=query,
             limit=limit,
             location=location,
             partner_id=partner_id or body.partner_id,
+            budget_max=budget_max,
         )
 
     async def _create_standing_intent(

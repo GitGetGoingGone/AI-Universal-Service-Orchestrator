@@ -48,14 +48,29 @@ async def discover_products(
     partner_id: Optional[str] = Query(None, description="Filter by partner"),
     exclude_partner_id: Optional[str] = Query(None, description="Exclude partner (for re-sourcing)"),
     limit: int = Query(20, ge=1, le=100),
+    budget_max: Optional[int] = Query(None, ge=0, description="Max price in cents (e.g. 5000 for $50)"),
 ):
     """
     Discover products by intent/query.
     Chat-First: Returns JSON-LD and Adaptive Card for AI agents.
     """
     products = await search(
-        query=intent, limit=limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id
+        query=intent, limit=limit * 2 if budget_max else limit,
+        partner_id=partner_id, exclude_partner_id=exclude_partner_id,
     )
+    if budget_max is not None:
+        filtered = []
+        for p in products:
+            price = p.get("price")
+            if price is not None:
+                price_cents = int(round(float(price) * 100))
+                if price_cents <= budget_max:
+                    filtered.append(p)
+            else:
+                filtered.append(p)
+        products = filtered[:limit]
+    else:
+        products = products[:limit]
 
     # Build JSON-LD ItemList (schema.org)
     item_list_elements = []

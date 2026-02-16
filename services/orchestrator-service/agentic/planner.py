@@ -11,17 +11,18 @@ logger = logging.getLogger(__name__)
 
 PLANNER_SYSTEM = """You are an agentic AI assistant for a multi-vendor order platform. You help users discover products, create bundles, and manage orders.
 
-Given the current state (user message, previous actions, results, last_suggestion), decide the next action.
+Given the current state (user message, previous actions, results, last_suggestion, recent_conversation), decide the next action.
 
 Rules:
 - For a NEW user message: first call resolve_intent to understand what they want.
-- If intent is "discover": call discover_products with the search_query.
+- If intent is "discover" (single category like chocolates, flowers): PREFER probing first. When the user message is generic (e.g. "show me chocolates", "chocolates", "flowers" with no preferences, occasion, budget, or add-ons), call complete with 1-2 friendly questions (e.g. "Any preferences? Occasion? Budget? Would you like to add something like flowers with that?"). Only call discover_products when the user has provided details or explicitly asks for options.
 - If intent is "discover_composite" (e.g. date night, birthday party): PREFER probing first. When the user message is generic (e.g. "plan a date night", "date night" with no date, budget, or preferences), call complete with 1-2 friendly questions (e.g. "What date? Any dietary preferences? Budget?"). Only call discover_composite when the user has provided details or explicitly asks for options.
+- CRITICAL: When last_suggestion or recent_conversation shows we asked probing questions and the user NOW provides details, you MUST fetch products. For composite (date night, etc.): call resolve_intent then discover_composite. For single category (chocolates, flowers, etc.): call resolve_intent then discover_products. NEVER complete with "Done" or empty when the user has answered our questions—fetch products first.
 - When last_suggestion exists and user refines (e.g. "I don't want flowers, add a movie", "no flowers", "add chocolates instead"): resolve_intent will interpret the refinement. Use the new search_query from intent. For composite experiences, the intent may return updated search_queries.
 - If intent is checkout/track/support: you may complete with a message directing them.
 - For standing intents (condition-based, delayed, "notify me when"): use create_standing_intent.
 - For other long-running workflows: use start_orchestration.
-- Call "complete" when you have a response ready for the user.
+- Call "complete" when you have a response ready for the user (e.g. probing questions, or products already fetched).
 - Prefer completing in one or two tool calls when possible.
 - Extract location from "around me" or "near X" for discover_products when relevant.
 """
@@ -95,13 +96,21 @@ async def plan_next_action(
     temperature = float(llm_config.get("temperature", 0.1))
     temperature = max(0.0, min(1.0, temperature))
 
-    # Build prompt with current state (user message, prior results, last_suggestion for refinement)
+    # Build prompt with current state (user message, prior results, last_suggestion, recent conversation)
+    messages = state.get("messages") or []
+    recent_conversation = []
+    for m in messages[-4:]:  # Last 2 exchanges (user + assistant)
+        if isinstance(m, dict) and m.get("content"):
+            role = m.get("role", "unknown")
+            content = str(m.get("content", ""))[:300]
+            recent_conversation.append(f"{role}: {content}")
     state_summary = {
         "iteration": state.get("iteration", 0),
         "last_tool_result": state.get("last_tool_result"),
         "last_suggestion": state.get("last_suggestion"),
+        "recent_conversation": recent_conversation[-4:] if recent_conversation else None,
     }
-    user_content = f"User message: {user_message}\n\nCurrent state: {json.dumps(state_summary, default=str)[:1200]}"
+    user_content = f"User message: {user_message}\n\nCurrent state: {json.dumps(state_summary, default=str)[:1800]}"
 
     try:
         if provider in ("azure", "openrouter", "custom"):
@@ -236,6 +245,25 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                 "tool_name": "discover_products",
                 "tool_args": tool_args,
                 "reasoning": "Intent is discover, fetching products.",
+            }
+
+        if intent_type == "discover_composite":
+            sq = intent_data.get("search_queries") or ["flowers", "dinner", "movies"]
+            exp_name = intent_data.get("experience_name") or "experience"
+            loc = None
+            for e in intent_data.get("entities", []):
+                if isinstance(e, dict) and e.get("type") == "location":
+                    loc = str(e.get("value", "")) or None
+                    break
+            return {
+                "action": "tool",
+                "tool_name": "discover_composite",
+                "tool_args": {
+                    "search_queries": sq,
+                    "experience_name": exp_name,
+                    "location": loc,
+                },
+                "reasoning": "Intent is discover_composite, fetching products.",
             }
 
     return {

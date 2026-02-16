@@ -89,4 +89,16 @@ async def search(
         partner_id=partner_id,
         exclude_partner_id=exclude_partner_id,
     )
+    # When "gifts" returns empty, try "gift" (singular) or "birthday" for gift-like queries
+    if not products and query.lower() in ("gifts", "gift"):
+        for fallback in ("gift", "birthday", "present"):
+            if fallback != query.lower():
+                products = await search_products(
+                    query=fallback,
+                    limit=limit,
+                    partner_id=partner_id,
+                    exclude_partner_id=exclude_partner_id,
+                )
+                if products:
+                    break
     return await _apply_ranking(products)

@@ -21,6 +21,7 @@ async def _discover_composite(
     limit: int = 20,
     location: Optional[str] = None,
     partner_id: Optional[str] = None,
+    budget_max: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Call discover_products per query, compose experience bundle."""
     from packages.shared.adaptive_cards.experience_card import generate_experience_card
@@ -39,6 +40,7 @@ async def _discover_composite(
                 limit=per_limit,
                 location=location,
                 partner_id=partner_id,
+                budget_max=budget_max,
             )
         except Exception as e:
             logger.warning("Discover composite query %s failed: %s", q, e)
@@ -136,16 +138,33 @@ async def run_agentic_loop(
         )
 
         if plan.get("action") == "complete":
-            state["agent_reasoning"].append(plan.get("reasoning", ""))
-            state["planner_complete_message"] = (plan.get("message") or "").strip()
-            break
+            msg = (plan.get("message") or "").strip()
+            # Override: if planner said "Done."/empty with no products, and last_suggestion looks like probing,
+            # user likely answered our questions—fetch instead of completing
+            if (not msg or msg == "Done.") and not products_data and not intent_data:
+                ls = (state.get("last_suggestion") or "").lower()
+                probe_keywords = ("budget", "dietary", "preferences", "location", "what date", "occasion", "add flowers", "add something", "?")
+                if ls and any(k in ls for k in probe_keywords):
+                    logger.info("Planner completed with no products but last_suggestion suggests probing—calling resolve_intent")
+                    plan = {"action": "tool", "tool_name": "resolve_intent", "tool_args": {"text": user_message}, "reasoning": "User answered probing questions, fetching products."}
+                    if state.get("last_suggestion"):
+                        plan["tool_args"]["last_suggestion"] = state["last_suggestion"]
+                    # Fall through to tool execution (don't break)
+                else:
+                    state["agent_reasoning"].append(plan.get("reasoning", ""))
+                    state["planner_complete_message"] = msg or "Processed your request."
+                    break
+            else:
+                state["agent_reasoning"].append(plan.get("reasoning", ""))
+                state["planner_complete_message"] = msg or "Processed your request."
+                break
 
         if plan.get("action") == "tool":
             tool_name = plan["tool_name"]
             tool_args = plan.get("tool_args", {})
             state["agent_reasoning"].append(plan.get("reasoning", ""))
 
-            # Inject limit and location from intent entities for discover_products
+            # Inject limit, location, budget from intent entities for discover_products
             if tool_name == "discover_products":
                 tool_args = dict(tool_args)
                 tool_args.setdefault("limit", limit)
@@ -153,6 +172,9 @@ async def run_agentic_loop(
                     loc = _extract_location(intent_data)
                     if loc:
                         tool_args.setdefault("location", loc)
+                    budget_cents = _extract_budget(intent_data)
+                    if budget_cents is not None:
+                        tool_args.setdefault("budget_max", budget_cents)
 
             # Inject last_suggestion for resolve_intent (refinement: "I don't want flowers, add a movie")
             if tool_name == "resolve_intent" and state.get("last_suggestion"):
@@ -172,14 +194,17 @@ async def run_agentic_loop(
                     tool_args["experience_name"] = intent_data.get("experience_name") or "experience"
                 if not tool_args.get("location") and intent_data:
                     tool_args["location"] = _extract_location(intent_data)
+                if not tool_args.get("budget_max") and intent_data:
+                    tool_args["budget_max"] = _extract_budget(intent_data)
 
-            async def _discover_composite_fn(search_queries, experience_name, location=None):
+            async def _discover_composite_fn(search_queries, experience_name, location=None, budget_max=None):
                 return await _discover_composite(
                     search_queries=search_queries,
                     experience_name=experience_name,
                     discover_products_fn=discover_products_fn,
                     limit=limit,
                     location=location,
+                    budget_max=budget_max,
                 )
 
             result = await execute_tool(
@@ -300,6 +325,21 @@ def _extract_location(intent_data: Optional[Dict[str, Any]]) -> Optional[str]:
     for e in intent_data.get("entities", []):
         if isinstance(e, dict) and e.get("type") == "location":
             return str(e.get("value", "")) or None
+    return None
+
+
+def _extract_budget(intent_data: Optional[Dict[str, Any]]) -> Optional[int]:
+    """Extract budget in cents from intent entities."""
+    if not intent_data:
+        return None
+    for e in intent_data.get("entities", []):
+        if isinstance(e, dict) and e.get("type") == "budget":
+            v = e.get("value")
+            if v is not None:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    pass
     return None
 
 
