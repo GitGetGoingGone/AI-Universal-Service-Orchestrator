@@ -81,6 +81,8 @@ async def _llm_resolve(
     max_tokens: int = 500,
 ) -> Optional[Dict[str, Any]]:
     """Call LLM to resolve intent. Returns parsed result or None on failure."""
+    from packages.shared.platform_llm import get_llm_chat_client
+
     provider, client = get_llm_chat_client(llm_config)
     if not client:
         return None
