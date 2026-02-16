@@ -137,6 +137,7 @@ async def run_agentic_loop(
 
         if plan.get("action") == "complete":
             state["agent_reasoning"].append(plan.get("reasoning", ""))
+            state["planner_complete_message"] = (plan.get("message") or "").strip()
             break
 
         if plan.get("action") == "tool":
@@ -163,11 +164,30 @@ async def run_agentic_loop(
                 tool_args.setdefault("platform", platform)
                 tool_args.setdefault("thread_id", thread_id)
 
+            if tool_name == "discover_composite" and intent_data and intent_data.get("intent_type") == "discover_composite":
+                tool_args = dict(tool_args)
+                if not tool_args.get("search_queries"):
+                    tool_args["search_queries"] = intent_data.get("search_queries") or []
+                if not tool_args.get("experience_name"):
+                    tool_args["experience_name"] = intent_data.get("experience_name") or "experience"
+                if not tool_args.get("location") and intent_data:
+                    tool_args["location"] = _extract_location(intent_data)
+
+            async def _discover_composite_fn(search_queries, experience_name, location=None):
+                return await _discover_composite(
+                    search_queries=search_queries,
+                    experience_name=experience_name,
+                    discover_products_fn=discover_products_fn,
+                    limit=limit,
+                    location=location,
+                )
+
             result = await execute_tool(
                 tool_name,
                 tool_args,
                 resolve_intent_fn=resolve_intent_fn,
                 discover_products_fn=discover_products_fn,
+                discover_composite_fn=_discover_composite_fn,
                 start_orchestration_fn=start_orchestration_fn,
                 create_standing_intent_fn=create_standing_intent_fn,
             )
@@ -181,24 +201,11 @@ async def run_agentic_loop(
 
             if tool_name == "resolve_intent":
                 intent_data = result.get("data", result)
-                # discover_composite: multi-query discovery, compose experience bundle
-                if intent_data and intent_data.get("intent_type") == "discover_composite":
-                    sq = intent_data.get("search_queries") or []
-                    if sq:
-                        exp_name = intent_data.get("experience_name") or "experience"
-                        loc = _extract_location(intent_data)
-                        composed = await _discover_composite(
-                            search_queries=sq,
-                            experience_name=exp_name,
-                            discover_products_fn=discover_products_fn,
-                            limit=limit,
-                            location=loc,
-                        )
-                        products_data = composed.get("data")
-                        adaptive_card = composed.get("adaptive_card")
-                        machine_readable = composed.get("machine_readable")
-                        state["last_tool_result"] = composed
-                        break
+                # Don't auto-fetch for discover_composite; let planner decide (probe first or fetch)
+            elif tool_name == "discover_composite":
+                products_data = result.get("data", result)
+                adaptive_card = result.get("adaptive_card")
+                machine_readable = result.get("machine_readable")
             elif tool_name == "discover_products":
                 products_data = result.get("data", result)
                 adaptive_card = result.get("adaptive_card")
@@ -206,12 +213,14 @@ async def run_agentic_loop(
             elif tool_name == "create_standing_intent":
                 intent_data = intent_data or {}
                 intent_data["standing_intent"] = result
-
-            if tool_name == "complete":
+            elif tool_name == "complete":
+                summary = (result.get("summary") or "").strip()
+                if summary:
+                    state["planner_complete_message"] = summary
                 break
 
     # Build final response
-    return _build_response(
+    out = _build_response(
         intent_data=intent_data,
         products_data=products_data,
         adaptive_card=adaptive_card,
@@ -220,6 +229,10 @@ async def run_agentic_loop(
         user_message=user_message,
         error=state.get("last_error"),
     )
+    planner_msg = state.get("planner_complete_message", "").strip()
+    if planner_msg:
+        out["planner_complete_message"] = planner_msg
+    return out
 
 
 async def _direct_flow(

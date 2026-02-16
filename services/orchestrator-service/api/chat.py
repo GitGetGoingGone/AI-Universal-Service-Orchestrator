@@ -162,10 +162,14 @@ async def chat(
             )
             adaptive_card = {**adaptive_card, "body": card_body}
 
-    # LLM-generated engagement response; fallback to templated summary
-    summary = await generate_engagement_response(body.text, result)
-    if not summary:
-        summary = _build_summary(result)
+    # If planner chose to complete with a message (e.g. probing questions), use it
+    planner_message = (result.get("planner_complete_message") or "").strip()
+    if planner_message:
+        summary = planner_message
+    else:
+        summary = await generate_engagement_response(body.text, result)
+        if not summary:
+            summary = _build_summary(result)
     return chat_first_response(
         data=result.get("data", {}),
         machine_readable=result.get("machine_readable", {}),

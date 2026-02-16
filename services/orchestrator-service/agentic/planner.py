@@ -16,6 +16,7 @@ Given the current state (user message, previous actions, results, last_suggestio
 Rules:
 - For a NEW user message: first call resolve_intent to understand what they want.
 - If intent is "discover": call discover_products with the search_query.
+- If intent is "discover_composite" (e.g. date night, birthday party): PREFER probing first. When the user message is generic (e.g. "plan a date night", "date night" with no date, budget, or preferences), call complete with 1-2 friendly questions (e.g. "What date? Any dietary preferences? Budget?"). Only call discover_composite when the user has provided details or explicitly asks for options.
 - When last_suggestion exists and user refines (e.g. "I don't want flowers, add a movie", "no flowers", "add chocolates instead"): resolve_intent will interpret the refinement. Use the new search_query from intent. For composite experiences, the intent may return updated search_queries.
 - If intent is checkout/track/support: you may complete with a message directing them.
 - For standing intents (condition-based, delayed, "notify me when"): use create_standing_intent.

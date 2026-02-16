@@ -45,6 +45,19 @@ TOOL_DEFS = [
         },
     },
     {
+        "name": "discover_composite",
+        "description": "Fetch products for a composed experience (e.g. date night: flowers, dinner, movies). Use ONLY when the user has provided enough detail (date, budget, preferences). For generic requests like 'plan a date night' with no details, prefer complete with probing questions first.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "search_queries": {"type": "array", "items": {"type": "string"}, "description": "Product categories to search (e.g. [flowers, dinner, movies])"},
+                "experience_name": {"type": "string", "description": "Experience name (e.g. date night)", "default": "experience"},
+                "location": {"type": "string", "description": "Optional location filter"},
+            },
+            "required": ["search_queries"],
+        },
+    },
+    {
         "name": "start_orchestration",
         "description": "Start a long-running workflow (e.g. standing intent, multi-step order). Use when user needs async processing.",
         "parameters": {
@@ -118,6 +131,16 @@ def apply_guardrails(name: str, params: Dict[str, Any]) -> Tuple[Dict[str, Any],
         if loc is not None and isinstance(loc, str):
             p["location"] = loc.strip()[:MAX_LOCATION_LEN] or None
 
+    elif name == "discover_composite":
+        sq = p.get("search_queries") or []
+        if not isinstance(sq, list):
+            sq = []
+        p["search_queries"] = [str(q).strip()[:MAX_QUERY_LEN] for q in sq if q][:10]
+        p["experience_name"] = (p.get("experience_name") or "experience")[:200]
+        loc = p.get("location")
+        if loc is not None and isinstance(loc, str):
+            p["location"] = loc.strip()[:MAX_LOCATION_LEN] or None
+
     elif name == "start_orchestration":
         msg = (p.get("message") or "").strip()
         if not msg:
@@ -152,6 +175,7 @@ async def execute_tool(
     *,
     resolve_intent_fn: Optional[Callable] = None,
     discover_products_fn: Optional[Callable] = None,
+    discover_composite_fn: Optional[Callable] = None,
     start_orchestration_fn: Optional[Callable] = None,
     create_standing_intent_fn: Optional[Callable] = None,
 ) -> Dict[str, Any]:
@@ -178,6 +202,18 @@ async def execute_tool(
         return await discover_products_fn(
             query=params.get("query", ""),
             limit=params.get("limit", 20),
+            location=params.get("location"),
+        )
+
+    if name == "discover_composite":
+        if not discover_composite_fn:
+            return {"error": "discover_composite not configured"}
+        sq = params.get("search_queries") or []
+        if not sq:
+            return {"error": "discover_composite requires non-empty search_queries"}
+        return await discover_composite_fn(
+            search_queries=sq,
+            experience_name=params.get("experience_name", "experience"),
             location=params.get("location"),
         )
 
