@@ -36,14 +36,14 @@ function FlipWord() {
     </div>
   );
 }
-import { useAuthState, AuthButtons, hasClerk } from "@/components/AuthWrapper";
+import { useAuthState, hasClerk } from "@/components/AuthWrapper";
 import { SignInButton } from "@clerk/nextjs";
-import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
 import { PaymentModal } from "@/components/PaymentModal";
 import { PhoneModal } from "@/components/PhoneModal";
 import { PreCheckoutModal } from "@/components/PreCheckoutModal";
 import { SideNav } from "@/components/SideNav";
+import { useSideNavCollapsed } from "@/hooks/useSideNavCollapsed";
 
 type ChatMessage = {
   id: string;
@@ -248,6 +248,7 @@ export function ChatPage(props: ChatPageProps = {}) {
     onPaymentSuccessHandled,
   } = props;
   const showSideNav = showSideNavProp ?? !embeddedInLanding;
+  const { collapsed: sideNavCollapsed, toggle: toggleSideNav } = useSideNavCollapsed();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<
     Array<{ id: string; intent_description: string }>
@@ -794,38 +795,10 @@ export function ChatPage(props: ChatPageProps = {}) {
 
   const chatContent = (
     <div className={`flex flex-col bg-[var(--background)] text-[var(--foreground)] ${showSideNav ? "min-h-0 flex-1 overflow-hidden" : embeddedInLanding ? "min-h-[60vh]" : "h-screen"}`}>
-      {!embeddedInLanding && !showSideNav && (
-        <header className="flex-shrink-0 border-b border-[var(--border)] px-4 py-3">
-          <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
-              <h1 className="text-lg font-semibold shrink-0">USO Unified Chat</h1>
-              {(userId || anonymousId) && threads.length > 0 && (
-                <select
-                  value={threadId ?? ""}
-                  onChange={(e) => handleSelectThread(e.target.value || null)}
-                  className="text-sm px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--card)] max-w-[180px] truncate"
-                >
-                  <option value="">New chat</option>
-                  {threads.map((t) => (
-                    <option key={t.id} value={t.id} title={t.title}>
-                      {t.title.length > 24 ? t.title.slice(0, 21) + "…" : t.title}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <ConnectWhatsApp />
-              <AuthButtons />
-            </div>
-          </div>
-        </header>
-      )}
-
       <main
-        className={`h-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""} ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}
+        className={`h-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""} ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}
       >
-        <div className={`mx-auto space-y-6 ${messages.length === 0 ? "flex w-full max-w-2xl flex-col items-center" : "max-w-3xl"}`}>
+        <div className={`mx-auto min-w-0 space-y-6 ${messages.length === 0 ? "flex w-full max-w-2xl flex-col items-center" : "max-w-3xl"}`}>
           {embeddedInLanding && (userId || anonymousId) && threads.length > 0 && (
             <div className="flex justify-end">
               <select
@@ -961,11 +934,11 @@ export function ChatPage(props: ChatPageProps = {}) {
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+                className={`flex min-w-0 w-full ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                <div className="flex flex-col gap-1">
+                <div className="flex min-w-0 flex-col gap-1">
                   <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                    className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 ${
                       m.role === "user"
                         ? "bg-[var(--primary-color)] text-[var(--primary-foreground)]"
                         : "bg-[var(--card)] border border-[var(--border)] text-[var(--card-foreground)]"
@@ -1269,7 +1242,7 @@ export function ChatPage(props: ChatPageProps = {}) {
 
   if (showSideNav) {
     return (
-      <div className="flex h-screen bg-[var(--background)]">
+      <div className="flex h-[100dvh] sm:h-screen bg-[var(--background)]">
         <SideNav
           threadId={threadId}
           threads={threads}
@@ -1277,11 +1250,28 @@ export function ChatPage(props: ChatPageProps = {}) {
           onSelectThread={handleSelectThread}
           hasUserOrAnonymous={!!(userId || anonymousId)}
           anonymousId={anonymousId ?? undefined}
+          collapsed={sideNavCollapsed}
+          onToggle={toggleSideNav}
         />
-        <div className="flex min-w-0 flex-1 flex-col min-h-0 overflow-hidden">
-          <header className="flex flex-shrink-0 items-center justify-end border-b border-[var(--border)] px-4 py-3">
-            <AuthButtons />
-          </header>
+        <div
+          className={`flex min-w-0 flex-1 flex-col min-h-0 overflow-hidden transition-[margin] duration-200 ${
+            !sideNavCollapsed ? "md:ml-64" : ""
+          }`}
+        >
+          {sideNavCollapsed && (
+            <header className="flex flex-shrink-0 items-center border-b border-[var(--border)] px-4 py-3">
+              <button
+                type="button"
+                onClick={toggleSideNav}
+                aria-label="Open menu"
+                className="rounded p-2 text-[var(--muted)] transition-colors hover:bg-[var(--card)] hover:text-[var(--card-foreground)]"
+              >
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+            </header>
+          )}
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {chatContent}
           </div>

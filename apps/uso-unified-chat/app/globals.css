@@ -16,9 +16,14 @@
   --border: #475569;
 }
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
+  overflow-x: hidden;
 }
 
 /* Adaptive Cards host overrides */

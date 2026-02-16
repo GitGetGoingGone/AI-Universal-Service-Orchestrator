@@ -18,6 +18,8 @@ export type SideNavProps = {
   onSelectThread?: (id: string | null) => void;
   hasUserOrAnonymous?: boolean;
   anonymousId?: string | null;
+  collapsed?: boolean;
+  onToggle?: () => void;
 };
 
 export function SideNav({
@@ -27,7 +29,17 @@ export function SideNav({
   onSelectThread,
   hasUserOrAnonymous = false,
   anonymousId,
+  collapsed = false,
+  onToggle,
 }: SideNavProps) {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
   const pathname = usePathname();
   const isSettings = pathname === "/settings";
   const [myStuff, setMyStuff] = useState<MyStuff | null>(null);
@@ -52,9 +64,38 @@ export function SideNav({
   }, [fetchMyStuff]);
 
   const hasMyStuff = myStuff && (myStuff.favorites.length > 0 || myStuff.standing_intents.length > 0);
+  const showBackdrop = isMobile && !collapsed;
 
   return (
-    <aside className="flex w-64 flex-shrink-0 flex-col border-r border-[var(--border)] bg-[var(--card)]">
+    <>
+      {showBackdrop && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={onToggle}
+          aria-hidden
+        />
+      )}
+      <aside
+        className={`fixed left-0 top-0 bottom-0 z-50 flex w-64 max-w-[85vw] flex-col border-r border-[var(--border)] bg-[var(--card)] shadow-lg transition-transform duration-200 ease-out ${
+          collapsed ? "-translate-x-full" : "translate-x-0"
+        }`}
+      >
+        {/* Collapse button */}
+        {onToggle && (
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--border)] px-3 py-2">
+            <span className="text-sm font-medium text-[var(--card-foreground)]">Menu</span>
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-label="Collapse sidebar"
+              className="rounded p-2 text-[var(--muted)] transition-colors hover:bg-[var(--background)] hover:text-[var(--card-foreground)]"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          </div>
+        )}
       {/* New chat */}
       <div className="p-3">
         {onNewChat ? (
@@ -183,5 +224,6 @@ export function SideNav({
         </Link>
       </div>
     </aside>
+    </>
   );
 }
