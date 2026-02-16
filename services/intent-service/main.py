@@ -69,17 +69,11 @@ async def check_database() -> DependencyCheck:
 
 
 async def check_llm() -> DependencyCheck:
-    """Check Azure OpenAI availability (optional)."""
-    if settings.azure_openai_configured:
-        return DependencyCheck(
-            name="azure_openai",
-            status=DependencyStatus.HEALTHY,
-            message="Configured",
-        )
+    """Intent uses heuristics (LLM config is in Platform Config)."""
     return DependencyCheck(
-        name="azure_openai",
-        status=DependencyStatus.DEGRADED,
-        message="Not configured; using fallback heuristics",
+        name="intent",
+        status=DependencyStatus.HEALTHY,
+        message="Using heuristics",
     )
 
 

@@ -249,56 +249,5 @@ def generate_ai_response_sync(
     faqs: List[Dict[str, Any]],
     order_status: List[Dict[str, Any]],
 ) -> Optional[str]:
-    """Generate AI response using Azure OpenAI. Returns None if LLM not configured or fails."""
-    try:
-        from config import settings
-        if not settings.azure_openai_configured:
-            return None
-        from openai import AzureOpenAI
-        client = AzureOpenAI(
-            api_key=settings.azure_openai_api_key,
-            api_version="2024-02-01",
-            azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
-        )
-
-        kb_text = "\n\n".join(
-            f"## {a.get('title', '')}\n{a.get('content', '')}" for a in kb_articles[:20]
-        ) or "No knowledge base articles."
-        faq_text = "\n\n".join(
-            f"Q: {f.get('question', '')}\nA: {f.get('answer', '')}" for f in faqs[:30]
-        ) or "No FAQs."
-        order_text = "\n".join(
-            f"Order {o.get('order_id', '')[:8]}...: status={o.get('status', '')}" for o in order_status
-        ) if order_status else "No order information available."
-
-        system = """You are a helpful customer support assistant for a multi-vendor order platform.
-You may ONLY reference orders explicitly provided in the context below. Do not fabricate or infer other order IDs.
-If the customer asks about an order not in the context, say you don't have that order information and suggest they contact support.
-Be concise, friendly, and professional."""
-
-        user = f"""Customer message: {message_content}
-
-Knowledge base:
-{kb_text}
-
-FAQs:
-{faq_text}
-
-Order status (only use these - do not reference other orders):
-{order_text}
-
-Respond with a helpful reply to the customer. Keep it under 200 words."""
-
-        resp = client.chat.completions.create(
-            model=settings.azure_openai_deployment,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.3,
-            max_tokens=500,
-        )
-        content = (resp.choices[0].message.content or "").strip()
-        return content if content else None
-    except Exception:
-        return None
+    """Generate AI response. LLM config is in Platform Config. Returns None when not configured."""
+    return None

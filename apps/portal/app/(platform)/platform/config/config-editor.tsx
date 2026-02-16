@@ -504,7 +504,7 @@ export function ConfigEditor() {
                     <label className="block text-sm font-medium mb-1">Model</label>
                     <input
                       type="text"
-                      placeholder="gpt-4o, gemini-1.5-flash, etc."
+                      placeholder="e.g. gpt-4o (from Platform Config)"
                       value={providerForm.model ?? ""}
                       onChange={(e) =>
                         setProviderForm((f) => ({ ...f, model: e.target.value }))

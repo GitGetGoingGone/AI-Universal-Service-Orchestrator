@@ -72,13 +72,12 @@ GET /api/v1/discover?intent=flowers
 
 ### When semantic search is used
 
-- **Used**: `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY` are set, and at least some products have non-null `embedding`.
+- **Used**: Embedding config is in Platform Config. At least some products need non-null `embedding` for semantic search.
 - **Not used** (fallback to text): embeddings not configured, or query embedding fails, or **no products have embeddings** (RPC returns nothing), or you explicitly call with `use_semantic=False` at the scout layer.
 
 ### Configuration
 
-- **Discovery service** uses the same Azure OpenAI env vars as the rest of the app, plus:
-  - `EMBEDDING_DEPLOYMENT` or `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` (e.g. `text-embedding-ada-002`).
+- **Discovery service** embedding config is in Platform Config (llm_providers).
 - Migration **`20240128000011_scout_semantic_search.sql`** must be applied so the `match_products` RPC exists.
 
 ---
@@ -205,7 +204,7 @@ For **UCP**, there is no public URL that serves a live product catalog you can p
 
 **2. Semantic search (with embeddings)**
 
-- Set in `.env`: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, and `EMBEDDING_DEPLOYMENT=text-embedding-ada-002` (or your deployment).
+- Configure LLM/embedding via Platform Config UI at `/platform/config`.
 - Apply migration: `supabase db push` (or equivalent) so **`match_products`** exists.
 - Backfill at least one product:
   ```bash
@@ -326,7 +325,7 @@ So to “test protocol adapters with semantic search” end-to-end you would:
 | What you want to test      | What to use                                                                 |
 |----------------------------|-----------------------------------------------------------------------------|
 | Text-only discovery        | `/discover?intent=...` with no embeddings configured                       |
-| Semantic discovery         | Configure Azure OpenAI + `EMBEDDING_DEPLOYMENT`, backfill products, then `/discover` |
+| Semantic discovery         | Configure embedding via Platform Config, backfill products, then `/discover` |
 | Scout browse behavior      | `/discover?intent=sample` or `intent=demo`                                 |
 | ACP feed parsing           | Host ACP-style JSON, then `POST /api/v1/admin/manifest/ingest` with `manifest_type=acp` |
 | UCP feed parsing           | Host UCP-style JSON, then `POST /api/v1/admin/manifest/ingest` with `manifest_type=ucp` |

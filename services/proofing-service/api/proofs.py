@@ -91,36 +91,18 @@ def generate_preview(proof_id: str, body: GenerateBody) -> Dict[str, Any]:
 
     if settings.dalle_configured:
         try:
-            if settings.azure_openai_endpoint and settings.azure_openai_api_key:
-                try:
-                    from openai import AzureOpenAI
-                except ImportError:
-                    raise HTTPException(status_code=503, detail="openai package required for DALL-E; pip install openai")
+            try:
+                from openai import OpenAI
+            except ImportError:
+                raise HTTPException(status_code=503, detail="openai package required for DALL-E; pip install openai")
 
-                client = AzureOpenAI(
-                    api_key=settings.azure_openai_api_key,
-                    api_version="2024-02-15-preview",
-                    azure_endpoint=settings.azure_openai_endpoint,
-                )
-                resp = client.images.generate(
-                    model=settings.azure_openai_deployment,
-                    prompt=body.prompt[:4000],
-                    n=1,
-                    size="1024x1024",
-                )
-            else:
-                try:
-                    from openai import OpenAI
-                except ImportError:
-                    raise HTTPException(status_code=503, detail="openai package required for DALL-E; pip install openai")
-
-                client = OpenAI(api_key=settings.openai_api_key)
-                resp = client.images.generate(
-                    model="dall-e-3",
-                    prompt=body.prompt[:4000],
-                    n=1,
-                    size="1024x1024",
-                )
+            client = OpenAI(api_key=settings.openai_api_key)
+            resp = client.images.generate(
+                model="dall-e-3",
+                prompt=body.prompt[:4000],
+                n=1,
+                size="1024x1024",
+            )
             if resp.data and len(resp.data) > 0:
                 image_url = resp.data[0].url or (getattr(resp.data[0], "b64_json", None) and f"data:image/png;base64,{resp.data[0].b64_json}")
         except Exception as e:

@@ -80,13 +80,7 @@ In the steps below, each service will **link this group** and add only its **ser
 
 4. **Environment**:
    - Under **Linked Environment Groups**, select `uso-shared` → **Link**
-   - Add service-specific vars (optional for OpenAI):
-
-| Key | Value |
-|-----|-------|
-| `AZURE_OPENAI_ENDPOINT` | *(optional)* Azure OpenAI endpoint |
-| `AZURE_OPENAI_API_KEY` | *(optional)* |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | `gpt-4o` |
+   - Add service-specific vars as needed. LLM providers are configured via Platform Config UI.
 
 5. Create and note the URL.
 
@@ -164,9 +158,7 @@ The Durable Orchestrator runs as an Azure Functions app in a Docker container. I
 | `REVERSE_LOGISTICS_SERVICE_URL` | `https://uso-reverse-logistics.onrender.com` *(for returns; optional)* |
 | `SUPABASE_SERVICE_KEY` | Same as `SUPABASE_SECRET_KEY` *(for Link Account; alias)* |
 | `GOOGLE_OAUTH_CLIENT_ID` | *(optional)* For Link Account with Google; from Google Cloud Console |
-| `AZURE_OPENAI_ENDPOINT` | *(optional)* For agentic planner |
-| `AZURE_OPENAI_API_KEY` | *(optional)* |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | `gpt-4o` |
+| `LLM_CONFIG_ENCRYPTION_KEY` | *(required for LLM)* Encrypt API keys in llm_providers; 32+ chars |
 
 5. Create and note the URL.
 

@@ -122,7 +122,7 @@ async def generate_engagement_response(
     if not client:
         return None
 
-    model = llm_config.get("model") or ("gpt-4o" if provider == "azure" else "gemini-1.5-flash")
+    model = llm_config.get("model") or "gpt-4o"
     temperature = min(0.7, float(llm_config.get("temperature", 0.1)) + 0.3)  # Slightly more creative for engagement
 
     data = result.get("data") or {}
@@ -134,7 +134,7 @@ async def generate_engagement_response(
     user_content = f"User said: {user_message[:300]}\n\nWhat we did: {context}\n\nWrite a brief friendly response:"
 
     try:
-        if provider == "azure":
+        if provider in ("azure", "openrouter", "custom"):
             def _call():
                 return client.chat.completions.create(
                     model=model,

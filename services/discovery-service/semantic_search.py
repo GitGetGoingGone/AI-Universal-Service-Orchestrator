@@ -2,55 +2,14 @@
 
 from typing import Any, Dict, List, Optional
 
-from config import settings
 from db import get_supabase
-
-
-_embedding_client: Optional[Any] = None
-
-
-def _get_embedding_client():
-    """Lazy Azure OpenAI client for embeddings."""
-    global _embedding_client
-    if _embedding_client is not None:
-        return _embedding_client
-    if not settings.embedding_configured:
-        return None
-    try:
-        from openai import AzureOpenAI
-
-        _embedding_client = AzureOpenAI(
-            api_key=settings.azure_openai_api_key,
-            api_version="2024-02-01",
-            azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
-        )
-        return _embedding_client
-    except Exception:
-        return None
 
 
 async def get_query_embedding(text: str) -> Optional[List[float]]:
     """
     Generate embedding for search query.
-    Uses Azure OpenAI text-embedding-ada-002 or text-embedding-3-small (1536 dims).
+    Embedding config is in Platform Config (llm_providers). Returns None when not configured.
     """
-    import asyncio
-
-    client = _get_embedding_client()
-    if not client or not text or not text.strip():
-        return None
-
-    try:
-        response = await asyncio.to_thread(
-            lambda: client.embeddings.create(
-                input=text.strip()[:8000],
-                model=settings.embedding_deployment,
-            )
-        )
-        if response.data and len(response.data) > 0:
-            return response.data[0].embedding
-    except Exception:
-        pass
     return None
 
 

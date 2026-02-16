@@ -63,14 +63,6 @@ class Settings:
         get_env("ORCHESTRATOR_SERVICE_URL") or "http://localhost:8002"
     ).rstrip("/")
 
-    # Azure OpenAI (for Agentic AI planner - optional)
-    azure_openai_endpoint: str = get_env("AZURE_OPENAI_ENDPOINT") or ""
-    azure_openai_api_key: str = get_env("AZURE_OPENAI_API_KEY") or ""
-    azure_openai_deployment: str = get_env("AZURE_OPENAI_DEPLOYMENT_NAME") or "gpt-4o"
-
-    # Google AI / Gemini (for Agentic AI planner - optional, fallback when Azure not configured)
-    google_ai_api_key: str = get_env("GOOGLE_AI_API_KEY") or get_env("GEMINI_API_KEY") or ""
-
     # Agentic handoff (Clerk SSO 2.0 - optional)
     clerk_publishable_key: str = get_env("CLERK_PUBLISHABLE_KEY") or ""
     clerk_secret_key: str = get_env("CLERK_SECRET_KEY") or ""
@@ -80,14 +72,6 @@ class Settings:
 
     environment: str = get_env("ENVIRONMENT", "development")
     log_level: str = get_env("LOG_LEVEL", "INFO")
-
-    @property
-    def azure_openai_configured(self) -> bool:
-        return bool(self.azure_openai_endpoint and self.azure_openai_api_key)
-
-    @property
-    def google_ai_configured(self) -> bool:
-        return bool(self.google_ai_api_key)
 
     @property
     def agentic_handoff_configured(self) -> bool:

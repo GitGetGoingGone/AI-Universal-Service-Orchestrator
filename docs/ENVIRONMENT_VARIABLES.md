@@ -34,15 +34,13 @@ cp .env.example .env
 
 **Where to get**: Clerk Dashboard → API Keys
 
-### AI / LLM (Azure OpenAI)
+### AI / LLM (Platform Config)
+
+LLM providers (Azure, Gemini, OpenRouter, Custom) are configured via Platform Config UI at `/platform/config`. Add providers and set one as active.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `AZURE_OPENAI_ENDPOINT` | For Module 4 | Azure OpenAI resource URL |
-| `AZURE_OPENAI_API_KEY` | For Module 4 | API key for Azure OpenAI |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | For Module 4 | Deployment name (e.g., gpt-4o) |
-
-**Where to get**: Azure Portal → Azure OpenAI resource → Keys and Endpoint
+| `LLM_CONFIG_ENCRYPTION_KEY` | For LLM | Encrypt API keys in llm_providers; 32+ chars. Required in production. |
 
 ### Messaging (Twilio)
 

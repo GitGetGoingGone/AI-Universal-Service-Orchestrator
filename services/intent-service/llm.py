@@ -1,11 +1,8 @@
-"""Intent resolution via LLM (Azure OpenAI) with action-word stripping fallback."""
+"""Intent resolution via heuristics (action-word stripping). LLM config is in Platform Config."""
 
-import asyncio
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from config import settings
 from packages.shared.discovery import derive_search_query
 
 logger = logging.getLogger(__name__)
@@ -32,9 +29,7 @@ Rules:
 
 async def resolve_intent(text: str, user_id: Optional[str] = None, last_suggestion: Optional[str] = None) -> Dict[str, Any]:
     """
-    Resolve intent from natural language. Uses Azure OpenAI when configured;
-    falls back to heuristics with action-word stripping otherwise.
-    When LLM returns bad/empty search_query, uses derive_search_query(text).
+    Resolve intent from natural language using heuristics (action-word stripping).
     """
     if not text or not text.strip():
         return {
@@ -44,84 +39,7 @@ async def resolve_intent(text: str, user_id: Optional[str] = None, last_suggesti
             "confidence_score": 0.5,
         }
 
-    if settings.azure_openai_configured:
-        try:
-            result = await _resolve_via_azure(text, last_suggestion=last_suggestion)
-            # When LLM returns bad/empty search_query for discover intent, use derived
-            if result.get("intent_type") == "discover":
-                sq = (result.get("search_query") or "").strip()
-                if not sq or len(sq) < 2:
-                    derived = derive_search_query(text)
-                    if derived:
-                        result["search_query"] = derived
-                        result["confidence_score"] = min(0.9, (result.get("confidence_score") or 0.5) + 0.2)
-            return result
-        except Exception as e:
-            logger.warning("Azure OpenAI intent failed: %s", e)
-
     return _heuristic_resolve(text)
-
-
-async def _resolve_via_azure(text: str, last_suggestion: Optional[str] = None) -> Dict[str, Any]:
-    """Resolve intent via Azure OpenAI."""
-    from openai import AzureOpenAI
-
-    client = AzureOpenAI(
-        api_key=settings.azure_openai_api_key,
-        api_version="2024-02-01",
-        azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
-    )
-
-    user_content = f"User message: {text}"
-    if last_suggestion:
-        user_content += f"\n\nPrevious suggestion shown to user: {last_suggestion[:300]}"
-
-    def _call():
-        r = client.chat.completions.create(
-            model=settings.azure_openai_deployment,
-            messages=[
-                {"role": "system", "content": INTENT_SYSTEM},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0.1,
-            max_tokens=200,
-        )
-        return r
-
-    response = await asyncio.to_thread(_call)
-    content = (response.choices[0].message.content or "").strip()
-
-    # Parse JSON from response (may be wrapped in markdown)
-    if "```" in content:
-        start = content.find("```") + 3
-        if content.startswith("```json"):
-            start += 4  # skip "json"
-        end = content.find("```", start)
-        content = content[start:end] if end > start else content
-
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        return _heuristic_resolve(text)
-
-    intent_type = (data.get("intent_type") or "discover").lower()
-    if intent_type not in ("discover", "discover_composite", "checkout", "track", "support", "browse"):
-        intent_type = "discover"
-
-    out: Dict[str, Any] = {
-        "intent_type": intent_type,
-        "search_query": (data.get("search_query") or "").strip(),
-        "entities": data.get("entities") if isinstance(data.get("entities"), list) else [],
-        "confidence_score": float(data.get("confidence_score", 0.8)),
-    }
-    if intent_type == "discover_composite":
-        sq_list = data.get("search_queries")
-        if isinstance(sq_list, list) and sq_list:
-            out["search_queries"] = [str(q).strip() for q in sq_list if str(q).strip()]
-        else:
-            out["search_queries"] = []
-        out["experience_name"] = (data.get("experience_name") or "").strip() or "experience"
-    return out
 
 
 def _heuristic_resolve(text: str) -> Dict[str, Any]:

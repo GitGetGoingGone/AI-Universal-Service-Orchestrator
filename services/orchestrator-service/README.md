@@ -54,14 +54,10 @@ Query param: `agentic=true` (default) – use LLM planning. Set `agentic=false` 
 | `INTENT_SERVICE_URL` | Intent service (default: http://localhost:8001) |
 | `DISCOVERY_SERVICE_URL` | Discovery service (default: http://localhost:8000) |
 | `DURABLE_ORCHESTRATOR_URL` | Durable Functions (default: http://localhost:7071) |
-| `AZURE_OPENAI_ENDPOINT` | For agentic planner (optional) |
-| `AZURE_OPENAI_API_KEY` | For agentic planner (optional) |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | Model (default: gpt-4o) |
 | `CLERK_PUBLISHABLE_KEY` | For agentic handoff (optional) |
 | `CLERK_SECRET_KEY` | For agentic handoff (optional) |
-| `GOOGLE_AI_API_KEY` or `GEMINI_API_KEY` | For Gemini planner when Azure not configured |
 
-When neither Azure OpenAI nor Google AI is configured, the agent uses a fallback planner (heuristics).
+LLM providers are configured via Platform Config UI. When no active provider is set, the agent uses a fallback planner (heuristics).
 
 ## Run
 

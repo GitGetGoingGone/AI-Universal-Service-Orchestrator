@@ -11,7 +11,7 @@ import re
 
 IV_LEN = 12
 TAG_LEN = 16
-KEY_LEN = 32
+ENC_PREFIX = "enc:"
 
 
 def _get_key() -> bytes:
@@ -25,9 +25,6 @@ def _get_key() -> bytes:
         if len(b) == 32:
             return b
     return hashlib.sha256(raw.encode()).digest()
-
-
-ENC_PREFIX = "enc:"
 
 
 def decrypt_llm_key(ciphertext: str) -> str:
@@ -47,8 +44,3 @@ def decrypt_llm_key(ciphertext: str) -> str:
     enc = buf[IV_LEN:-TAG_LEN]
     aesgcm = AESGCM(key)
     return aesgcm.decrypt(iv, enc + tag, None).decode("utf8")
-
-
-def is_encryption_configured() -> bool:
-    raw = os.getenv("LLM_CONFIG_ENCRYPTION_KEY")
-    return bool(raw and len(raw) >= 16)

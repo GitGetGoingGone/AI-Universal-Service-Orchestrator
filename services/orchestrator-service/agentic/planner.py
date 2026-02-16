@@ -26,32 +26,8 @@ Rules:
 """
 
 
-def get_planner_client():
-    """Get LLM client for planning: Azure OpenAI first, then Google AI (Gemini)."""
-    from config import settings
-
-    if settings.azure_openai_configured:
-        from openai import AzureOpenAI
-
-        return ("azure", AzureOpenAI(
-            api_key=settings.azure_openai_api_key,
-            api_version="2024-02-01",
-            azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
-        ))
-    if settings.google_ai_configured:
-        try:
-            import google.generativeai as genai
-
-            genai.configure(api_key=settings.google_ai_api_key)
-            return ("gemini", genai)
-        except ImportError:
-            logger.warning("google-generativeai not installed. pip install google-generativeai for Gemini support.")
-    return (None, None)
-
-
 def _get_planner_client_for_config(llm_config: Dict[str, Any]):
-    """Get planner client based on platform_config or llm_providers. Falls back to env-based get_planner_client."""
-    from config import settings
+    """Get planner client from platform config (llm_providers). No env fallback."""
     from openai import OpenAI
 
     cfg = llm_config or {}
@@ -70,40 +46,23 @@ def _get_planner_client_for_config(llm_config: Dict[str, Any]):
             base = f"{base}/v1"
         return ("custom", OpenAI(base_url=base, api_key=api_key))
 
-    if preferred == "gemini":
-        key = api_key or settings.google_ai_api_key
-        if key:
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=key)
-                return ("gemini", genai)
-            except ImportError:
-                pass
-        if settings.google_ai_configured:
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=settings.google_ai_api_key)
-                return ("gemini", genai)
-            except ImportError:
-                pass
+    if preferred == "gemini" and api_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            return ("gemini", genai)
+        except ImportError:
+            logger.warning("google-generativeai not installed for Gemini support.")
 
-    if preferred in ("azure", "openai"):
-        if endpoint and api_key:
-            from openai import AzureOpenAI
-            return ("azure", AzureOpenAI(
-                api_key=api_key,
-                api_version="2024-02-01",
-                azure_endpoint=endpoint.rstrip("/"),
-            ))
-        if settings.azure_openai_configured:
-            from openai import AzureOpenAI
-            return ("azure", AzureOpenAI(
-                api_key=settings.azure_openai_api_key,
-                api_version="2024-02-01",
-                azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
-            ))
+    if preferred in ("azure", "openai") and endpoint and api_key:
+        from openai import AzureOpenAI
+        return ("azure", AzureOpenAI(
+            api_key=api_key,
+            api_version="2024-02-01",
+            azure_endpoint=endpoint.rstrip("/"),
+        ))
 
-    return get_planner_client()
+    return (None, None)
 
 
 async def plan_next_action(
@@ -131,7 +90,7 @@ async def plan_next_action(
     if not client:
         return _fallback_plan(user_message, state)
 
-    model = llm_config.get("model") or ("gpt-4o" if provider == "azure" else "gemini-1.5-flash")
+    model = llm_config.get("model") or "gpt-4o"
     temperature = float(llm_config.get("temperature", 0.1))
     temperature = max(0.0, min(1.0, temperature))
 
@@ -197,7 +156,7 @@ async def _plan_with_gemini(
     genai_module,
     user_content: str,
     *,
-    model: str = "gemini-1.5-flash",
+    model: str,
     temperature: float = 0.1,
 ) -> Dict[str, Any]:
     """Use Gemini for planning (function calling). Requires google-generativeai."""

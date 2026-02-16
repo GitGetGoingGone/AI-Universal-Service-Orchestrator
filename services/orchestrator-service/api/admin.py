@@ -67,10 +67,10 @@ def get_llm_config() -> Dict[str, Any]:
                 if row:
                     api_key = None
                     enc = row.get("api_key_encrypted")
-                    if enc:
-                        try:
-                            from encrypt import decrypt_llm_key
-                            api_key = decrypt_llm_key(enc)
+                if enc:
+                    try:
+                        from packages.shared.encrypt import decrypt_llm_key
+                        api_key = decrypt_llm_key(enc)
                         except Exception:
                             pass
                     provider = (row.get("provider_type") or "azure").lower()
@@ -95,7 +95,7 @@ def get_llm_config() -> Dict[str, Any]:
     if provider == "openai":
         provider = "azure"
     model = (cfg or {}).get("llm_model") or (
-        settings.azure_openai_deployment if provider == "azure" else "gemini-1.5-flash"
+        "gpt-4o"
     )
     temp = (cfg or {}).get("llm_temperature")
     temperature = float(temp) if temp is not None else 0.1

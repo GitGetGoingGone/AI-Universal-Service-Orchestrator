@@ -39,26 +39,56 @@ def auto_approve_with_vision_ai(
 
 
 def _vision_configured() -> bool:
-    return bool(
-        settings.openai_api_key or (settings.azure_openai_endpoint and settings.azure_openai_api_key)
-    )
+    """Vision uses Platform Config LLM or OPENAI_API_KEY fallback."""
+    if settings.openai_api_key:
+        return True
+    try:
+        from db import get_supabase
+        from packages.shared.platform_llm import get_platform_llm_config
+        client = get_supabase()
+        cfg = get_platform_llm_config(client) if client else None
+        return bool(cfg and cfg.get("api_key"))
+    except Exception:
+        return False
 
 
 def _compare_images(proof_url: str, source_url: Optional[str]) -> float:
-    """Use OpenAI Vision to compare images. Returns 0-1 similarity score."""
+    """Use Platform Config LLM or OpenAI Vision to compare images. Returns 0-1 similarity score."""
     try:
-        if settings.azure_openai_endpoint and settings.azure_openai_api_key:
-            from openai import AzureOpenAI
-            client = AzureOpenAI(
-                api_key=settings.azure_openai_api_key,
-                api_version="2024-02-15-preview",
-                azure_endpoint=settings.azure_openai_endpoint,
-            )
-            model = settings.azure_openai_deployment
-        else:
-            from openai import OpenAI
+        from openai import OpenAI
+        from db import get_supabase
+        from packages.shared.platform_llm import get_platform_llm_config
+
+        client = None
+        model = "gpt-4o"
+
+        supabase = get_supabase()
+        cfg = get_platform_llm_config(supabase) if supabase else None
+        if cfg and cfg.get("api_key"):
+            model = cfg.get("model") or "gpt-4o"
+            provider = cfg.get("provider", "azure")
+            if provider == "openrouter":
+                client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=cfg["api_key"])
+            elif provider == "custom" and cfg.get("endpoint"):
+                base = cfg["endpoint"].rstrip("/")
+                if not base.endswith("/v1"):
+                    base = f"{base}/v1"
+                client = OpenAI(base_url=base, api_key=cfg["api_key"])
+            elif provider in ("azure", "openai") and cfg.get("endpoint"):
+                from openai import AzureOpenAI
+                client = AzureOpenAI(
+                    api_key=cfg["api_key"],
+                    api_version="2024-02-15-preview",
+                    azure_endpoint=cfg["endpoint"].rstrip("/"),
+                )
+            else:
+                client = OpenAI(api_key=cfg["api_key"])
+
+        if not client and settings.openai_api_key:
             client = OpenAI(api_key=settings.openai_api_key)
-            model = "gpt-4o"
+
+        if not client:
+            return 0.0
 
         content = [
             {"type": "text", "text": "Compare these two images. Return ONLY a number from 0 to 1 indicating visual similarity (1=identical). No other text."},
