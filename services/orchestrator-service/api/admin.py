@@ -67,10 +67,10 @@ def get_llm_config() -> Dict[str, Any]:
                 if row:
                     api_key = None
                     enc = row.get("api_key_encrypted")
-                if enc:
-                    try:
-                        from packages.shared.encrypt import decrypt_llm_key
-                        api_key = decrypt_llm_key(enc)
+                    if enc:
+                        try:
+                            from packages.shared.encrypt import decrypt_llm_key
+                            api_key = decrypt_llm_key(enc)
                         except Exception:
                             pass
                     provider = (row.get("provider_type") or "azure").lower()
