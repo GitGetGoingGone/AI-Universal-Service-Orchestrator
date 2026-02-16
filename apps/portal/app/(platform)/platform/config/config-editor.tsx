@@ -110,6 +110,17 @@ type SponsorshipPricing = {
   sponsorship_enabled?: boolean;
 };
 
+type ModelInteractionPrompt = {
+  id: string;
+  interaction_type: string;
+  display_name: string;
+  when_used: string;
+  system_prompt: string | null;
+  enabled: boolean;
+  max_tokens: number;
+  display_order: number;
+};
+
 type Config = {
   id?: string;
   commission_rate_pct?: number;
@@ -135,12 +146,15 @@ export function ConfigEditor() {
   const [modelSettingsExpanded, setModelSettingsExpanded] = useState(true);
   const [llmProvidersExpanded, setLlmProvidersExpanded] = useState(true);
   const [imageProvidersExpanded, setImageProvidersExpanded] = useState(true);
+  const [modelInteractionsExpanded, setModelInteractionsExpanded] = useState(true);
   const [rankingExpanded, setRankingExpanded] = useState(true);
   const [sponsorshipExpanded, setSponsorshipExpanded] = useState(true);
   const [llmProviders, setLlmProviders] = useState<LLMProvider[]>([]);
   const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null);
   const [addingNew, setAddingNew] = useState(false);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
+  const [modelInteractions, setModelInteractions] = useState<ModelInteractionPrompt[]>([]);
+  const [savingModelInteractions, setSavingModelInteractions] = useState(false);
   const [providerForm, setProviderForm] = useState<Partial<LLMProvider> & { api_key?: string }>({
     name: "",
     provider_type: "azure",
@@ -156,6 +170,16 @@ export function ConfigEditor() {
       if (!data.detail) setLlmProviders(Array.isArray(data) ? data : []);
     } catch {
       setLlmProviders([]);
+    }
+  }, []);
+
+  const fetchModelInteractions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/platform/model-interactions");
+      const data = await res.json();
+      if (!data.detail) setModelInteractions(Array.isArray(data) ? data : []);
+    } catch {
+      setModelInteractions([]);
     }
   }, []);
 
@@ -209,6 +233,10 @@ export function ConfigEditor() {
   useEffect(() => {
     if (!loading) fetchLlms();
   }, [loading, fetchLlms]);
+
+  useEffect(() => {
+    if (!loading) fetchModelInteractions();
+  }, [loading, fetchModelInteractions]);
 
   useEffect(() => {
     if (providerForm.provider_type === "openrouter" && openRouterModels.length === 0) {
@@ -629,6 +657,128 @@ export function ConfigEditor() {
                 generation.
               </p>
             )}
+          </div>
+        )}
+      </div>
+
+      <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
+        <button
+          type="button"
+          onClick={() => setModelInteractionsExpanded((e) => !e)}
+          className="flex items-center justify-between w-full text-left font-medium"
+        >
+          Model Interactions
+          <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+            {modelInteractionsExpanded ? "−" : "+"}
+          </span>
+        </button>
+        {modelInteractionsExpanded && (
+          <div className="mt-4 space-y-6">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Edit system prompts per interaction type. Changes apply without redeployment. Empty prompt
+              uses code default.
+            </p>
+            {modelInteractions.map((m) => (
+              <div
+                key={m.id}
+                className="rounded border border-[rgb(var(--color-border))] p-4 space-y-3"
+              >
+                <div>
+                  <span className="font-medium">{m.display_name}</span>
+                  <span className="ml-2 text-xs text-[rgb(var(--color-text-secondary))]">
+                    {m.interaction_type}
+                  </span>
+                </div>
+                <p className="text-xs text-[rgb(var(--color-text-secondary))] bg-[rgb(var(--color-border))]/20 rounded px-2 py-1.5">
+                  {m.when_used}
+                </p>
+                <div>
+                  <label className="block text-sm font-medium mb-1">System prompt</label>
+                  <textarea
+                    rows={6}
+                    value={m.system_prompt ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setModelInteractions((prev) =>
+                        prev.map((p) =>
+                          p.interaction_type === m.interaction_type
+                            ? { ...p, system_prompt: val || null }
+                            : p
+                        )
+                      );
+                    }}
+                    placeholder="Leave empty to use code default"
+                    className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] font-mono text-sm"
+                  />
+                </div>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={m.enabled}
+                      onChange={(e) =>
+                        setModelInteractions((prev) =>
+                          prev.map((p) =>
+                            p.interaction_type === m.interaction_type
+                              ? { ...p, enabled: e.target.checked }
+                              : p
+                          )
+                        )
+                      }
+                    />
+                    <span className="text-sm">Enabled</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm">Max tokens</label>
+                    <input
+                      type="number"
+                      min={50}
+                      max={4000}
+                      value={m.max_tokens}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        if (!Number.isNaN(n))
+                          setModelInteractions((prev) =>
+                            prev.map((p) =>
+                              p.interaction_type === m.interaction_type
+                                ? { ...p, max_tokens: Math.max(50, Math.min(4000, n)) }
+                                : p
+                            )
+                          );
+                      }}
+                      className="w-20 px-2 py-1 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+            <Button
+              onClick={async () => {
+                setSavingModelInteractions(true);
+                try {
+                  const res = await fetch("/api/platform/model-interactions", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      updates: modelInteractions.map((m) => ({
+                        interaction_type: m.interaction_type,
+                        system_prompt: m.system_prompt || null,
+                        enabled: m.enabled,
+                        max_tokens: m.max_tokens,
+                      })),
+                    }),
+                  });
+                  if (!res.ok) throw new Error("Failed");
+                } catch {
+                  alert("Failed to save model interactions");
+                } finally {
+                  setSavingModelInteractions(false);
+                }
+              }}
+              disabled={savingModelInteractions || modelInteractions.length === 0}
+            >
+              {savingModelInteractions ? "Saving..." : "Save Model Interactions"}
+            </Button>
           </div>
         )}
       </div>

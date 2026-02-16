@@ -243,11 +243,87 @@ def create_classification_and_respond(
     }
 
 
+HYBRID_RESPONSE_SYSTEM = """You are a helpful support assistant. Answer the customer's question using the provided knowledge base articles, FAQs, and order status. Be concise and friendly. If the answer is not in the context, say so and offer to connect them with a human."""
+
+
 def generate_ai_response_sync(
     message_content: str,
     kb_articles: List[Dict[str, Any]],
     faqs: List[Dict[str, Any]],
     order_status: List[Dict[str, Any]],
 ) -> Optional[str]:
-    """Generate AI response. LLM config is in Platform Config. Returns None when not configured."""
+    """Generate AI response using Platform Config LLM. Returns None when not configured."""
+    from packages.shared.platform_llm import (
+        get_platform_llm_config,
+        get_model_interaction_prompt,
+        get_llm_chat_client,
+    )
+
+    client = get_supabase()
+    if not client:
+        return None
+
+    llm_config = get_platform_llm_config(client)
+    prompt_cfg = get_model_interaction_prompt(client, "hybrid_response")
+
+    if not llm_config or not llm_config.get("api_key"):
+        return None
+    if prompt_cfg is not None and not prompt_cfg.get("enabled", True):
+        return None
+
+    system_prompt = (prompt_cfg.get("system_prompt") if prompt_cfg else None) or HYBRID_RESPONSE_SYSTEM
+    max_tokens = prompt_cfg.get("max_tokens", 400) if prompt_cfg else 400
+
+    provider, llm_client = get_llm_chat_client(llm_config)
+    if not llm_client:
+        return None
+
+    # Build context
+    parts = [f"Customer question: {message_content[:2000]}"]
+    if kb_articles:
+        parts.append("\n\nKnowledge base:")
+        for a in kb_articles[:10]:
+            title = a.get("title", "")
+            content = (a.get("content") or "")[:800]
+            parts.append(f"\n- {title}: {content}")
+    if faqs:
+        parts.append("\n\nFAQs:")
+        for f in faqs[:15]:
+            q = f.get("question", "")
+            a = f.get("answer", "")
+            parts.append(f"\nQ: {q}\nA: {a}")
+    if order_status:
+        parts.append("\n\nOrder status:")
+        for o in order_status[:10]:
+            parts.append(f"\n- Order {o.get('order_id', '')}: {o.get('status', '')}")
+
+    user_content = "\n".join(parts)[:6000]
+
+    model = llm_config.get("model") or "gpt-4o"
+    temperature = min(0.5, float(llm_config.get("temperature", 0.1)) + 0.2)
+
+    try:
+        if provider in ("azure", "openrouter", "custom", "openai"):
+            resp = llm_client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            text = (resp.choices[0].message.content or "").strip()
+            return text if text else None
+        if provider == "gemini":
+            gen_model = llm_client.GenerativeModel(model)
+            resp = gen_model.generate_content(
+                f"{system_prompt}\n\n{user_content}",
+                generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
+            )
+            if resp and resp.candidates:
+                text = (getattr(resp, "text", None) or "").strip()
+                return text if text else None
+    except Exception:
+        pass
     return None
