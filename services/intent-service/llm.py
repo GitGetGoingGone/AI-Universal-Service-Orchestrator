@@ -48,6 +48,15 @@ async def resolve_intent(text: str, user_id: Optional[str] = None, last_suggesti
     llm_config = get_platform_llm_config(supabase) if supabase else None
     prompt_cfg = get_model_interaction_prompt(supabase, "intent") if supabase else None
 
+    if not supabase:
+        logger.info("Intent: Supabase not configured, using heuristics")
+    elif not llm_config:
+        logger.info("Intent: No LLM config (active_llm_provider_id not set or provider missing), using heuristics")
+    elif not llm_config.get("api_key"):
+        logger.info("Intent: LLM config has no api_key (decryption failed or key not stored), using heuristics")
+    elif prompt_cfg is not None and not prompt_cfg.get("enabled", True):
+        logger.info("Intent: Intent prompt disabled in Model Interactions, using heuristics")
+
     system_prompt = (prompt_cfg.get("system_prompt") if prompt_cfg else None) or INTENT_SYSTEM
     enabled = prompt_cfg.get("enabled", True) if prompt_cfg else True
     max_tokens = prompt_cfg.get("max_tokens", 500) if prompt_cfg else 500
@@ -57,6 +66,7 @@ async def resolve_intent(text: str, user_id: Optional[str] = None, last_suggesti
             result = await _llm_resolve(text, last_suggestion, llm_config, system_prompt, max_tokens)
             if result:
                 return result
+            logger.info("Intent: LLM returned no result (client or parse failed), using heuristics")
         except Exception as e:
             logger.warning("Intent LLM failed, falling back to heuristics: %s", e)
 
@@ -159,8 +169,39 @@ def _heuristic_resolve(text: str) -> Dict[str, Any]:
     if any(w in text_lower for w in ("support", "help", "complaint", "refund")):
         return {"intent_type": "support", "search_query": "", "entities": [], "confidence_score": 0.7}
 
-    # discover_composite: only from LLM; heuristic fallback uses single discover + derive
+    # discover_composite: heuristic detection for common experience phrases
+    if "date night" in text_lower or ("plan" in text_lower and "date" in text_lower):
+        return {
+            "intent_type": "discover_composite",
+            "search_query": "",
+            "search_queries": ["flowers", "dinner", "movies"],
+            "experience_name": "date night",
+            "entities": [],
+            "confidence_score": 0.7,
+        }
+    if "birthday" in text_lower and ("party" in text_lower or "celebration" in text_lower):
+        return {
+            "intent_type": "discover_composite",
+            "search_query": "",
+            "search_queries": ["cake", "flowers", "gifts"],
+            "experience_name": "birthday",
+            "entities": [],
+            "confidence_score": 0.7,
+        }
+    if "picnic" in text_lower:
+        return {
+            "intent_type": "discover_composite",
+            "search_query": "",
+            "search_queries": ["basket", "blanket", "food"],
+            "experience_name": "picnic",
+            "entities": [],
+            "confidence_score": 0.7,
+        }
+
+    # Single-category discover: use "gifts" when user asks for gifts (better catalog match)
     derived = derive_search_query(text)
+    if "gift" in text_lower:
+        derived = "gifts" if not derived else "gifts"
     return {
         "intent_type": "discover",
         "search_query": derived if derived else "browse",
