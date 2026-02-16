@@ -131,7 +131,7 @@ export function ConfigEditor() {
   const [config, setConfig] = useState<Config>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [llmExpanded, setLlmExpanded] = useState(true);
+  const [modelSettingsExpanded, setModelSettingsExpanded] = useState(true);
   const [llmProvidersExpanded, setLlmProvidersExpanded] = useState(true);
   const [rankingExpanded, setRankingExpanded] = useState(true);
   const [sponsorshipExpanded, setSponsorshipExpanded] = useState(true);
@@ -292,8 +292,6 @@ export function ConfigEditor() {
           enable_chatgpt: config.enable_chatgpt,
           feature_flags: config.feature_flags,
           active_llm_provider_id: config.active_llm_provider_id ?? null,
-          llm_provider: config.llm_provider,
-          llm_model: config.llm_model,
           llm_temperature: config.llm_temperature,
           ranking_enabled: config.ranking_enabled,
           ranking_policy: config.ranking_policy,
@@ -568,41 +566,16 @@ export function ConfigEditor() {
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
-          onClick={() => setLlmExpanded((e) => !e)}
+          onClick={() => setModelSettingsExpanded((e) => !e)}
           className="flex items-center justify-between w-full text-left font-medium"
         >
-          LLM Settings (legacy)
+          Model settings
           <span className="text-sm text-[rgb(var(--color-text-secondary))]">
-            {llmExpanded ? "−" : "+"}
+            {modelSettingsExpanded ? "−" : "+"}
           </span>
         </button>
-        {llmExpanded && (
+        {modelSettingsExpanded && (
           <div className="mt-4 space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Provider</label>
-              <select
-                value={config.llm_provider ?? "azure"}
-                onChange={(e) =>
-                  setConfig((c) => ({ ...c, llm_provider: e.target.value }))
-                }
-                className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
-              >
-                <option value="azure">Azure OpenAI</option>
-                <option value="gemini">Google Gemini</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Model</label>
-              <input
-                type="text"
-                placeholder="gpt-4o, gemini-1.5-flash, etc."
-                value={config.llm_model ?? "gpt-4o"}
-                onChange={(e) =>
-                  setConfig((c) => ({ ...c, llm_model: e.target.value }))
-                }
-                className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
-              />
-            </div>
             <div>
               <label className="block text-sm font-medium mb-1">
                 Creativity (0–1)
@@ -624,6 +597,9 @@ export function ConfigEditor() {
               <span className="text-sm text-[rgb(var(--color-text-secondary))]">
                 {(config.llm_temperature ?? 0.1).toFixed(2)}
               </span>
+              <p className="text-xs text-[rgb(var(--color-text-secondary))] mt-1">
+                Lower = more deterministic; higher = more creative. Applies to the active LLM provider.
+              </p>
             </div>
           </div>
         )}
