@@ -53,7 +53,7 @@ function OpenRouterModelSelect({
     <div className="relative">
       <input
         type="text"
-        value={open ? search : (selected?.name ?? value || "Select model...")}
+        value={open ? search : ((selected?.name ?? value) || "Select model...")}
         onChange={(e) => {
           setSearch(e.target.value);
           setOpen(true);
