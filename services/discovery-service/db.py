@@ -50,31 +50,50 @@ async def search_products(
     if not client:
         return []
 
+    select_cols = (
+        "id, name, description, price, currency, capabilities, metadata, partner_id, "
+        "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability, created_at"
+    )
     try:
-        # Text search: filter by name containing query (case-insensitive)
         q = (
             client.table("products")
-            .select(
-                "id, name, description, price, currency, capabilities, metadata, partner_id, "
-                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability, created_at"
-            )
+            .select(f"{select_cols}, sold_count")
             .is_("deleted_at", "null")
         )
-
         if query and not is_browse_query(query):
-            # Search in name or description (case-insensitive)
-            # Browse queries (sample, demo, please, etc.) return products without filter
             pattern = f"%{query}%"
             q = q.or_(f"name.ilike.{pattern},description.ilike.{pattern}")
         if partner_id:
             q = q.eq("partner_id", partner_id)
         if exclude_partner_id:
             q = q.neq("partner_id", exclude_partner_id)
-
         result = q.order("created_at", desc=True).limit(limit).execute()
-        return result.data or []
+        data = result.data or []
+        for row in data:
+            if "sold_count" not in row:
+                row["sold_count"] = 0
+        return data
     except Exception:
-        return []
+        try:
+            q = (
+                client.table("products")
+                .select(select_cols)
+                .is_("deleted_at", "null")
+            )
+            if query and not is_browse_query(query):
+                pattern = f"%{query}%"
+                q = q.or_(f"name.ilike.{pattern},description.ilike.{pattern}")
+            if partner_id:
+                q = q.eq("partner_id", partner_id)
+            if exclude_partner_id:
+                q = q.neq("partner_id", exclude_partner_id)
+            result = q.order("created_at", desc=True).limit(limit).execute()
+            data = result.data or []
+            for row in data:
+                row["sold_count"] = 0
+            return data
+        except Exception:
+            return []
 
 
 async def get_product_by_id(product_id: str) -> Optional[Dict[str, Any]]:
@@ -157,6 +176,25 @@ async def get_platform_config_ranking() -> Optional[Dict[str, Any]]:
         return dict(row)
     except Exception:
         return {"ranking_enabled": True}
+
+
+async def get_composite_discovery_config() -> Optional[Dict[str, Any]]:
+    """Get composite_discovery_config from platform_config (products_per_category, product_mix, sponsorship_enabled)."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("platform_config")
+            .select("composite_discovery_config")
+            .limit(1)
+            .execute()
+        )
+        row = result.data[0] if result.data else None
+        cdc = (row or {}).get("composite_discovery_config")
+        return cdc if isinstance(cdc, dict) else None
+    except Exception:
+        return None
 
 
 async def get_partner_ratings_map(partner_ids: List[str]) -> Dict[str, float]:
@@ -398,6 +436,49 @@ async def add_product_to_bundle(
             }
     except Exception:
         return None
+
+
+async def add_products_to_bundle_bulk(
+    product_ids: List[str],
+    user_id: Optional[str] = None,
+    bundle_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Add multiple products to a bundle in one call.
+    Creates new draft bundle if bundle_id not provided.
+    Returns { bundle_id, products_added, total_price, currency }.
+    """
+    if not product_ids:
+        return None
+    client = get_supabase()
+    if not client:
+        return None
+
+    products_added: List[str] = []
+    total_price = 0.0
+    currency = "USD"
+
+    for i, product_id in enumerate(product_ids):
+        result = await add_product_to_bundle(
+            product_id=product_id,
+            user_id=user_id if i == 0 and not bundle_id else None,
+            bundle_id=bundle_id,
+        )
+        if not result:
+            continue
+        bundle_id = result.get("bundle_id")
+        products_added.append(result.get("product_added", ""))
+        total_price = float(result.get("total_price", 0))
+        currency = result.get("currency", "USD")
+
+    if not products_added or not bundle_id:
+        return None
+    return {
+        "bundle_id": bundle_id,
+        "products_added": products_added,
+        "total_price": total_price,
+        "currency": currency,
+    }
 
 
 async def get_bundle_by_id(bundle_id: str) -> Optional[Dict[str, Any]]:

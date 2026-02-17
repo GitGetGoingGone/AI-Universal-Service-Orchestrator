@@ -18,7 +18,7 @@ DEFAULT_SAMPLE_MESSAGES: Dict[str, str] = {
     "intent": "Plan a date night",
     "hybrid_response": "Where is my order?",
     "planner": "User message: Plan a date night. Current state: { iteration: 0, last_tool_result: null }. What is your next action?",
-    "engagement_discover": "User said: show me flowers. Found 3 products: Red Roses ($49), Tulips ($35), Sunflowers ($29). Write a brief friendly response.",
+    "engagement_discover": "Allowed CTAs (suggest ONLY these): Add to bundle. Do NOT suggest same-day delivery, delivery options, or any feature not listed. User said: show me flowers. Found 3 products: Red Roses ($49), Tulips ($35), Sunflowers ($29). Write a brief friendly response.",
     "engagement_browse": "User is browsing with no specific query. Engage them conversationally.",
     "engagement_discover_composite": "User asked for date night. Categories: flowers, dinner, movies. Found: Red Roses. No dinner or movies in catalog. Write a helpful response.",
     "engagement_default": "User said: I want to checkout. What we did: Found their bundle with 2 items. Write a brief response.",
@@ -49,6 +49,15 @@ def _get_platform_config() -> Optional[Dict[str, Any]]:
         return r.data[0] if r.data else None
     except Exception:
         return None
+
+
+def get_composite_discovery_config() -> Dict[str, Any]:
+    """Get composite_discovery_config from platform_config. Used for products_per_category, product_mix."""
+    cfg = _get_platform_config()
+    cdc = (cfg or {}).get("composite_discovery_config")
+    if isinstance(cdc, dict):
+        return cdc
+    return {"products_per_category": 5, "sponsorship_enabled": True}
 
 
 def _update_platform_config(updates: Dict[str, Any]) -> bool:

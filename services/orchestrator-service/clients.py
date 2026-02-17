@@ -157,6 +157,26 @@ async def add_to_bundle(
         return r.json()
 
 
+async def add_to_bundle_bulk(
+    product_ids: list[str],
+    user_id: Optional[str] = None,
+    bundle_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Call Discovery service to add multiple products to bundle."""
+    url = f"{settings.discovery_service_url}/api/v1/bundle/add-bulk"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(
+            url,
+            json={
+                "product_ids": product_ids,
+                "user_id": user_id,
+                "bundle_id": bundle_id,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 async def remove_from_bundle(item_id: str) -> Dict[str, Any]:
     """Call Discovery service to remove item from bundle."""
     url = f"{settings.discovery_service_url}/api/v1/bundle/remove"

@@ -10,6 +10,7 @@ from clients import (
     get_product_details,
     get_bundle_details,
     add_to_bundle as add_to_bundle_client,
+    add_to_bundle_bulk as add_to_bundle_bulk_client,
     remove_from_bundle as remove_from_bundle_client,
     proceed_to_checkout as proceed_to_checkout_client,
     create_payment_intent as create_payment_intent_client,
@@ -54,12 +55,37 @@ class AddToBundleBody(BaseModel):
     bundle_id: Optional[str] = None
 
 
+class AddBulkBody(BaseModel):
+    """Request body for adding multiple products to a bundle."""
+
+    product_ids: list[str]
+    user_id: Optional[str] = None
+    bundle_id: Optional[str] = None
+
+
 @router.post("/bundle/add")
 async def add_to_bundle(body: AddToBundleBody):
     """Add product to bundle. For Add to Bundle action."""
     try:
         return await add_to_bundle_client(
             product_id=body.product_id,
+            user_id=body.user_id,
+            bundle_id=body.bundle_id,
+        )
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
+
+
+@router.post("/bundle/add-bulk")
+async def add_to_bundle_bulk(body: AddBulkBody):
+    """Add multiple products to bundle. For Add curated bundle action."""
+    try:
+        return await add_to_bundle_bulk_client(
+            product_ids=body.product_ids,
             user_id=body.user_id,
             bundle_id=body.bundle_id,
         )

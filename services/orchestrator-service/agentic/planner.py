@@ -114,10 +114,24 @@ async def plan_next_action(
     }
     user_content = f"User message: {user_message}\n\nCurrent state: {json.dumps(state_summary, default=str)[:1800]}"
 
+    # Use admin-configured planner prompt from DB when available and enabled
+    planner_prompt = PLANNER_SYSTEM
+    try:
+        from db import get_supabase
+        from packages.shared.platform_llm import get_model_interaction_prompt
+        client = get_supabase()
+        prompt_cfg = get_model_interaction_prompt(client, "planner") if client else None
+        if prompt_cfg and prompt_cfg.get("enabled", True):
+            db_prompt = (prompt_cfg.get("system_prompt") or "").strip()
+            if db_prompt:
+                planner_prompt = db_prompt
+    except Exception:
+        pass
+
     try:
         if provider in ("azure", "openrouter", "custom"):
             messages = [
-                {"role": "system", "content": PLANNER_SYSTEM},
+                {"role": "system", "content": planner_prompt},
                 {"role": "user", "content": user_content},
             ]
             tools = [{"type": "function", "function": t} for t in TOOL_DEFS]
@@ -156,7 +170,7 @@ async def plan_next_action(
             }
 
         if provider == "gemini":
-            return await _plan_with_gemini(client, user_content, model=model, temperature=temperature)
+            return await _plan_with_gemini(client, user_content, model=model, temperature=temperature, system_prompt=planner_prompt)
     except Exception as e:
         logger.warning("Planner LLM failed: %s", e)
         return _fallback_plan(user_message, state)
@@ -170,6 +184,7 @@ async def _plan_with_gemini(
     *,
     model: str,
     temperature: float = 0.1,
+    system_prompt: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Use Gemini for planning (function calling). Requires google-generativeai."""
     from .tools import TOOL_DEFS
@@ -187,7 +202,7 @@ async def _plan_with_gemini(
         tools=[{"function_declarations": declarations}],
     )
 
-    prompt = f"{PLANNER_SYSTEM}\n\n{user_content}"
+    prompt = f"{system_prompt or PLANNER_SYSTEM}\n\n{user_content}"
 
     def _call():
         resp = gen_model.generate_content(

@@ -150,6 +150,12 @@ type Config = {
   ranking_policy?: RankingPolicy;
   ranking_edge_cases?: RankingEdgeCases;
   sponsorship_pricing?: SponsorshipPricing;
+  composite_discovery_config?: {
+    products_per_category?: number;
+    sponsorship_enabled?: boolean;
+    product_mix?: Array<{ sort: string; limit: number; pct: number }>;
+  };
+  enable_composite_bundle_suggestion?: boolean;
 };
 
 export function ConfigEditor() {
@@ -163,6 +169,7 @@ export function ConfigEditor() {
   const [externalApisExpanded, setExternalApisExpanded] = useState(true);
   const [rankingExpanded, setRankingExpanded] = useState(true);
   const [sponsorshipExpanded, setSponsorshipExpanded] = useState(true);
+  const [compositeDiscoveryExpanded, setCompositeDiscoveryExpanded] = useState(true);
   const [externalApiProviders, setExternalApiProviders] = useState<ExternalApiProvider[]>([]);
   const [addingExternalApi, setAddingExternalApi] = useState(false);
   const [externalApiForm, setExternalApiForm] = useState<Partial<ExternalApiProvider> & { api_key?: string }>({
@@ -260,6 +267,18 @@ export function ConfigEditor() {
             max_sponsored_per_query: sp.max_sponsored_per_query ?? 3,
             sponsorship_enabled: sp.sponsorship_enabled ?? true,
           },
+          composite_discovery_config: data.composite_discovery_config ?? {
+            products_per_category: 5,
+            sponsorship_enabled: true,
+            product_mix: [
+              { sort: "price_desc", limit: 10, pct: 50 },
+              { sort: "price_asc", limit: 10, pct: 20 },
+              { sort: "rating", limit: 10, pct: 10 },
+              { sort: "popularity", limit: 10, pct: 10 },
+              { sort: "sponsored", limit: 10, pct: 10 },
+            ],
+          },
+          enable_composite_bundle_suggestion: data.enable_composite_bundle_suggestion ?? true,
         });
       })
       .catch(() => {})
@@ -370,6 +389,8 @@ export function ConfigEditor() {
           ranking_policy: config.ranking_policy,
           ranking_edge_cases: config.ranking_edge_cases,
           sponsorship_pricing: config.sponsorship_pricing,
+          composite_discovery_config: config.composite_discovery_config,
+          enable_composite_bundle_suggestion: config.enable_composite_bundle_suggestion,
         }),
       });
       if (!res.ok) throw new Error("Failed");
@@ -1309,6 +1330,188 @@ export function ConfigEditor() {
                 }
                 className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
               />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
+        <button
+          type="button"
+          onClick={() => setCompositeDiscoveryExpanded((e) => !e)}
+          className="flex items-center justify-between w-full text-left font-medium"
+        >
+          Composite Discovery (Date Night, Bundles)
+          <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+            {compositeDiscoveryExpanded ? "−" : "+"}
+          </span>
+        </button>
+        {compositeDiscoveryExpanded && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Products per category for composite experiences (e.g. date night: flowers, dinner, movies).
+            </p>
+            <div>
+              <label className="block text-sm font-medium mb-1">Products per category</label>
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={config.composite_discovery_config?.products_per_category ?? 5}
+                onChange={(e) =>
+                  setConfig((c) => ({
+                    ...c,
+                    composite_discovery_config: {
+                      ...c.composite_discovery_config,
+                      products_per_category: Math.max(1, Math.min(10, Number(e.target.value) || 5)),
+                    },
+                  }))
+                }
+                className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+              />
+              <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+                (1–10, default 5)
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="composite-sponsorship"
+                checked={config.composite_discovery_config?.sponsorship_enabled ?? true}
+                onChange={(e) =>
+                  setConfig((c) => ({
+                    ...c,
+                    composite_discovery_config: {
+                      ...c.composite_discovery_config,
+                      sponsorship_enabled: e.target.checked,
+                    },
+                  }))
+                }
+                className="rounded border border-[rgb(var(--color-border))]"
+              />
+              <label htmlFor="composite-sponsorship" className="text-sm">
+                Apply sponsorship boost when ranking composite results
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="enable-bundle-suggestion"
+                checked={config.enable_composite_bundle_suggestion ?? true}
+                onChange={(e) =>
+                  setConfig((c) => ({ ...c, enable_composite_bundle_suggestion: e.target.checked }))
+                }
+                className="rounded border border-[rgb(var(--color-border))]"
+              />
+              <label htmlFor="enable-bundle-suggestion" className="text-sm">
+                Enable LLM bundle suggestions (2–4 options per composite experience)
+              </label>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Product Mix (slices by sort, % of results)</label>
+              <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-2">
+                Mix products from different sort criteria. Percentages should sum to 100.
+              </p>
+              {(config.composite_discovery_config?.product_mix ?? []).map((slice, i) => (
+                <div key={i} className="flex gap-2 items-center mb-2">
+                  <select
+                    value={slice.sort}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        composite_discovery_config: {
+                          ...c.composite_discovery_config,
+                          product_mix: (c.composite_discovery_config?.product_mix ?? []).map((s, j) =>
+                            j === i ? { ...s, sort: e.target.value } : s
+                          ),
+                        },
+                      }))
+                    }
+                    className="flex-1 px-2 py-1.5 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                  >
+                    <option value="price_desc">Price (high → low)</option>
+                    <option value="price_asc">Price (low → high)</option>
+                    <option value="rating">Rating</option>
+                    <option value="popularity">Popularity (most sold)</option>
+                    <option value="sponsored">Sponsored</option>
+                    <option value="recent">Recent</option>
+                  </select>
+                  <span className="text-sm text-[rgb(var(--color-text-secondary))]">Top</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={slice.limit}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        composite_discovery_config: {
+                          ...c.composite_discovery_config,
+                          product_mix: (c.composite_discovery_config?.product_mix ?? []).map((s, j) =>
+                            j === i ? { ...s, limit: Math.max(1, Math.min(50, Number(e.target.value) || 10)) } : s
+                          ),
+                        },
+                      }))
+                    }
+                    className="w-14 px-2 py-1.5 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={slice.pct}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        composite_discovery_config: {
+                          ...c.composite_discovery_config,
+                          product_mix: (c.composite_discovery_config?.product_mix ?? []).map((s, j) =>
+                            j === i ? { ...s, pct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) } : s
+                          ),
+                        },
+                      }))
+                    }
+                    className="w-16 px-2 py-1.5 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                  />
+                  <span className="text-sm">%</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfig((c) => ({
+                        ...c,
+                        composite_discovery_config: {
+                          ...c.composite_discovery_config,
+                          product_mix: (c.composite_discovery_config?.product_mix ?? []).filter((_, j) => j !== i),
+                        },
+                      }))
+                    }
+                    className="text-red-500 hover:underline text-sm"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setConfig((c) => ({
+                    ...c,
+                    composite_discovery_config: {
+                      ...c.composite_discovery_config,
+                      product_mix: [...(c.composite_discovery_config?.product_mix ?? []), { sort: "price_desc", limit: 10, pct: 20 }],
+                    },
+                  }))
+                }
+                className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+              >
+                + Add slice
+              </button>
+              {(() => {
+                const total = (config.composite_discovery_config?.product_mix ?? []).reduce((s, x) => s + (x.pct ?? 0), 0);
+                return total !== 100 && (config.composite_discovery_config?.product_mix ?? []).length > 0 ? (
+                  <p className="text-xs text-amber-600 mt-1">Percentages sum to {total}% (should be 100%)</p>
+                ) : null;
+              })()}
             </div>
           </div>
         )}

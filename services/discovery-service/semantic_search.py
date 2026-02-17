@@ -99,8 +99,8 @@ async def semantic_search(
         result = client.rpc("match_products", kwargs).execute()
         rows = result.data or []
 
-        # Normalize to dict with expected keys (created_at for ranking tie-breaker)
-        select_cols = ("id", "name", "description", "price", "currency", "capabilities", "metadata", "partner_id", "created_at")
+        # Normalize to dict with expected keys (created_at for ranking, sold_count for product_mix)
+        select_cols = ("id", "name", "description", "price", "currency", "capabilities", "metadata", "partner_id", "created_at", "sold_count")
         return [
             {k: r.get(k) for k in select_cols if k in r}
             for r in rows

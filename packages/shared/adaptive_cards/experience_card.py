@@ -1,6 +1,6 @@
 """Experience bundle Adaptive Card - grouped by category (e.g. date night: flowers, dinner, transport)."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .base import _filter_empty, container, create_card, strip_html, text_block
 
@@ -8,16 +8,65 @@ from .base import _filter_empty, container, create_card, strip_html, text_block
 def generate_experience_card(
     experience_name: str,
     categories: List[Dict[str, Any]],
+    suggested_bundle_product_ids: Optional[List[str]] = None,
+    suggested_bundle_options: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Generate Adaptive Card for experience bundle.
     Header: experience_name. Sections per category with products.
     Same actions per product: Add to Bundle, View Details.
+    When suggested_bundle_options (2-4 options): one "Add this bundle" per option.
+    When suggested_bundle_product_ids (single): one "Add curated bundle" button.
     """
     title = (experience_name or "experience").replace("_", " ").title()
     body: List[Dict[str, Any]] = [
         text_block(f"Your {title} bundle", size="Large", weight="Bolder"),
     ]
+
+    if suggested_bundle_options:
+        for opt in suggested_bundle_options:
+            label = opt.get("label", "Option")
+            product_ids = opt.get("product_ids") or []
+            total_price = opt.get("total_price")
+            desc = opt.get("description", "")
+            btn_title = f"Add {label}"
+            if total_price is not None:
+                btn_title = f"Add {label} (${float(total_price):.2f})"
+            body.append({
+                "type": "Container",
+                "items": [
+                    text_block(f"**{label}**" + (f" – {desc}" if desc else ""), size="Small"),
+                    {
+                        "type": "ActionSet",
+                        "actions": [
+                            {
+                                "type": "Action.Submit",
+                                "title": btn_title,
+                                "data": {
+                                    "action": "add_bundle_bulk",
+                                    "product_ids": product_ids,
+                                    "option_label": label,
+                                },
+                            },
+                        ],
+                    },
+                ],
+                "style": "emphasis",
+            })
+    elif suggested_bundle_product_ids:
+        body.append({
+            "type": "ActionSet",
+            "actions": [
+                {
+                    "type": "Action.Submit",
+                    "title": "Add curated bundle",
+                    "data": {
+                        "action": "add_bundle_bulk",
+                        "product_ids": suggested_bundle_product_ids,
+                    },
+                },
+            ],
+        })
 
     for cat in categories:
         query = cat.get("query", "products")

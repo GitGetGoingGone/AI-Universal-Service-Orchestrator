@@ -52,7 +52,7 @@ type ChatMessage = {
   adaptiveCard?: Record<string, unknown>;
 };
 
-const E2E_ACTIONS = ["add_to_bundle", "view_bundle", "remove_from_bundle", "checkout", "complete_checkout"];
+const E2E_ACTIONS = ["add_to_bundle", "add_bundle_bulk", "view_bundle", "remove_from_bundle", "checkout", "complete_checkout"];
 const STANDING_INTENT_ACTION = "approve_standing_intent";
 
 const MAX_DISCOVERY_CYCLE = 5;
@@ -587,6 +587,41 @@ export function ChatPage(props: ChatPageProps = {}) {
           if (bundleId) addPayload.bundle_id = bundleId;
 
           const res = await fetch("/api/bundle/add", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(addPayload),
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || "Add to bundle failed");
+
+          const newBundleId = json.bundle_id ?? json.data?.bundle_id;
+          if (newBundleId && threadId) {
+            setBundleId(newBundleId);
+            const patchBody = userId
+              ? { bundle_id: newBundleId, user_id: userId }
+              : { bundle_id: newBundleId, anonymous_id: anonymousId };
+            fetch(`/api/threads/${threadId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(patchBody),
+            }).catch(() => {});
+          } else if (newBundleId) {
+            setBundleId(newBundleId);
+          }
+
+          const addMsg = { role: "assistant" as const, content: json.summary || "Added to bundle.", adaptiveCard: json.adaptive_card };
+          addMessage(addMsg);
+          persistMessage(addMsg);
+          if (json.adaptive_card) return;
+        }
+
+        if (action === "add_bundle_bulk" && data.product_ids && Array.isArray(data.product_ids)) {
+          const addPayload: Record<string, unknown> = {
+            product_ids: data.product_ids,
+          };
+          if (bundleId) addPayload.bundle_id = bundleId;
+
+          const res = await fetch("/api/bundle/add-bulk", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(addPayload),

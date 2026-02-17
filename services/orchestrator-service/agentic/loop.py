@@ -138,7 +138,17 @@ async def _discover_composite(
     all_products: List[Dict[str, Any]] = []
     item_list_elements: List[Dict[str, Any]] = []
 
-    per_limit = max(5, limit // len(search_queries)) if search_queries else limit
+    # Use composite_discovery_config.products_per_category when available
+    try:
+        from api.admin import get_composite_discovery_config
+        cdc = get_composite_discovery_config()
+        per_cat = cdc.get("products_per_category")
+        if per_cat is not None and isinstance(per_cat, (int, float)):
+            per_limit = max(1, min(20, int(per_cat)))
+        else:
+            per_limit = max(5, limit // len(search_queries)) if search_queries else limit
+    except Exception:
+        per_limit = max(5, limit // len(search_queries)) if search_queries else limit
     for q in search_queries:
         if not q or not str(q).strip():
             continue
@@ -349,6 +359,49 @@ async def run_agentic_loop(
                 products_data = result.get("data", result)
                 adaptive_card = result.get("adaptive_card")
                 machine_readable = result.get("machine_readable")
+                # LLM-suggested bundle options: 2-4 options, each one product per category (when enabled)
+                if products_data and (products_data.get("categories") or products_data.get("products")):
+                    try:
+                        from api.admin import _get_platform_config
+                        cfg = _get_platform_config() or {}
+                        if cfg.get("enable_composite_bundle_suggestion", True) is False:
+                            pass  # Skip bundle suggestion when disabled
+                        else:
+                            from agentic.response import suggest_composite_bundle_options
+                            categories = products_data.get("categories") or []
+                            budget = _extract_budget(intent_data) if intent_data else None
+                            options = await suggest_composite_bundle_options(
+                                categories=categories,
+                                user_message=user_message,
+                                experience_name=products_data.get("experience_name", "experience"),
+                                budget_max=budget,
+                            )
+                            if options:
+                                engagement_data["suggested_bundle_options"] = options
+                                from packages.shared.adaptive_cards.experience_card import generate_experience_card
+                                adaptive_card = generate_experience_card(
+                                    products_data.get("experience_name", "experience"),
+                                    categories,
+                                    suggested_bundle_options=options,
+                                )
+                            else:
+                                from agentic.response import suggest_composite_bundle
+                                suggested = await suggest_composite_bundle(
+                                    categories=categories,
+                                    user_message=user_message,
+                                    experience_name=products_data.get("experience_name", "experience"),
+                                    budget_max=budget,
+                                )
+                                if suggested:
+                                    engagement_data["suggested_bundle_product_ids"] = suggested
+                                    from packages.shared.adaptive_cards.experience_card import generate_experience_card
+                                    adaptive_card = generate_experience_card(
+                                        products_data.get("experience_name", "experience"),
+                                        categories,
+                                        suggested_bundle_product_ids=suggested,
+                                    )
+                    except Exception as e:
+                        logger.warning("suggest_composite_bundle_options failed: %s", e)
             elif tool_name == "discover_products":
                 products_data = result.get("data", result)
                 adaptive_card = result.get("adaptive_card")

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from config import settings
-from db import get_product_by_id, get_products_for_acp_export, add_product_to_bundle, get_bundle_by_id, remove_from_bundle, create_order_from_bundle
+from db import get_product_by_id, get_products_for_acp_export, add_product_to_bundle, add_products_to_bundle_bulk, get_bundle_by_id, remove_from_bundle, create_order_from_bundle
 from scout_engine import search
 from protocols.acp_compliance import validate_product_acp
 from protocols.ucp_compliance import validate_product_ucp
@@ -24,6 +24,14 @@ class AddToBundleBody(BaseModel):
     """Request body for adding a product to a bundle."""
 
     product_id: str
+    user_id: Optional[str] = None
+    bundle_id: Optional[str] = None
+
+
+class AddBulkBody(BaseModel):
+    """Request body for adding multiple products to a bundle."""
+
+    product_ids: list[str]
     user_id: Optional[str] = None
     bundle_id: Optional[str] = None
 
@@ -323,6 +331,40 @@ async def proceed_to_checkout(request: Request, body: CheckoutBody):
             "priceCurrency": currency,
             "orderStatus": "CheckoutInitiated",
         },
+        "metadata": {
+            "api_version": "v1",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "request_id": request_id,
+        },
+    }
+
+
+@router.post("/bundle/add-bulk")
+async def add_to_bundle_bulk(request: Request, body: AddBulkBody):
+    """Add multiple products to a bundle. For Add curated bundle action."""
+    result = await add_products_to_bundle_bulk(
+        product_ids=body.product_ids,
+        user_id=body.user_id,
+        bundle_id=body.bundle_id,
+    )
+    if not result:
+        raise HTTPException(status_code=400, detail="Failed to add products to bundle (products not found or error)")
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    products_added = result.get("products_added", [])
+    total = float(result.get("total_price", 0))
+    curr = result.get("currency", "USD")
+    summary = f"Added {len(products_added)} item(s) to bundle. Total: {curr} {total:.2f}"
+    bundle_id = result.get("bundle_id")
+    adaptive_card = create_card(
+        body=[text_block(summary)],
+        actions=[
+            {"type": "Action.Submit", "title": "View Bundle", "data": {"action": "view_bundle", "bundle_id": str(bundle_id)}},
+        ],
+    ) if bundle_id else None
+    return {
+        "data": result,
+        "summary": summary,
+        "adaptive_card": adaptive_card,
         "metadata": {
             "api_version": "v1",
             "timestamp": datetime.utcnow().isoformat() + "Z",
