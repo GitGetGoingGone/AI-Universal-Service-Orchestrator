@@ -16,7 +16,7 @@ Given the current state (user message, previous actions, results, last_suggestio
 Rules:
 - For a NEW user message: first call resolve_intent to understand what they want.
 - If intent is "discover" (single category like chocolates, flowers): PREFER probing first. When the user message is generic (e.g. "show me chocolates", "chocolates", "flowers" with no preferences, occasion, budget, or add-ons), call complete with 1-2 friendly questions (e.g. "Any preferences? Occasion? Budget? Would you like to add something like flowers with that?"). Only call discover_products when the user has provided details or explicitly asks for options.
-- If intent is "discover_composite" (e.g. date night, birthday party): PREFER probing first. When the user message is generic (e.g. "plan a date night", "date night" with no date, budget, or preferences), call complete with 1-2 friendly questions (e.g. "What date? Any dietary preferences? Budget?"). Only call discover_composite when the user has provided details or explicitly asks for options.
+- If intent is "discover_composite" (e.g. date night, birthday party): PREFER probing first. When the user message is generic (e.g. "plan a date night", "date night" with no date, budget, or preferences), call complete with 1-2 friendly questions (e.g. "What date? Any dietary preferences? Budget?"). Only call discover_composite when the user has provided details or explicitly asks for options. When discover_composite returns products, prefer the best combination for the experience (e.g. date night: flowers + dinner + movie).
 - CRITICAL: When last_suggestion or recent_conversation shows we asked probing questions and the user NOW provides details, you MUST fetch products. For composite (date night, etc.): call resolve_intent then discover_composite. For single category (chocolates, flowers, etc.): call resolve_intent then discover_products. NEVER complete with "Done" or empty when the user has answered our questions—fetch products first.
 - When last_suggestion exists and user refines (e.g. "I don't want flowers, add a movie", "no flowers", "add chocolates instead"): resolve_intent will interpret the refinement. Use the new search_query from intent. For composite experiences, the intent may return updated search_queries.
 - If intent is checkout/track/support: you may complete with a message directing them.
@@ -25,6 +25,7 @@ Rules:
 - Call "complete" when you have a response ready for the user (e.g. probing questions, or products already fetched).
 - Prefer completing in one or two tool calls when possible.
 - Extract location from "around me" or "near X" for discover_products when relevant.
+- Engagement tools (optional): Use get_weather when user provides location for experiences. Use get_upcoming_occasions for local events when location given. Use web_search for ideas or trends. Call before/after discover_composite when user has location/date.
 """
 
 
@@ -90,6 +91,7 @@ async def plan_next_action(
 
     provider, client = _get_planner_client_for_config(llm_config)
     if not client:
+        logger.info("Planner: No LLM client (provider=%s), using fallback", provider)
         return _fallback_plan(user_message, state)
 
     model = llm_config.get("model") or "gpt-4o"
@@ -248,6 +250,21 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
             }
 
         if intent_type == "discover_composite":
+            # Probe first: generic "plan a date night" with no details -> ask questions
+            has_details = any(
+                e.get("type") in ("location", "budget")
+                for e in intent_data.get("entities", [])
+                if isinstance(e, dict)
+            )
+            if not has_details and not any(
+                w in (user_message or "").lower()
+                for w in ("$", "dollar", "vegetarian", "vegan", "dallas", "nyc", "budget", "around", "casual", "romantic")
+            ):
+                return {
+                    "action": "complete",
+                    "message": "I'd love to help you plan a perfect date night! To tailor the experience, could you tell me: 1) What date are you planning for? 2) Do you have a budget in mind? 3) Any dietary preferences? 4) Preferred location or area?",
+                    "reasoning": "Probing for date night details before fetching.",
+                }
             sq = intent_data.get("search_queries") or ["flowers", "dinner", "movies"]
             exp_name = intent_data.get("experience_name") or "experience"
             loc = None
@@ -264,6 +281,17 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                     "location": loc,
                 },
                 "reasoning": "Intent is discover_composite, fetching products.",
+            }
+
+    # When we have products from a prior tool (iteration >= 2), return empty message
+    # so chat uses generate_engagement_response instead of generic "Processed your request."
+    if iteration >= 2 and last_result:
+        data = last_result.get("data", last_result)
+        if data.get("products") or data.get("categories"):
+            return {
+                "action": "complete",
+                "message": "",
+                "reasoning": "",
             }
 
     return {

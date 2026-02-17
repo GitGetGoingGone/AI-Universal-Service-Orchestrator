@@ -1,5 +1,6 @@
-"""Platform admin: kill switch, SLA config."""
+"""Platform admin: kill switch, SLA config, test interaction."""
 
+import asyncio
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
@@ -12,6 +13,17 @@ from db import get_supabase
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 
+# Default sample messages per interaction type for test
+DEFAULT_SAMPLE_MESSAGES: Dict[str, str] = {
+    "intent": "Plan a date night",
+    "hybrid_response": "Where is my order?",
+    "planner": "User message: Plan a date night. Current state: { iteration: 0, last_tool_result: null }. What is your next action?",
+    "engagement_discover": "User said: show me flowers. Found 3 products: Red Roses ($49), Tulips ($35), Sunflowers ($29). Write a brief friendly response.",
+    "engagement_browse": "User is browsing with no specific query. Engage them conversationally.",
+    "engagement_discover_composite": "User asked for date night. Categories: flowers, dinner, movies. Found: Red Roses. No dinner or movies in catalog. Write a helpful response.",
+    "engagement_default": "User said: I want to checkout. What we did: Found their bundle with 2 items. Write a brief response.",
+}
+
 _llm_config_cache: Optional[Tuple[float, Dict[str, Any]]] = None
 LLM_CACHE_TTL_SEC = 60
 
@@ -20,6 +32,12 @@ class KillSwitchBody(BaseModel):
     active: bool = Field(..., description="True to activate, False to deactivate")
     reason: Optional[str] = Field(None, description="Reason for kill switch")
     activated_by: Optional[str] = Field(None, description="User ID of admin")
+
+
+class TestInteractionBody(BaseModel):
+    interaction_type: str = Field(..., description="e.g. intent, planner, engagement_discover")
+    sample_user_message: Optional[str] = Field(None, description="Override default sample message")
+    system_prompt_override: Optional[str] = Field(None, description="Use this prompt instead of saved (for testing edits)")
 
 
 def _get_platform_config() -> Optional[Dict[str, Any]]:
@@ -150,6 +168,74 @@ async def get_kill_switch_status() -> Dict[str, Any]:
         "reason": cfg.get("kill_switch_reason"),
         "activated_at": cfg.get("kill_switch_activated_at"),
     }
+
+
+@router.post("/test-interaction")
+async def test_interaction(body: TestInteractionBody) -> Dict[str, Any]:
+    """
+    Test an interaction with the configured model. Sends the interaction's system prompt
+    plus a sample user message, returns the model response. Use to verify connection
+    and tweak prompts.
+    """
+    llm_config = get_llm_config()
+    if not llm_config or not llm_config.get("api_key"):
+        raise HTTPException(status_code=503, detail="No LLM configured or API key missing.")
+
+    from packages.shared.platform_llm import get_llm_chat_client, get_model_interaction_prompt
+
+    client = get_supabase()
+    prompt_cfg = get_model_interaction_prompt(client, body.interaction_type) if client else None
+    system_prompt = body.system_prompt_override if body.system_prompt_override is not None else (
+        (prompt_cfg.get("system_prompt") if prompt_cfg else None) or ""
+    )
+    max_tokens = prompt_cfg.get("max_tokens", 500) if prompt_cfg else 500
+
+    user_message = body.sample_user_message or DEFAULT_SAMPLE_MESSAGES.get(
+        body.interaction_type, "Test message"
+    )
+
+    provider, chat_client = get_llm_chat_client(llm_config)
+    if not chat_client:
+        raise HTTPException(status_code=503, detail="Could not create LLM client for provider.")
+
+    model = llm_config.get("model") or "gpt-4o"
+    temperature = min(0.3, float(llm_config.get("temperature", 0.1)))
+
+    try:
+        if provider in ("azure", "openrouter", "custom", "openai"):
+            def _call():
+                return chat_client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt or "You are a helpful assistant."},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            response = await asyncio.to_thread(_call)
+            text = (response.choices[0].message.content or "").strip()
+            return {"response": text, "model": model, "interaction_type": body.interaction_type}
+
+        if provider == "gemini":
+            gen_model = chat_client.GenerativeModel(model)
+            def _call():
+                return gen_model.generate_content(
+                    f"{system_prompt or 'You are a helpful assistant.'}\n\nUser: {user_message}",
+                    generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
+                )
+            resp = await asyncio.to_thread(_call)
+            if resp and resp.candidates:
+                text = (getattr(resp, "text", None) or "").strip()
+                return {"response": text, "model": model, "interaction_type": body.interaction_type}
+            raise HTTPException(status_code=502, detail="Gemini returned no response")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Model call failed: {str(e)}")
+
+    raise HTTPException(status_code=503, detail="Unsupported provider for test")
 
 
 @router.get("/platform-config")

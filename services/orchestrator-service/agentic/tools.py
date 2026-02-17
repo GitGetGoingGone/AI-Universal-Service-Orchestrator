@@ -86,6 +86,41 @@ TOOL_DEFS = [
         },
     },
     {
+        "name": "web_search",
+        "description": "Search the web for local events, trends, ideas, or general information. Use when planning experiences (e.g. date night) to find ideas, local happenings, or special occasions. Requires web_search external API configured.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query (e.g. 'date night ideas San Francisco', 'events this weekend')"},
+                "max_results": {"type": "integer", "description": "Max results to return", "default": 5},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_weather",
+        "description": "Get current weather for a location. Use when user provides location/date for experiences (e.g. date night, outdoor plans). Requires weather external API configured.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City name or location (e.g. 'San Francisco', 'New York')"},
+            },
+            "required": ["location"],
+        },
+    },
+    {
+        "name": "get_upcoming_occasions",
+        "description": "Get upcoming events, concerts, or occasions for a location. Use when planning experiences with a location. Requires events external API configured.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City or location for events (e.g. 'San Francisco')"},
+                "limit": {"type": "integer", "description": "Max events to return", "default": 5},
+            },
+            "required": ["location"],
+        },
+    },
+    {
         "name": "complete",
         "description": "Finish the conversation and return the final response to the user. Use when you have enough information.",
         "parameters": {
@@ -168,6 +203,36 @@ def apply_guardrails(name: str, params: Dict[str, Any]) -> Tuple[Dict[str, Any],
         summary = (p.get("summary") or "").strip()
         p["summary"] = summary[:MAX_SUMMARY_LEN] if summary else "Done."
 
+    elif name == "web_search":
+        query = (p.get("query") or "").strip()
+        if not query:
+            return {}, "web_search requires non-empty query"
+        p["query"] = query[:MAX_QUERY_LEN]
+        max_results = p.get("max_results", 5)
+        try:
+            max_results = int(max_results) if max_results is not None else 5
+        except (TypeError, ValueError):
+            max_results = 5
+        p["max_results"] = max(LIMIT_MIN, min(20, max_results))
+
+    elif name == "get_weather":
+        loc = (p.get("location") or "").strip()
+        if not loc:
+            return {}, "get_weather requires non-empty location"
+        p["location"] = loc[:MAX_LOCATION_LEN]
+
+    elif name == "get_upcoming_occasions":
+        loc = (p.get("location") or "").strip()
+        if not loc:
+            return {}, "get_upcoming_occasions requires non-empty location"
+        p["location"] = loc[:MAX_LOCATION_LEN]
+        limit = p.get("limit", 5)
+        try:
+            limit = int(limit) if limit is not None else 5
+        except (TypeError, ValueError):
+            limit = 5
+        p["limit"] = max(LIMIT_MIN, min(20, limit))
+
     return p, None
 
 
@@ -180,6 +245,9 @@ async def execute_tool(
     discover_composite_fn: Optional[Callable] = None,
     start_orchestration_fn: Optional[Callable] = None,
     create_standing_intent_fn: Optional[Callable] = None,
+    web_search_fn: Optional[Callable] = None,
+    get_weather_fn: Optional[Callable] = None,
+    get_upcoming_occasions_fn: Optional[Callable] = None,
 ) -> Dict[str, Any]:
     """
     Execute a tool by name with given parameters.
@@ -237,6 +305,27 @@ async def execute_tool(
             approval_timeout_hours=params.get("approval_timeout_hours", 24),
             platform=params.get("platform"),
             thread_id=params.get("thread_id"),
+        )
+
+    if name == "web_search":
+        if not web_search_fn:
+            return {"error": "web_search not configured (add web_search external API in Platform Config)"}
+        return await web_search_fn(
+            query=params.get("query", ""),
+            max_results=params.get("max_results", 5),
+        )
+
+    if name == "get_weather":
+        if not get_weather_fn:
+            return {"error": "get_weather not configured (add weather external API in Platform Config)"}
+        return await get_weather_fn(location=params.get("location", ""))
+
+    if name == "get_upcoming_occasions":
+        if not get_upcoming_occasions_fn:
+            return {"error": "get_upcoming_occasions not configured (add events external API in Platform Config)"}
+        return await get_upcoming_occasions_fn(
+            location=params.get("location", ""),
+            limit=params.get("limit", 5),
         )
 
     if name == "complete":

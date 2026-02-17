@@ -21,6 +21,7 @@ End-to-end testing for the full stack: backend services on **Render**, Partner P
    - `supabase/migrations/20250128000008_chat_threads.sql` (chat_threads, chat_messages for unified chat persistence)
    - `supabase/migrations/20250128000009_platform_config_llm.sql` (llm_provider, llm_model, llm_temperature)
    - `supabase/migrations/20250128000010_partner_ranking.sql` (ranking_policy, sponsorship_pricing, product_sponsorships)
+   - `supabase/migrations/20250128000018_external_api_providers.sql` (external_api_providers, active_external_api_ids)
 
 3. **Orchestrator env (Render)**  
    On **uso-orchestrator** → Environment, set:
@@ -579,11 +580,56 @@ If your user is in `platform_admins` (by `clerk_user_id`), you can access **Plat
 
 | Section | Settings | Purpose |
 |---------|----------|---------|
-| **LLM Settings** | Provider (Azure/Gemini), Model, Creativity (0–1) | Orchestrator planner uses these for LLM calls |
+| **LLM Settings** | Provider (Azure/Gemini/OpenRouter), Model, Creativity (0–1) | Orchestrator planner uses these for LLM calls |
+| **External APIs** | web_search, weather, events providers; API keys; "Use for [type]" | Engagement tools (get_weather, web_search, get_upcoming_occasions) use these |
 | **Partner Ranking** | Enable ranking, strategy, weights (price, rating, commission, trust), price direction | Discovery applies ranking when `ranking_enabled` is true |
 | **Sponsorship** | Enable sponsorship, price per day (cents), max sponsored per query | Product sponsorship pricing and limits |
+| **Model Interactions** | System prompts per interaction type; Try button | Planner, engagement, intent prompts; test before save |
 
 **Test:** Sign in as platform admin → Platform → Config → edit LLM/ranking/sponsorship → Save. Verify orchestrator uses LLM config (e.g. switch provider) and discovery applies ranking.
+
+### Runtime External API Config
+
+**Prerequisite:** Migration `20250128000018_external_api_providers.sql` applied.
+
+1. Sign in as platform admin → **Platform** → **Config**.
+2. Expand **External APIs (Events, Weather, Web Search)**.
+3. Click **+ Add external API**.
+4. Fill in: Name (e.g. "Tavily Search"), API Type (web_search / weather / events), Base URL (optional), API Key.
+5. Click **Save**. Verify the provider appears in the list.
+6. Click **Use for [api_type]** on a provider. Confirm the "Active for [api_type]" badge appears.
+7. Verify `platform_config.active_external_api_ids` is updated (e.g. via Supabase dashboard or GET /api/platform/config).
+
+### Engagement Tools (web_search, weather, occasions)
+
+**Prerequisite:** At least one external API provider configured and set active per type (see Runtime External API Config).
+
+1. Send a chat message with location and/or date, e.g. "plan a date night in San Francisco this Saturday".
+2. The planner may call `get_weather`, `get_upcoming_occasions`, or `web_search` before or after `discover_composite`.
+3. **Expected:** Response includes engagement context (weather, events, or web search results) along with product cards when products exist.
+4. **Fallback:** If no provider is configured for a type, the tool returns an error; the planner continues without that engagement data.
+
+### Test Interaction Try Button
+
+1. Sign in as platform admin → **Platform** → **Config**.
+2. Expand **Model Interactions**.
+3. Expand an interaction (e.g. planner, engagement_discover).
+4. Click the **Try** button.
+5. **Expected:** A response or error appears (uses saved system prompt + default sample message).
+6. Edit the system prompt (unsaved), click Try again with the override option. **Expected:** The override prompt is used.
+
+### Date Night Flow (Probing, Products, Engagement)
+
+1. Send **"date night"** (generic). **Expected:** Probing questions (date, budget, preferences).
+2. Send **"this Saturday, $100 budget, vegetarian"** (answers). **Expected:** Products (flowers, dinner, movies) and a conversational engagement message (not "Processed your request" or "Done").
+3. **Verify:** The `summary` or response text is conversational and references products/categories.
+
+### gpt-oss-120b Configuration
+
+1. Sign in as platform admin → **Platform** → **Config** → **LLM Providers**.
+2. Add a provider: OpenRouter, model `openai/gpt-oss-120b`, API key from [openrouter.ai](https://openrouter.ai).
+3. Set as active. Run a chat request.
+4. **Expected:** Planner uses gpt-oss-120b. See [GPT_OSS_120B.md](./GPT_OSS_120B.md) for details.
 
 ### Product sponsorship (partner portal)
 
@@ -708,6 +754,11 @@ curl -s -X POST "$HYBRID_RESPONSE/api/v1/classify-and-route" -H "Content-Type: a
 | Portal Push (Products) | Products → Push to AI catalog + table Last pushed/Status | Push to ChatGPT/Gemini/both; 15-min throttle; per-product status |
 | Portal product ACP/UCP | Product edit → URL, brand, eligibility, Validate, Push | Fields persist; validate shows ACP/UCP result; push works (scope=single) |
 | Platform Admin config | Platform → Config (LLM, Ranking, Sponsorship) | LLM/ranking/sponsorship settings save; orchestrator and discovery use them |
+| External API Config | Portal → Config → External APIs | Add provider, set active, verify in DB |
+| Engagement tools | Chat with location/date | Weather, events, or web search context in response (when configured) |
+| Test interaction Try | Config → Model Interactions → Try | Response or error shown; override works |
+| Date night flow | "date night" → probing → answer | Probing first; products + engagement message after |
+| gpt-oss-120b | LLM provider + model openai/gpt-oss-120b | Planner uses configured model |
 | Product sponsorship | Product edit → Sponsor this product | Duration selector; Stripe payment; product_sponsorships created on success |
 | Unified Chat | Chat, threads, checkout, standing intents | Chat works; threads persist; Recent dropdown; checkout with Stripe; approval cards |
 | Task Queue (Module 11) | POST /api/v1/orders/{id}/tasks, GET /api/v1/tasks, start/complete | Creates tasks from order legs; partner list; start/complete updates status |

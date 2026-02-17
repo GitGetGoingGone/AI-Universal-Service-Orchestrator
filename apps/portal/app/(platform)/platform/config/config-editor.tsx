@@ -121,6 +121,18 @@ type ModelInteractionPrompt = {
   display_order: number;
 };
 
+type ExternalApiProvider = {
+  id: string;
+  name: string;
+  api_type: string;
+  base_url: string | null;
+  has_key: boolean;
+  enabled: boolean;
+  display_order: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
 type Config = {
   id?: string;
   commission_rate_pct?: number;
@@ -130,6 +142,7 @@ type Config = {
   feature_flags?: Record<string, boolean>;
   active_llm_provider_id?: string | null;
   active_image_provider_id?: string | null;
+  active_external_api_ids?: Record<string, string>;
   llm_provider?: string;
   llm_model?: string;
   llm_temperature?: number;
@@ -147,14 +160,26 @@ export function ConfigEditor() {
   const [llmProvidersExpanded, setLlmProvidersExpanded] = useState(true);
   const [imageProvidersExpanded, setImageProvidersExpanded] = useState(true);
   const [modelInteractionsExpanded, setModelInteractionsExpanded] = useState(true);
+  const [externalApisExpanded, setExternalApisExpanded] = useState(true);
   const [rankingExpanded, setRankingExpanded] = useState(true);
   const [sponsorshipExpanded, setSponsorshipExpanded] = useState(true);
+  const [externalApiProviders, setExternalApiProviders] = useState<ExternalApiProvider[]>([]);
+  const [addingExternalApi, setAddingExternalApi] = useState(false);
+  const [externalApiForm, setExternalApiForm] = useState<Partial<ExternalApiProvider> & { api_key?: string }>({
+    name: "",
+    api_type: "web_search",
+    base_url: "",
+    api_key: "",
+  });
   const [llmProviders, setLlmProviders] = useState<LLMProvider[]>([]);
   const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null);
   const [addingNew, setAddingNew] = useState(false);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [modelInteractions, setModelInteractions] = useState<ModelInteractionPrompt[]>([]);
   const [savingModelInteractions, setSavingModelInteractions] = useState(false);
+  const [testResultByInteraction, setTestResultByInteraction] = useState<
+    Record<string, { response?: string; error?: string; loading?: boolean }>
+  >({});
   const [providerForm, setProviderForm] = useState<Partial<LLMProvider> & { api_key?: string }>({
     name: "",
     provider_type: "azure",
@@ -183,6 +208,16 @@ export function ConfigEditor() {
     }
   }, []);
 
+  const fetchExternalApis = useCallback(async () => {
+    try {
+      const res = await fetch("/api/platform/external-api-providers");
+      const data = await res.json();
+      if (!data.detail) setExternalApiProviders(Array.isArray(data) ? data : []);
+    } catch {
+      setExternalApiProviders([]);
+    }
+  }, []);
+
   useEffect(() => {
     fetch("/api/platform/config")
       .then((res) => res.json())
@@ -199,6 +234,7 @@ export function ConfigEditor() {
           feature_flags: data.feature_flags ?? {},
           active_llm_provider_id: data.active_llm_provider_id ?? null,
           active_image_provider_id: data.active_image_provider_id ?? null,
+          active_external_api_ids: data.active_external_api_ids ?? {},
           llm_provider: data.llm_provider ?? "azure",
           llm_model: data.llm_model ?? "gpt-4o",
           llm_temperature: Number(data.llm_temperature ?? 0.1),
@@ -237,6 +273,10 @@ export function ConfigEditor() {
   useEffect(() => {
     if (!loading) fetchModelInteractions();
   }, [loading, fetchModelInteractions]);
+
+  useEffect(() => {
+    if (!loading) fetchExternalApis();
+  }, [loading, fetchExternalApis]);
 
   useEffect(() => {
     if (providerForm.provider_type === "openrouter" && openRouterModels.length === 0) {
@@ -664,6 +704,149 @@ export function ConfigEditor() {
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
+          onClick={() => setExternalApisExpanded((e) => !e)}
+          className="flex items-center justify-between w-full text-left font-medium"
+        >
+          External APIs (Events, Weather, Web Search)
+          <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+            {externalApisExpanded ? "−" : "+"}
+          </span>
+        </button>
+        {externalApisExpanded && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Add external APIs for engagement tools (events, weather, web search). Keys are encrypted. Select which provider to use per type.
+            </p>
+            {addingExternalApi && (
+              <div className="rounded border border-[rgb(var(--color-border))] p-4 space-y-3">
+                <h4 className="font-medium">Add External API</h4>
+                <div>
+                  <label className="block text-sm mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={externalApiForm.name ?? ""}
+                    onChange={(e) => setExternalApiForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g. Tavily Search"
+                    className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">API Type</label>
+                  <select
+                    value={externalApiForm.api_type ?? "web_search"}
+                    onChange={(e) => setExternalApiForm((f) => ({ ...f, api_type: e.target.value }))}
+                    className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  >
+                    <option value="web_search">Web Search</option>
+                    <option value="weather">Weather</option>
+                    <option value="events">Events</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">Base URL (optional for some APIs)</label>
+                  <input
+                    type="text"
+                    value={externalApiForm.base_url ?? ""}
+                    onChange={(e) => setExternalApiForm((f) => ({ ...f, base_url: e.target.value }))}
+                    placeholder="https://api.tavily.com"
+                    className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">API Key</label>
+                  <input
+                    type="password"
+                    value={externalApiForm.api_key ?? ""}
+                    onChange={(e) => setExternalApiForm((f) => ({ ...f, api_key: e.target.value }))}
+                    placeholder="Your API key"
+                    className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={async () => {
+                      try {
+                        const res = await fetch("/api/platform/external-api-providers", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            name: externalApiForm.name,
+                            api_type: externalApiForm.api_type,
+                            base_url: externalApiForm.base_url || undefined,
+                            api_key: externalApiForm.api_key || undefined,
+                          }),
+                        });
+                        if (!res.ok) throw new Error("Failed");
+                        setAddingExternalApi(false);
+                        setExternalApiForm({ name: "", api_type: "web_search", base_url: "", api_key: "" });
+                        fetchExternalApis();
+                      } catch {
+                        alert("Failed to add external API");
+                      }
+                    }}
+                  >
+                    Save
+                  </Button>
+                  <Button variant="outline" onClick={() => setAddingExternalApi(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+            {externalApiProviders.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between gap-4 rounded border border-[rgb(var(--color-border))] p-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">{p.name}</span>
+                  <span className="ml-2 text-sm text-[rgb(var(--color-text-secondary))]">
+                    {p.api_type}
+                    {p.base_url && ` · ${p.base_url}`}
+                  </span>
+                  {config.active_external_api_ids?.[p.api_type] === p.id && (
+                    <span className="ml-2 rounded bg-[rgb(var(--color-primary))]/20 px-2 py-0.5 text-xs">
+                      Active for {p.api_type}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const next = { ...(config.active_external_api_ids ?? {}), [p.api_type]: p.id };
+                    setConfig((c) => ({ ...c, active_external_api_ids: next }));
+                    try {
+                      await fetch("/api/platform/config", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ active_external_api_ids: next }),
+                      });
+                    } catch {
+                      alert("Failed to set external API");
+                    }
+                  }}
+                  className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                >
+                  Use for {p.api_type}
+                </button>
+              </div>
+            ))}
+            {!addingExternalApi && (
+              <button
+                type="button"
+                onClick={() => setAddingExternalApi(true)}
+                className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+              >
+                + Add external API
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
+        <button
+          type="button"
           onClick={() => setModelInteractionsExpanded((e) => !e)}
           className="flex items-center justify-between w-full text-left font-medium"
         >
@@ -676,7 +859,7 @@ export function ConfigEditor() {
           <div className="mt-4 space-y-6">
             <p className="text-sm text-[rgb(var(--color-text-secondary))]">
               Edit system prompts per interaction type. Changes apply without redeployment. Empty prompt
-              uses code default.
+              uses code default. Use <strong>Try</strong> to test each interaction with the active model—verifies connection and helps tweak prompts.
             </p>
             {modelInteractions.map((m) => (
               <div
@@ -711,7 +894,7 @@ export function ConfigEditor() {
                     className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] font-mono text-sm"
                   />
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 flex-wrap">
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -749,7 +932,75 @@ export function ConfigEditor() {
                       className="w-20 px-2 py-1 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
                     />
                   </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={testResultByInteraction[m.interaction_type]?.loading}
+                    onClick={async () => {
+                      setTestResultByInteraction((prev) => ({
+                        ...prev,
+                        [m.interaction_type]: { loading: true },
+                      }));
+                      try {
+                        const res = await fetch("/api/platform/model-interactions/test", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            interaction_type: m.interaction_type,
+                            system_prompt_override: m.system_prompt || undefined,
+                          }),
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) {
+                          setTestResultByInteraction((prev) => ({
+                            ...prev,
+                            [m.interaction_type]: {
+                              error: data.detail || "Test failed",
+                            },
+                          }));
+                        } else {
+                          setTestResultByInteraction((prev) => ({
+                            ...prev,
+                            [m.interaction_type]: {
+                              response: data.response,
+                              error: undefined,
+                            },
+                          }));
+                        }
+                      } catch {
+                        setTestResultByInteraction((prev) => ({
+                          ...prev,
+                          [m.interaction_type]: { error: "Request failed" },
+                        }));
+                      }
+                    }}
+                  >
+                    {testResultByInteraction[m.interaction_type]?.loading
+                      ? "Testing..."
+                      : "Try"}
+                  </Button>
                 </div>
+                {testResultByInteraction[m.interaction_type]?.response && (
+                  <div className="mt-3 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]/50 p-3">
+                    <p className="text-xs font-medium text-[rgb(var(--color-text-secondary))] mb-1">
+                      Model response
+                    </p>
+                    <pre className="text-sm whitespace-pre-wrap break-words font-sans">
+                      {testResultByInteraction[m.interaction_type].response}
+                    </pre>
+                  </div>
+                )}
+                {testResultByInteraction[m.interaction_type]?.error && (
+                  <div className="mt-3 rounded border border-red-500/50 bg-red-500/10 p-3">
+                    <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">
+                      Error
+                    </p>
+                    <p className="text-sm">
+                      {testResultByInteraction[m.interaction_type].error}
+                    </p>
+                  </div>
+                )}
               </div>
             ))}
             <Button

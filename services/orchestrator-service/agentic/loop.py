@@ -3,15 +3,123 @@
 import logging
 from typing import Any, Dict, List, Optional
 
+import httpx
+
 from .planner import plan_next_action
 from .tools import execute_tool
 
 logger = logging.getLogger(__name__)
 
+HTTP_TIMEOUT = 15.0
+
 
 def _get_llm_config() -> Dict[str, Any]:
     from api.admin import get_llm_config
     return get_llm_config()
+
+
+async def _web_search(query: str, max_results: int = 5) -> Dict[str, Any]:
+    """Call web search API (Tavily or compatible)."""
+    from db import get_supabase
+    from packages.shared.external_api import get_external_api_config
+
+    client = get_supabase()
+    cfg = get_external_api_config(client, "web_search") if client else None
+    if not cfg or not cfg.get("api_key"):
+        return {"error": "web_search not configured (add web_search external API in Platform Config)"}
+
+    base_url = (cfg.get("base_url") or "https://api.tavily.com").rstrip("/")
+    url = f"{base_url}/search" if not base_url.endswith("/search") else base_url
+    api_key = cfg.get("api_key", "")
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as http:
+            # Tavily: POST with api_key in body or Authorization header
+            body = {"query": query, "search_depth": "basic", "max_results": min(max_results, 20)}
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            resp = await http.post(url, json=body, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("results", data.get("answer", []))
+            if isinstance(results, str):
+                results = [{"content": results}]
+            return {"data": {"results": results[:max_results], "query": query}}
+    except Exception as e:
+        logger.warning("web_search failed: %s", e)
+        return {"error": str(e)}
+
+
+async def _get_weather(location: str) -> Dict[str, Any]:
+    """Call weather API (OpenWeatherMap or compatible)."""
+    from db import get_supabase
+    from packages.shared.external_api import get_external_api_config
+
+    client = get_supabase()
+    cfg = get_external_api_config(client, "weather") if client else None
+    if not cfg or not cfg.get("api_key"):
+        return {"error": "get_weather not configured (add weather external API in Platform Config)"}
+
+    base_url = (cfg.get("base_url") or "https://api.openweathermap.org").rstrip("/")
+    api_key = cfg.get("api_key", "")
+    extra = cfg.get("extra_config") or {}
+    # OpenWeatherMap: ?q=city&appid=key. Some use lat/lon from extra_config.
+    params = {"q": location, "appid": api_key, "units": extra.get("units", "imperial")}
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as http:
+            resp = await http.get(f"{base_url}/data/2.5/weather", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            main = data.get("main", {})
+            weather = (data.get("weather") or [{}])[0]
+            return {
+                "data": {
+                    "location": location,
+                    "temp": main.get("temp"),
+                    "feels_like": main.get("feels_like"),
+                    "description": weather.get("description", ""),
+                    "humidity": main.get("humidity"),
+                }
+            }
+    except Exception as e:
+        logger.warning("get_weather failed: %s", e)
+        return {"error": str(e)}
+
+
+async def _get_upcoming_occasions(location: str, limit: int = 5) -> Dict[str, Any]:
+    """Call events API (Ticketmaster Discovery or compatible)."""
+    from db import get_supabase
+    from packages.shared.external_api import get_external_api_config
+
+    client = get_supabase()
+    cfg = get_external_api_config(client, "events") if client else None
+    if not cfg or not cfg.get("api_key"):
+        return {"error": "get_upcoming_occasions not configured (add events external API in Platform Config)"}
+
+    base_url = (cfg.get("base_url") or "https://app.ticketmaster.com/discovery/v2").rstrip("/")
+    api_key = cfg.get("api_key", "")
+    # Ticketmaster: /events.json?apikey=KEY&city=SanFrancisco
+    params = {"apikey": api_key, "city": location.replace(" ", ""), "size": min(limit, 20)}
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as http:
+            url = f"{base_url}/events.json" if not base_url.endswith(".json") else base_url
+            resp = await http.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            events = data.get("_embedded", {}).get("events", [])
+            out = []
+            for e in events[:limit]:
+                name = e.get("name", "")
+                url = e.get("url", "")
+                dates = e.get("dates", {}).get("start", {})
+                out.append({"name": name, "url": url, "date": dates.get("localDate"), "time": dates.get("localTime")})
+            return {"data": {"events": out, "location": location}}
+    except Exception as e:
+        logger.warning("get_upcoming_occasions failed: %s", e)
+        return {"error": str(e)}
 
 
 async def _discover_composite(
@@ -127,6 +235,7 @@ async def run_agentic_loop(
     products_data = None
     adaptive_card = None
     machine_readable = None
+    engagement_data: Dict[str, Any] = {}
 
     llm_config = _get_llm_config()
 
@@ -215,6 +324,9 @@ async def run_agentic_loop(
                 discover_composite_fn=_discover_composite_fn,
                 start_orchestration_fn=start_orchestration_fn,
                 create_standing_intent_fn=create_standing_intent_fn,
+                web_search_fn=_web_search,
+                get_weather_fn=_get_weather,
+                get_upcoming_occasions_fn=_get_upcoming_occasions,
             )
 
             state["last_tool_result"] = result
@@ -227,6 +339,12 @@ async def run_agentic_loop(
             if tool_name == "resolve_intent":
                 intent_data = result.get("data", result)
                 # Don't auto-fetch for discover_composite; let planner decide (probe first or fetch)
+            elif tool_name == "web_search":
+                engagement_data["web_search"] = result.get("data", result)
+            elif tool_name == "get_weather":
+                engagement_data["weather"] = result.get("data", result)
+            elif tool_name == "get_upcoming_occasions":
+                engagement_data["occasions"] = result.get("data", result)
             elif tool_name == "discover_composite":
                 products_data = result.get("data", result)
                 adaptive_card = result.get("adaptive_card")
@@ -253,6 +371,7 @@ async def run_agentic_loop(
         agent_reasoning=state.get("agent_reasoning", []),
         user_message=user_message,
         error=state.get("last_error"),
+        engagement_data=engagement_data,
     )
     planner_msg = state.get("planner_complete_message", "").strip()
     if planner_msg:
@@ -352,6 +471,7 @@ def _build_response(
     agent_reasoning: Optional[list] = None,
     user_message: str = "",
     error: Optional[str] = None,
+    engagement_data: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build unified chat response."""
     intent_data = intent_data or {}
@@ -380,6 +500,8 @@ def _build_response(
         "adaptive_card": adaptive_card,
         "agent_reasoning": agent_reasoning or [],
     }
+    if engagement_data:
+        out["data"]["engagement"] = engagement_data
     if error:
         out["data"]["error"] = error
         out["error"] = error

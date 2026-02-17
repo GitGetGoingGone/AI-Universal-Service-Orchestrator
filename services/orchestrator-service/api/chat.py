@@ -164,8 +164,16 @@ async def chat(
             adaptive_card = {**adaptive_card, "body": card_body}
 
     # If planner chose to complete with a message (e.g. probing questions), use it
+    # Unless it's generic and we have products - then prefer engagement response
     planner_message = (result.get("planner_complete_message") or "").strip()
-    if planner_message:
+    pd = result.get("data", {}).get("products")
+    has_products = bool(
+        pd and isinstance(pd, dict) and (pd.get("products") or pd.get("categories"))
+    )
+    generic_messages = ("processed your request.", "done.", "done")
+    if planner_message and not (
+        has_products and planner_message.lower() in generic_messages
+    ):
         summary = planner_message
     else:
         summary = await generate_engagement_response(body.text, result)

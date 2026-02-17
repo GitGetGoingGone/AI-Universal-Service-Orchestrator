@@ -34,10 +34,26 @@ def _build_context(result: Dict[str, Any]) -> str:
     data = result.get("data") or {}
     intent = data.get("intent") or {}
     products = data.get("products") or {}
+    engagement = data.get("engagement") or {}
 
     parts = []
     intent_type = intent.get("intent_type", "unknown")
     parts.append(f"Intent: {intent_type}")
+
+    # Add engagement context (weather, events, web search) when available
+    if engagement:
+        eng_parts = []
+        if engagement.get("weather"):
+            w = engagement["weather"]
+            eng_parts.append(f"Weather in {w.get('location', '')}: {w.get('description', '')} ({w.get('temp')}°F)" if w.get("temp") else f"Weather: {w.get('description', '')}")
+        if engagement.get("occasions", {}).get("events"):
+            evts = engagement["occasions"]["events"][:3]
+            eng_parts.append(f"Upcoming events: {', '.join(e.get('name', '') for e in evts if e.get('name'))}")
+        if engagement.get("web_search", {}).get("results"):
+            res = engagement["web_search"]["results"][:2]
+            eng_parts.append(f"Web search: {'; '.join((str(r.get('content', r.get('title', '')) or '')[:80] for r in res if isinstance(r, dict)))}")
+        if eng_parts:
+            parts.append("Engagement context: " + ". ".join(eng_parts))
 
     if intent_type in ("checkout", "track", "support"):
         parts.append(f"User needs help with {intent_type}. Direct them appropriately.")
@@ -46,11 +62,38 @@ def _build_context(result: Dict[str, Any]) -> str:
     elif intent_type == "discover_composite":
         exp_name = products.get("experience_name", "experience")
         categories = products.get("categories") or []
+        product_list = products.get("products") if isinstance(products, dict) else []
         cat_names = [c.get("query", "") for c in categories if isinstance(c, dict) and c.get("query")]
-        parts.append(
-            f"User asked for experience: {exp_name}. Categories they want: {', '.join(cat_names) or 'products'}. "
-            "You are a concierge — guide them through a structured flow to gather details for each category. Do NOT list products."
-        )
+        if product_list or categories:
+            # We have fetched products - present as curated bundle
+            all_items = []
+            for c in categories:
+                if isinstance(c, dict):
+                    for p in c.get("products", [])[:3]:
+                        if isinstance(p, dict):
+                            pr = p.get("price")
+                            s = p.get("name", "Item")
+                            if pr is not None:
+                                s += f" ({p.get('currency', 'USD')} {pr})"
+                            all_items.append(s)
+            if not all_items and product_list:
+                for p in (product_list[:6] if isinstance(product_list, list) else []):
+                    if isinstance(p, dict):
+                        pr = p.get("price")
+                        s = p.get("name", "Item")
+                        if pr is not None:
+                            s += f" ({p.get('currency', 'USD')} {pr})"
+                        all_items.append(s)
+            parts.append(
+                f"User asked for {exp_name}. Found products in: {', '.join(cat_names) or 'categories'}. "
+                f"Present as a curated bundle. Product data: {'; '.join(all_items[:10])}. "
+                "Mention Add to bundle / Book now. Be warm and helpful."
+            )
+        else:
+            parts.append(
+                f"User asked for experience: {exp_name}. Categories they want: {', '.join(cat_names) or 'products'}. "
+                "You are a concierge — guide them through a structured flow to gather details for each category. Do NOT list products."
+            )
     else:
         product_list = products.get("products") if isinstance(products, dict) else []
         if not product_list and isinstance(products, list):
