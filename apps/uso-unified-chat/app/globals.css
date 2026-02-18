@@ -26,10 +26,10 @@ body {
   overflow-x: hidden;
 }
 
-/* Adaptive Cards host overrides */
+/* Adaptive Cards host overrides - no borders */
 .aco-adaptiveCard {
   background: var(--card) !important;
-  border: 1px solid var(--border) !important;
+  border: none !important;
   border-radius: 12px !important;
   width: 100% !important;
   max-width: 100% !important;
@@ -58,7 +58,7 @@ body {
 .chat-window .ac-columnSet,
 .chat-window .ac-column {
   background: var(--card) !important;
-  border-color: var(--border) !important;
+  border: none !important;
   color: var(--card-foreground) !important;
 }
 
@@ -76,7 +76,7 @@ body {
   background: transparent !important;
 }
 
-/* Force dark backgrounds on all card structure elements */
+/* Force dark backgrounds and remove borders on all card structure elements */
 .chat-window .ac-adaptiveCard,
 .chat-window .aco-adaptiveCard,
 .chat-window .ac-container,
@@ -85,6 +85,16 @@ body {
 .chat-window .ac-actionSet {
   background-color: var(--card) !important;
   background: var(--card) !important;
+  border: none !important;
+}
+
+/* Remove borders from adaptive cards globally */
+.ac-adaptiveCard,
+.aco-adaptiveCard,
+.ac-container,
+.ac-columnSet,
+.ac-column {
+  border: none !important;
 }
 
 /* Typing animation - staggered bounce for dots */

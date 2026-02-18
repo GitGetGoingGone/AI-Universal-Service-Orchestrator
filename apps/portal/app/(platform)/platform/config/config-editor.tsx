@@ -170,6 +170,7 @@ export function ConfigEditor() {
   const [rankingExpanded, setRankingExpanded] = useState(true);
   const [sponsorshipExpanded, setSponsorshipExpanded] = useState(true);
   const [compositeDiscoveryExpanded, setCompositeDiscoveryExpanded] = useState(true);
+  const [activeTab, setActiveTab] = useState<"general" | "llm" | "discovery" | "integrations">("general");
   const [externalApiProviders, setExternalApiProviders] = useState<ExternalApiProvider[]>([]);
   const [addingExternalApi, setAddingExternalApi] = useState(false);
   const [externalApiForm, setExternalApiForm] = useState<Partial<ExternalApiProvider> & { api_key?: string }>({
@@ -403,10 +404,45 @@ export function ConfigEditor() {
 
   if (loading) return <p className="text-[rgb(var(--color-text-secondary))]">Loading...</p>;
 
+  const TABS = [
+    { id: "general" as const, label: "General", description: "Commission, discovery threshold, and feature flags" },
+    { id: "llm" as const, label: "LLM & AI", description: "Providers, image generation, model interactions" },
+    { id: "discovery" as const, label: "Discovery & Ranking", description: "Partner ranking, sponsorship, composite discovery" },
+    { id: "integrations" as const, label: "Integrations", description: "External APIs for events, weather, web search" },
+  ];
+
   return (
     <div className="space-y-6 max-w-xl">
-      <div>
-        <label className="block text-sm font-medium mb-1">Commission Rate (%)</label>
+      <div className="border-b border-[rgb(var(--color-border))]">
+        <div className="flex gap-1 overflow-x-auto">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActiveTab(t.id)}
+              className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                activeTab === t.id
+                  ? "border-[rgb(var(--color-primary))] text-[rgb(var(--color-primary))]"
+                  : "border-transparent text-[rgb(var(--color-text-secondary))] hover:text-[rgb(var(--color-text))] hover:border-[rgb(var(--color-border))]"
+              }`}
+              title={t.description}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeTab === "general" && (
+        <div className="space-y-6">
+          <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+            Platform-wide settings: commission rate, discovery relevance threshold, and feature toggles.
+          </p>
+          <div>
+            <label className="block text-sm font-medium mb-1">Commission Rate (%)</label>
+            <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+              Default platform commission percentage applied to partner transactions.
+            </p>
         <input
           type="number"
           step="0.01"
@@ -424,6 +460,9 @@ export function ConfigEditor() {
         <label className="block text-sm font-medium mb-1">
           Discovery Relevance Threshold (0–1)
         </label>
+        <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+          Minimum similarity score for products to appear in discovery. Higher = stricter relevance.
+        </p>
         <input
           type="number"
           step="0.01"
@@ -449,7 +488,9 @@ export function ConfigEditor() {
             setConfig((c) => ({ ...c, enable_self_registration: e.target.checked }))
           }
         />
-        <label htmlFor="self_reg">Enable self-registration</label>
+        <label htmlFor="self_reg" className="text-sm">
+          Enable self-registration — Allow new partners to sign up without admin approval.
+        </label>
       </div>
 
       <div className="flex items-center gap-2">
@@ -461,9 +502,18 @@ export function ConfigEditor() {
             setConfig((c) => ({ ...c, enable_chatgpt: e.target.checked }))
           }
         />
-        <label htmlFor="chatgpt">Enable ChatGPT integration</label>
+        <label htmlFor="chatgpt" className="text-sm">
+          Enable ChatGPT integration — Enable ChatGPT/OpenAI for chat experiences.
+        </label>
       </div>
+        </div>
+      )}
 
+      {activeTab === "llm" && (
+        <div className="space-y-6">
+          <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+            LLM providers, image generation, model interactions, and creativity settings.
+          </p>
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
@@ -477,6 +527,9 @@ export function ConfigEditor() {
         </button>
         {llmProvidersExpanded && (
           <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Configure LLM providers (Azure, OpenAI, OpenRouter, etc.) for chat and reasoning. Set one as active.
+            </p>
             {llmProviders.map((p) => (
               <div
                 key={p.id}
@@ -721,7 +774,14 @@ export function ConfigEditor() {
           </div>
         )}
       </div>
+        </div>
+      )}
 
+      {activeTab === "integrations" && (
+        <div className="space-y-6">
+          <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+            External APIs for engagement tools: events, weather, web search. Keys are encrypted.
+          </p>
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
@@ -864,7 +924,11 @@ export function ConfigEditor() {
           </div>
         )}
       </div>
+        </div>
+      )}
 
+      {activeTab === "llm" && (
+        <>
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
@@ -1068,6 +1132,9 @@ export function ConfigEditor() {
         </button>
         {modelSettingsExpanded && (
           <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Control creativity (temperature) for the active LLM provider.
+            </p>
             <div>
               <label className="block text-sm font-medium mb-1">
                 Creativity (0–1)
@@ -1096,7 +1163,14 @@ export function ConfigEditor() {
           </div>
         )}
       </div>
+        </>
+      )}
 
+      {activeTab === "discovery" && (
+        <div className="space-y-6">
+          <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+            Partner ranking weights, sponsorship pricing, and composite discovery (date night, bundles).
+          </p>
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
@@ -1110,6 +1184,9 @@ export function ConfigEditor() {
         </button>
         {rankingExpanded && (
           <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Configure how partners are ranked in search results. Weight price, rating, commission, and trust.
+            </p>
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -1274,6 +1351,9 @@ export function ConfigEditor() {
         </button>
         {sponsorshipExpanded && (
           <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Configure sponsored product placement and pricing per day. Partners pay to boost visibility.
+            </p>
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -1516,6 +1596,8 @@ export function ConfigEditor() {
           </div>
         )}
       </div>
+        </div>
+      )}
 
       <Button onClick={onSave} disabled={saving}>
         {saving ? "Saving..." : "Save"}

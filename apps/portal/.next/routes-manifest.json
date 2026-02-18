@@ -44,12 +44,52 @@
       "namedRegex": "^/api/orders/(?<nxtPid>[^/]+?)/reject(?:/)?$"
     },
     {
+      "page": "/api/partners/conversations/[id]",
+      "regex": "^/api/partners/conversations/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/partners/conversations/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/partners/conversations/[id]/assign",
+      "regex": "^/api/partners/conversations/([^/]+?)/assign(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/partners/conversations/(?<nxtPid>[^/]+?)/assign(?:/)?$"
+    },
+    {
+      "page": "/api/partners/conversations/[id]/messages",
+      "regex": "^/api/partners/conversations/([^/]+?)/messages(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/partners/conversations/(?<nxtPid>[^/]+?)/messages(?:/)?$"
+    },
+    {
+      "page": "/api/partners/faqs/[id]",
+      "regex": "^/api/partners/faqs/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/partners/faqs/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/partners/integrations/keys/[id]",
       "regex": "^/api/partners/integrations/keys/([^/]+?)(?:/)?$",
       "routeKeys": {
         "nxtPid": "nxtPid"
       },
       "namedRegex": "^/api/partners/integrations/keys/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/partners/knowledge-base/[id]",
+      "regex": "^/api/partners/knowledge\\-base/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/partners/knowledge\\-base/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
       "page": "/api/partners/ratings/[id]/respond",
@@ -92,12 +132,36 @@
       "namedRegex": "^/api/platform/escalations/(?<nxtPid>[^/]+?)/resolve(?:/)?$"
     },
     {
+      "page": "/api/platform/external-api-providers/[id]",
+      "regex": "^/api/platform/external\\-api\\-providers/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/platform/external\\-api\\-providers/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/platform/llm-providers/[id]",
+      "regex": "^/api/platform/llm\\-providers/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/platform/llm\\-providers/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/platform/partners/[id]",
       "regex": "^/api/platform/partners/([^/]+?)(?:/)?$",
       "routeKeys": {
         "nxtPid": "nxtPid"
       },
       "namedRegex": "^/api/platform/partners/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/platform/partners/[id]/chat-config",
+      "regex": "^/api/platform/partners/([^/]+?)/chat\\-config(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/platform/partners/(?<nxtPid>[^/]+?)/chat\\-config(?:/)?$"
     },
     {
       "page": "/api/platform/rfps/[id]/bids",
@@ -206,6 +270,14 @@
       "namedRegex": "^/api/venues/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/conversations/[id]",
+      "regex": "^/conversations/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/conversations/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/products/[id]",
       "regex": "^/products/([^/]+?)(?:/)?$",
       "routeKeys": {
@@ -256,6 +328,12 @@
       "namedRegex": "^/commerce\\-profile(?:/)?$"
     },
     {
+      "page": "/conversations",
+      "regex": "^/conversations(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/conversations(?:/)?$"
+    },
+    {
       "page": "/dashboard",
       "regex": "^/dashboard(?:/)?$",
       "routeKeys": {},
@@ -274,6 +352,12 @@
       "namedRegex": "^/earnings(?:/)?$"
     },
     {
+      "page": "/faqs",
+      "regex": "^/faqs(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/faqs(?:/)?$"
+    },
+    {
       "page": "/integrations",
       "regex": "^/integrations(?:/)?$",
       "routeKeys": {},
@@ -284,6 +368,12 @@
       "regex": "^/inventory(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/inventory(?:/)?$"
+    },
+    {
+      "page": "/knowledge-base",
+      "regex": "^/knowledge\\-base(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/knowledge\\-base(?:/)?$"
     },
     {
       "page": "/manifest.webmanifest",
@@ -416,6 +506,12 @@
       "regex": "^/settings(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/settings(?:/)?$"
+    },
+    {
+      "page": "/settings/chat-widget",
+      "regex": "^/settings/chat\\-widget(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/settings/chat\\-widget(?:/)?$"
     },
     {
       "page": "/support",

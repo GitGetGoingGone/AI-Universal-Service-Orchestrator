@@ -8,6 +8,7 @@ type ChatConfig = {
   primary_color: string;
   secondary_color: string;
   font_family: string;
+  font_size_px?: number;
   logo_url: string | null;
   welcome_message: string;
   embed_enabled: boolean;
@@ -15,6 +16,8 @@ type ChatConfig = {
   e2e_add_to_bundle: boolean;
   e2e_checkout: boolean;
   e2e_payment: boolean;
+  chat_typing_enabled?: boolean;
+  chat_typing_speed_ms?: number;
 };
 
 export default function ChatWidgetSettingsPage() {
@@ -130,6 +133,25 @@ export default function ChatWidgetSettingsPage() {
             />
           </div>
           <div className="mt-4">
+            <label className="block text-sm mb-1">Font size (px)</label>
+            <input
+              type="number"
+              min={12}
+              max={24}
+              value={config.font_size_px ?? 14}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  font_size_px: Math.max(12, Math.min(24, parseInt(e.target.value, 10) || 14)),
+                })
+              }
+              className="w-24 rounded border border-[rgb(var(--color-border))] px-3 py-2"
+            />
+            <p className="text-xs text-[rgb(var(--color-text-secondary))] mt-1">
+              Base font size for chat messages (12–24px).
+            </p>
+          </div>
+          <div className="mt-4">
             <label className="block text-sm mb-1">Logo URL (optional)</label>
             <input
               type="url"
@@ -186,6 +208,53 @@ export default function ChatWidgetSettingsPage() {
             <p className="text-xs text-[rgb(var(--color-text-secondary))] mt-1">
               Add this script to your website to show the chat widget.
             </p>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-lg font-semibold mb-3">Message Display</h2>
+          <p className="text-sm text-[rgb(var(--color-text-secondary))] mb-4">
+            Control how assistant messages appear in the chat.
+          </p>
+          <div className="space-y-4 mb-6">
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="chat_typing_enabled"
+                checked={config.chat_typing_enabled !== false}
+                onChange={(e) =>
+                  setConfig({ ...config, chat_typing_enabled: e.target.checked })
+                }
+                className="rounded border-[rgb(var(--color-border))]"
+              />
+              <label htmlFor="chat_typing_enabled" className="cursor-pointer">
+                Enable typewriter effect for assistant messages
+              </label>
+            </div>
+            {(config.chat_typing_enabled !== false) && (
+              <div>
+                <label className="block text-sm mb-1">Typing speed (ms per character)</label>
+                <input
+                  type="number"
+                  min={10}
+                  max={200}
+                  value={config.chat_typing_speed_ms ?? 30}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      chat_typing_speed_ms: Math.max(
+                        10,
+                        Math.min(200, parseInt(e.target.value, 10) || 30)
+                      ),
+                    })
+                  }
+                  className="w-24 rounded border border-[rgb(var(--color-border))] px-3 py-2"
+                />
+                <p className="text-xs text-[rgb(var(--color-text-secondary))] mt-1">
+                  Lower = faster. 10–200ms.
+                </p>
+              </div>
+            )}
           </div>
         </section>
 

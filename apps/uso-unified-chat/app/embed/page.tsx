@@ -15,10 +15,13 @@ type EmbedConfig = {
   primary_color?: string;
   secondary_color?: string;
   font_family?: string;
+  font_size_px?: number;
   welcome_message?: string;
   e2e_add_to_bundle?: boolean;
   e2e_checkout?: boolean;
   e2e_payment?: boolean;
+  chat_typing_enabled?: boolean;
+  chat_typing_speed_ms?: number;
 };
 
 function EmbedContent() {
@@ -81,6 +84,11 @@ function EmbedContent() {
         partnerId={partnerId}
         e2eEnabled={e2eEnabled ?? true}
         welcomeMessage={config?.welcome_message}
+        chatConfig={{
+          chat_typing_enabled: config?.chat_typing_enabled,
+          chat_typing_speed_ms: config?.chat_typing_speed_ms,
+          font_size_px: config?.font_size_px,
+        }}
         embeddedInLanding
         showSideNav={false}
       />

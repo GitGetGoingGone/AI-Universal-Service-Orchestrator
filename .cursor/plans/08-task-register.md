@@ -147,6 +147,25 @@ overview: One place for all planned tasks and latest status. Update status here;
 
 ---
 
+## 5d. Composite Bundle (Date Night, Bundles) (composite-bundle-unified-plan)
+
+*Probing → discover → multiple bundle options → bulk add. Configurable prompts, product mix, enable/disable. Full plan: [composite-bundle-unified-plan.md](./composite-bundle-unified-plan.md).*
+
+| ID | Task | Status | Source |
+|----|------|--------|--------|
+| composite-bulk-add-api | Bulk Add API: Discovery add_products_to_bundle_bulk, POST /bundle/add-bulk; Orchestrator client + proxy | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+| composite-chat-handler | Chat UI: Handle add_bundle_bulk action, POST /api/bundle/add-bulk | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+| composite-bundle-options | suggest_composite_bundle_options: 2–4 options per experience; experience card "Add [Label]" per option | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+| composite-db-prompt | suggest_composite_bundle: Fetch prompt from model_interaction_prompts when available | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+| composite-enable-flag | enable_composite_bundle_suggestion: platform_config flag; loop checks before calling suggest | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+| composite-products-per-cat | products_per_category: Configurable in composite_discovery_config; loop uses for per_limit | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+| composite-config-ui | Config UI: Composite Discovery section (products per category, sponsorship checkbox, enable bundle suggestion) | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+| composite-product-mix | Product mix: Discovery slices (price_desc, price_asc, rating, popularity, sponsored, recent); compose by pct, dedupe | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+| composite-sold-count | products.sold_count: Migration for popularity slice; search_products + semantic_search include it | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+| composite-product-mix-ui | Product Mix editor: Add/remove slices, sort/limit/pct per slice, validate pct sums to 100 | Done | [composite-bundle-unified-plan](./composite-bundle-unified-plan.md) |
+
+---
+
 ## 6. Implemented (reference)
 
 | Item | Status |
@@ -169,6 +188,7 @@ overview: One place for all planned tasks and latest status. Update status here;
 | Module 2: Legacy Adapter Layer | Done – CSV/Excel/JSON ingest, column mapping, Scout Engine integration, portal import |
 | UCP REST Schema (rest.openapi.json) | Done – searchGifts operationId, gift params, well-known points to custom schema |
 | ChatGPT App (MCP), Unified Web App, Orchestrator auxiliary | Done – see 5c |
+| Composite Bundle (Date Night, Bundles) | Done – probing, discover, 2–4 options, bulk add, product mix, config UI – see 5d |
 
 ---
 

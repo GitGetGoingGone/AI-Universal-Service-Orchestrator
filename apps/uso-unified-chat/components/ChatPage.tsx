@@ -39,6 +39,7 @@ function FlipWord() {
 import { useAuthState, hasClerk } from "@/components/AuthWrapper";
 import { SignInButton } from "@clerk/nextjs";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
+import { TypewriterText } from "@/components/TypewriterText";
 import { PaymentModal } from "@/components/PaymentModal";
 import { PhoneModal } from "@/components/PhoneModal";
 import { PreCheckoutModal } from "@/components/PreCheckoutModal";
@@ -50,6 +51,8 @@ type ChatMessage = {
   role: "user" | "assistant";
   content?: string;
   adaptiveCard?: Record<string, unknown>;
+  /** When true, message was loaded from history — skip typewriter effect */
+  isFromHistory?: boolean;
 };
 
 const E2E_ACTIONS = ["add_to_bundle", "add_bundle_bulk", "view_bundle", "remove_from_bundle", "checkout", "complete_checkout"];
@@ -221,6 +224,12 @@ export type ChatPageProps = {
   partnerId?: string;
   e2eEnabled?: boolean;
   welcomeMessage?: string;
+  /** Chat display config: typing effect, font size */
+  chatConfig?: {
+    chat_typing_enabled?: boolean;
+    chat_typing_speed_ms?: number;
+    font_size_px?: number;
+  };
   /** When set, programmatically send this prompt. Cleared via onPromptSent. */
   promptToSend?: string;
   /** Called after promptToSend has been sent. Parent should clear promptToSend. */
@@ -240,6 +249,7 @@ export function ChatPage(props: ChatPageProps = {}) {
     partnerId,
     e2eEnabled: e2eProp,
     welcomeMessage,
+    chatConfig,
     promptToSend,
     onPromptSent,
     embeddedInLanding,
@@ -247,6 +257,9 @@ export function ChatPage(props: ChatPageProps = {}) {
     paymentSuccessOrderId,
     onPaymentSuccessHandled,
   } = props;
+  const typingEnabled = chatConfig?.chat_typing_enabled !== false;
+  const typingSpeedMs = Math.max(10, Math.min(200, chatConfig?.chat_typing_speed_ms ?? 30));
+  const fontSizePx = Math.max(12, Math.min(24, chatConfig?.font_size_px ?? 14));
   const showSideNav = showSideNavProp ?? !embeddedInLanding;
   const { collapsed: sideNavCollapsed, toggle: toggleSideNav } = useSideNavCollapsed();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -312,6 +325,7 @@ export function ChatPage(props: ChatPageProps = {}) {
             role: m.role as "user" | "assistant",
             content: m.content,
             adaptiveCard: m.adaptiveCard,
+            isFromHistory: true,
           })
         );
         setMessages(msgs);
@@ -499,8 +513,9 @@ export function ChatPage(props: ChatPageProps = {}) {
         const newThreadId = (data as { thread_id?: string }).thread_id;
         if (newThreadId && !threadId) {
           setThreadId(newThreadId);
-          fetchThreads();
         }
+        // Refresh thread list so new conversations appear and titles stay in sync
+        fetchThreads();
 
         addMessage({
           role: "assistant",
@@ -834,12 +849,13 @@ export function ChatPage(props: ChatPageProps = {}) {
         className={`h-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""} ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}
       >
         <div className={`mx-auto min-w-0 space-y-6 ${messages.length === 0 ? "flex w-full max-w-2xl flex-col items-center" : "max-w-3xl"}`}>
-          {embeddedInLanding && (userId || anonymousId) && threads.length > 0 && (
+          {embeddedInLanding && (userId || anonymousId) && (
             <div className="flex justify-end">
               <select
                 value={threadId ?? ""}
                 onChange={(e) => handleSelectThread(e.target.value || null)}
                 className="text-sm px-2 py-1.5 rounded border border-[var(--border)] bg-[var(--card)]"
+                title="Switch conversation"
               >
                 <option value="">New chat</option>
                 {threads.map((t) => (
@@ -954,11 +970,21 @@ export function ChatPage(props: ChatPageProps = {}) {
                     className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 ${
                       m.role === "user"
                         ? "bg-[var(--primary-color)] text-[var(--primary-foreground)]"
-                        : "bg-[var(--card)] border border-[var(--border)] text-[var(--card-foreground)]"
+                        : "bg-[var(--card)] text-[var(--card-foreground)]"
                     }`}
                   >
                     {m.content && (
-                      <p className="text-sm whitespace-pre-wrap">{m.content}</p>
+                      <p className="whitespace-pre-wrap" style={{ fontSize: `${fontSizePx}px` }}>
+                        {m.role === "assistant" && typingEnabled && !m.isFromHistory ? (
+                          <TypewriterText
+                            text={m.content}
+                            speedMs={typingSpeedMs}
+                            enabled={typingEnabled}
+                          />
+                        ) : (
+                          m.content
+                        )}
+                      </p>
                     )}
                     {m.adaptiveCard && (() => {
                       const rawCard = filterE2EActions(m.adaptiveCard, e2eEnabled);
@@ -1124,7 +1150,7 @@ export function ChatPage(props: ChatPageProps = {}) {
               transition={{ duration: 0.2 }}
               className="flex justify-start"
             >
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
+              <div className="rounded-2xl bg-[var(--card)] px-4 py-3">
                 <div className="flex items-center gap-1">
                   <span className="inline-block h-2 w-2 animate-typing-1 rounded-full bg-slate-400" />
                   <span className="inline-block h-2 w-2 animate-typing-2 rounded-full bg-slate-400" />

@@ -33,6 +33,7 @@ export async function GET(req: Request) {
     primary_color: "#1976d2",
     secondary_color: "#424242",
     font_family: "Inter, sans-serif",
+    font_size_px: 14,
     logo_url: null,
     welcome_message: "How can I help you today?",
     embed_enabled: false,
@@ -42,6 +43,8 @@ export async function GET(req: Request) {
     e2e_payment: true,
     chat_widget_enabled: true,
     admin_e2e_enabled: true,
+    chat_typing_enabled: true,
+    chat_typing_speed_ms: 30,
   };
 
   const chatEnabled = config.chat_widget_enabled !== false;
@@ -83,10 +86,13 @@ export async function GET(req: Request) {
     primary_color: config.primary_color ?? "#1976d2",
     secondary_color: config.secondary_color ?? "#424242",
     font_family: config.font_family ?? "Inter, sans-serif",
+    font_size_px: config.font_size_px ?? 14,
     logo_url: config.logo_url ?? null,
     welcome_message: config.welcome_message ?? "How can I help you today?",
     e2e_add_to_bundle: e2eEnabled && (config.e2e_add_to_bundle !== false),
     e2e_checkout: e2eEnabled && (config.e2e_checkout !== false),
     e2e_payment: e2eEnabled && (config.e2e_payment !== false),
+    chat_typing_enabled: config.chat_typing_enabled !== false,
+    chat_typing_speed_ms: Math.max(10, Math.min(200, config.chat_typing_speed_ms ?? 30)),
   });
 }

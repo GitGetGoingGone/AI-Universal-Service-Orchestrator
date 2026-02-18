@@ -25,6 +25,7 @@ export async function GET() {
       primary_color: "#1976d2",
       secondary_color: "#424242",
       font_family: "Inter, sans-serif",
+      font_size_px: 14,
       logo_url: null,
       welcome_message: "How can I help you today?",
       embed_enabled: false,
@@ -34,6 +35,8 @@ export async function GET() {
       e2e_payment: true,
       chat_widget_enabled: true,
       admin_e2e_enabled: true,
+      chat_typing_enabled: true,
+      chat_typing_speed_ms: 30,
     });
   }
 
@@ -52,6 +55,7 @@ export async function PATCH(request: Request) {
     "primary_color",
     "secondary_color",
     "font_family",
+    "font_size_px",
     "logo_url",
     "welcome_message",
     "embed_enabled",
@@ -59,6 +63,8 @@ export async function PATCH(request: Request) {
     "e2e_add_to_bundle",
     "e2e_checkout",
     "e2e_payment",
+    "chat_typing_enabled",
+    "chat_typing_speed_ms",
   ];
   for (const key of allowed) {
     if (body[key] !== undefined) updates[key] = body[key];

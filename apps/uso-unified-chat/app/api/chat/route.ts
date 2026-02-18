@@ -13,6 +13,28 @@ function isLocalhost(url: string): boolean {
   }
 }
 
+/** Derive a human-friendly conversation title from the orchestrator response. */
+function deriveThreadTitle(data: Record<string, unknown>, fallback: string): string {
+  const d = data.data as Record<string, unknown> | undefined;
+  const intent = d?.intent as Record<string, unknown> | undefined;
+  const searchQuery = (intent?.search_query as string) || "";
+  const intentType = (intent?.intent_type as string) || "";
+
+  // For composite discovery (date night, gifts, etc.), use "Planning [query]"
+  if (intentType === "discover_composite" && searchQuery) {
+    const capped = searchQuery.slice(0, 40);
+    return `Planning ${capped.charAt(0).toUpperCase() + capped.slice(1)}`;
+  }
+
+  // For browse/explore, use the query
+  if (searchQuery && searchQuery.length <= 50) {
+    return searchQuery.charAt(0).toUpperCase() + searchQuery.slice(1);
+  }
+
+  // Fallback: first user message, truncated
+  return fallback.slice(0, 50) || "New chat";
+}
+
 export async function POST(req: Request) {
   // In production (Vercel), localhost will not work
   if (
@@ -51,6 +73,7 @@ export async function POST(req: Request) {
 
     const supabase = getSupabase();
     let resolvedThreadId = thread_id;
+    let isNewThread = false;
 
     if (supabase && (thread_id || anonymous_id || user_id)) {
       if (thread_id) {
@@ -89,6 +112,7 @@ export async function POST(req: Request) {
           .select("id")
           .single();
         resolvedThreadId = newThread?.id ?? null;
+        isNewThread = !!newThread?.id;
       } else if (anonymous_id) {
         const { data: newThread } = await supabase
           .from("chat_threads")
@@ -100,6 +124,7 @@ export async function POST(req: Request) {
           .select("id")
           .single();
         resolvedThreadId = newThread?.id ?? null;
+        isNewThread = !!newThread?.id;
       }
 
       if (resolvedThreadId) {
@@ -111,10 +136,7 @@ export async function POST(req: Request) {
         });
         await supabase
           .from("chat_threads")
-          .update({
-            updated_at: new Date().toISOString(),
-            title: lastUserMessage.slice(0, 100) || "New chat",
-          })
+          .update({ updated_at: new Date().toISOString() })
           .eq("id", resolvedThreadId);
       }
     }
@@ -159,9 +181,16 @@ export async function POST(req: Request) {
         adaptive_card: adaptiveCard,
         channel: "web",
       });
+
+      // For new threads, set a human-friendly title from the orchestrator response (e.g. "Planning date night")
+      const updatePayload: Record<string, string> = { updated_at: new Date().toISOString() };
+      if (isNewThread) {
+        updatePayload.title = deriveThreadTitle(data, lastUserMessage) || lastUserMessage.slice(0, 50) || "New chat";
+      }
+
       await supabase
         .from("chat_threads")
-        .update({ updated_at: new Date().toISOString() })
+        .update(updatePayload)
         .eq("id", resolvedThreadId);
     }
 
