@@ -31,6 +31,8 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = Field(None, description="Chat thread ID for webhook push (ChatGPT/Gemini)")
     platform: Optional[Literal["chatgpt", "gemini", "web"]] = Field(None, description="Platform for webhook push (web = unified chat app)")
     partner_id: Optional[str] = Field(None, description="Filter products to this partner (for embed/white-label)")
+    bundle_id: Optional[str] = Field(None, description="Thread's bundle ID - use for order context, never ask user")
+    order_id: Optional[str] = Field(None, description="Thread's paid order ID - use for track/support, never ask user")
 
 
 @router.post("/chat")
@@ -125,6 +127,8 @@ async def chat(
             platform=body.platform,
             thread_id=body.thread_id,
             messages=body.messages,
+            bundle_id=body.bundle_id,
+            order_id=body.order_id,
         )
     except Exception as e:
         return chat_first_response(

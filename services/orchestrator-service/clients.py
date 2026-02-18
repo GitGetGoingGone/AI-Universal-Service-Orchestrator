@@ -196,6 +196,17 @@ async def remove_from_bundle(item_id: str) -> Dict[str, Any]:
         return r.json()
 
 
+async def get_order_status(order_id: str) -> Dict[str, Any]:
+    """Call Discovery service to get order status. For track_order tool."""
+    url = f"{settings.discovery_service_url}/api/v1/orders/{order_id}/status"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(url)
+        if r.status_code == 404:
+            return {"error": "Order not found"}
+        r.raise_for_status()
+        return r.json()
+
+
 async def proceed_to_checkout(bundle_id: str) -> Dict[str, Any]:
     """Call Discovery service to proceed to checkout with bundle. Creates order, returns order_id."""
     url = f"{settings.discovery_service_url}/api/v1/checkout"

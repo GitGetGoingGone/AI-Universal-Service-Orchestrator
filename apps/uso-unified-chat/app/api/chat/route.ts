@@ -58,12 +58,16 @@ export async function POST(req: Request) {
       user_id,
       thread_id,
       anonymous_id,
+      bundle_id,
+      order_id,
     } = body as {
       messages?: { role: string; content: string }[];
       partner_id?: string;
       user_id?: string;
       thread_id?: string;
       anonymous_id?: string;
+      bundle_id?: string;
+      order_id?: string;
     };
 
     const lastUserMessage =
@@ -154,6 +158,8 @@ export async function POST(req: Request) {
     if (messages && messages.length > 0) {
       payload.messages = messages;
     }
+    if (bundle_id) payload.bundle_id = bundle_id;
+    if (order_id) payload.order_id = order_id;
 
     const res = await fetch(`${ORCHESTRATOR_URL}/api/v1/chat`, {
       method: "POST",

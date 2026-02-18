@@ -13,18 +13,21 @@ const stripePromise =
 
 export type PaymentModalProps = {
   orderId: string;
+  threadId?: string | null;
   onClose: () => void;
   onSuccess: () => void;
 };
 
 function PaymentFormInner({
   orderId,
+  threadId,
   amount,
   currency,
   onSuccess,
   onError,
 }: {
   orderId: string;
+  threadId?: string | null;
   amount: number;
   currency: string;
   onSuccess: () => void;
@@ -39,7 +42,9 @@ function PaymentFormInner({
     if (!stripe || !elements) return;
     setLoading(true);
     try {
-      const returnUrl = `${window.location.origin}${window.location.pathname}?payment_success=1&order_id=${orderId}`;
+      const params = new URLSearchParams({ payment_success: "1", order_id: orderId });
+      if (threadId) params.set("thread_id", threadId);
+      const returnUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
       const { error } = await stripe.confirmPayment({
         elements,
         confirmParams: {
@@ -77,6 +82,7 @@ function PaymentFormInner({
 
 export function PaymentModal({
   orderId,
+  threadId,
   onClose,
   onSuccess,
 }: PaymentModalProps) {
@@ -160,6 +166,7 @@ export function PaymentModal({
           >
             <PaymentFormInner
               orderId={orderId}
+              threadId={threadId}
               amount={amount}
               currency={currency}
               onSuccess={onSuccess}

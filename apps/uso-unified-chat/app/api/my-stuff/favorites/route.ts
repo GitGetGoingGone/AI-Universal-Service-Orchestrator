@@ -41,13 +41,22 @@ export async function POST(req: Request) {
     }
 
     if (clerkUserId) {
-      const { data: user } = await supabase
+      let { data: user } = await supabase
         .from("users")
         .select("id")
         .eq("clerk_user_id", clerkUserId)
         .limit(1)
         .single();
       userId = user?.id ?? null;
+      // Create user on-the-fly if signed in to Clerk but not yet in our users table
+      if (!userId) {
+        const { data: created } = await supabase
+          .from("users")
+          .insert({ id: crypto.randomUUID(), clerk_user_id: clerkUserId })
+          .select("id")
+          .single();
+        userId = created?.id ?? null;
+      }
     }
 
     if (!userId) {

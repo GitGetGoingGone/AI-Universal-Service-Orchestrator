@@ -53,12 +53,54 @@ export async function GET(
     .eq("thread_id", id)
     .in("status", ["pending", "active"]);
 
+  let latestOrder: {
+    id: string;
+    status: string;
+    payment_status: string;
+    total_amount: number;
+    currency: string;
+    created_at: string;
+    items?: Array<{ item_name: string; quantity: number; total_price: number }>;
+  } | null = null;
+
+  if (thread.bundle_id) {
+    const { data: orders } = await supabase
+      .from("orders")
+      .select("id, status, payment_status, total_amount, currency, created_at")
+      .eq("bundle_id", thread.bundle_id)
+      .eq("payment_status", "paid")
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (orders?.[0]) {
+      const o = orders[0];
+      const { data: items } = await supabase
+        .from("order_items")
+        .select("item_name, quantity, total_price")
+        .eq("order_id", o.id);
+      latestOrder = {
+        id: o.id,
+        status: o.status ?? "unknown",
+        payment_status: o.payment_status ?? "paid",
+        total_amount: Number(o.total_amount ?? 0),
+        currency: o.currency ?? "USD",
+        created_at: o.created_at ?? "",
+        items: (items ?? []).map((it) => ({
+          item_name: it.item_name ?? "",
+          quantity: it.quantity ?? 1,
+          total_price: Number(it.total_price ?? 0),
+        })),
+      };
+    }
+  }
+
   return NextResponse.json({
     thread: {
       id: thread.id,
       bundle_id: thread.bundle_id,
       title: thread.title,
       created_at: thread.created_at,
+      latest_order: latestOrder,
     },
     messages: (messages ?? []).map((m) => ({
       id: m.id,

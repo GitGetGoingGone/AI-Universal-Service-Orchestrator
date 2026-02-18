@@ -46,10 +46,13 @@ export function AuthButtons() {
 }
 
 function AuthButtonsInner() {
-  const { isSignedIn } = useUser();
+  const { isSignedIn, isLoaded } = useUser();
+  // Only show Sign out when we're certain user is signed in (isLoaded && isSignedIn).
+  // During loading or when signed out, show Sign in to avoid showing Sign out incorrectly.
+  const showSignOut = !!isLoaded && !!isSignedIn;
   return (
     <div className="flex items-center gap-3">
-      {isSignedIn ? (
+      {showSignOut ? (
         <SignOutButton>
           <button className="text-sm px-3 py-1.5 rounded-lg border border-[var(--border)] hover:bg-[var(--card)]">
             Sign out

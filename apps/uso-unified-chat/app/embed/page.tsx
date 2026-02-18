@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 
 const ChatPage = dynamic(
@@ -28,6 +28,9 @@ function EmbedContent() {
   const searchParams = useSearchParams();
   const partnerId = searchParams.get("partner_id") || undefined;
   const parentOrigin = searchParams.get("parent_origin") || undefined;
+  const paymentSuccessOrderId =
+    searchParams.get("payment_success") === "1" ? searchParams.get("order_id") : null;
+  const paymentSuccessThreadId = searchParams.get("thread_id") || undefined;
   const [config, setConfig] = useState<EmbedConfig | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -78,6 +81,16 @@ function EmbedContent() {
     config.e2e_checkout !== false ||
     config.e2e_payment !== false;
 
+  const handlePaymentSuccessHandled = useCallback(() => {
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("payment_success");
+      url.searchParams.delete("order_id");
+      url.searchParams.delete("thread_id");
+      window.history.replaceState({}, "", url.pathname + url.search);
+    }
+  }, []);
+
   return (
     <div className="h-screen w-full min-h-[400px]">
       <ChatPage
@@ -91,6 +104,9 @@ function EmbedContent() {
         }}
         embeddedInLanding
         showSideNav={false}
+        paymentSuccessOrderId={paymentSuccessOrderId}
+        paymentSuccessThreadId={paymentSuccessThreadId}
+        onPaymentSuccessHandled={handlePaymentSuccessHandled}
       />
     </div>
   );

@@ -64,7 +64,7 @@ def generate_checkout_card(
     if show_instant_checkout:
         actions = [
             {"type": "Action.Submit", "title": "Complete Checkout", "data": {"action": "complete_checkout", "order_id": str(order.get("id", ""))}},
-            {"type": "Action.Submit", "title": "Edit Order", "data": {"action": "edit_order"}},
+            {"type": "Action.Submit", "title": "Edit Order", "data": {"action": "edit_order", "bundle_id": str(order.get("bundle_id", "")), "order_id": str(order.get("id", ""))}},
         ]
 
     return create_card(body=body, actions=actions)

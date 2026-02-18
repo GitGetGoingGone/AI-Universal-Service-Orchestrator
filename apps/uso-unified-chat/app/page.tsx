@@ -12,6 +12,7 @@ function PageContent() {
     searchParams.get("payment_success") === "1"
       ? searchParams.get("order_id")
       : null;
+  const paymentSuccessThreadId = searchParams.get("thread_id") || undefined;
 
   const handlePromptSent = useCallback(() => {
     setPromptToSend(undefined);
@@ -22,6 +23,7 @@ function PageContent() {
       const url = new URL(window.location.href);
       url.searchParams.delete("payment_success");
       url.searchParams.delete("order_id");
+      url.searchParams.delete("thread_id");
       window.history.replaceState({}, "", url.pathname + url.search);
     }
   }, []);
@@ -32,6 +34,7 @@ function PageContent() {
       onPromptSent={handlePromptSent}
       showSideNav
       paymentSuccessOrderId={paymentSuccessOrderId}
+      paymentSuccessThreadId={paymentSuccessThreadId}
       onPaymentSuccessHandled={handlePaymentSuccessHandled}
     />
   );

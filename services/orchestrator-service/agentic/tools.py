@@ -121,6 +121,16 @@ TOOL_DEFS = [
         },
     },
     {
+        "name": "track_order",
+        "description": "Get order status (items, payment, fulfillment). Use when user asks about order status, delivery, or tracking. IMPORTANT: If thread_context has order_id, use it—never ask the user for order ID.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string", "description": "Order UUID. Use thread_context.order_id when available; do not ask user."},
+            },
+        },
+    },
+    {
         "name": "complete",
         "description": "Finish the conversation and return the final response to the user. Use when you have enough information.",
         "parameters": {
@@ -233,6 +243,12 @@ def apply_guardrails(name: str, params: Dict[str, Any]) -> Tuple[Dict[str, Any],
             limit = 5
         p["limit"] = max(LIMIT_MIN, min(20, limit))
 
+    elif name == "track_order":
+        oid = (p.get("order_id") or "").strip()
+        if not oid:
+            return {}, "track_order requires order_id (use thread_context.order_id)"
+        p["order_id"] = oid[:100]
+
     return p, None
 
 
@@ -248,6 +264,7 @@ async def execute_tool(
     web_search_fn: Optional[Callable] = None,
     get_weather_fn: Optional[Callable] = None,
     get_upcoming_occasions_fn: Optional[Callable] = None,
+    track_order_fn: Optional[Callable] = None,
 ) -> Dict[str, Any]:
     """
     Execute a tool by name with given parameters.
@@ -327,6 +344,14 @@ async def execute_tool(
             location=params.get("location", ""),
             limit=params.get("limit", 5),
         )
+
+    if name == "track_order":
+        if not track_order_fn:
+            return {"error": "track_order not configured"}
+        oid = params.get("order_id", "").strip()
+        if not oid:
+            return {"error": "order_id required for track_order"}
+        return await track_order_fn(order_id=oid)
 
     if name == "complete":
         return {"status": "complete", "summary": params.get("summary", "")}

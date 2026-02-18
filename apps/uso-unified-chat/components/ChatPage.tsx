@@ -71,24 +71,53 @@ function extractProductContainersFromCard(card: Record<string, unknown> | null):
   return containers.slice(0, MAX_DISCOVERY_CYCLE);
 }
 
-function buildCycledProductCard(
-  card: Record<string, unknown>,
-  productContainers: unknown[],
-  cycleIndex: number
-): Record<string, unknown> {
-  if (productContainers.length === 0) return card;
-  const body = (card as Record<string, unknown>).body as unknown[];
-  const headerItems = body.filter((item) => {
-    const c = item as Record<string, unknown>;
-    return c?.type !== "Container" || c?.style !== "emphasis";
-  });
-  const idx = cycleIndex % productContainers.length;
-  const cycledBody = [
-    ...headerItems,
-    { type: "TextBlock", text: `Option ${idx + 1} of ${productContainers.length}`, size: "Small", isSubtle: true, wrap: true },
-    productContainers[idx],
-  ];
-  return { ...card, body: cycledBody };
+type ProductInfo = { name: string; price: string; product_id: string; product_name?: string };
+
+function extractProductInfoFromContainer(container: unknown): ProductInfo | null {
+  if (!container || typeof container !== "object") return null;
+  const c = container as Record<string, unknown>;
+  const items = c.items as unknown[] | undefined;
+  if (!Array.isArray(items)) return null;
+  let name = "Unknown";
+  let price = "";
+  let product_id = "";
+  let product_name: string | undefined;
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    const i = item as Record<string, unknown>;
+    if (i.type === "TextBlock") {
+      const t = String(i.text ?? "");
+      if (i.weight === "Bolder" && !t.match(/^\$|^\d|USD|EUR/)) name = t;
+      else if (t.match(/USD|EUR|\d+\.\d{2}/)) price = t;
+    }
+    if (i.type === "ActionSet" && Array.isArray(i.actions)) {
+      for (const a of i.actions as Record<string, unknown>[]) {
+        const d = a?.data as Record<string, unknown> | undefined;
+        if (d?.product_id) {
+          product_id = String(d.product_id);
+          product_name = d.product_name as string | undefined;
+          break;
+        }
+      }
+    }
+  }
+  return product_id ? { name, price, product_id, product_name } : null;
+}
+
+function getHeaderTextFromCard(card: Record<string, unknown> | null): string {
+  if (!card || typeof card !== "object") return "";
+  const body = (card as Record<string, unknown>).body as unknown[] | undefined;
+  if (!Array.isArray(body)) return "";
+  for (const item of body) {
+    if (item && typeof item === "object") {
+      const i = item as Record<string, unknown>;
+      if (i.type === "TextBlock" && i.style !== "emphasis") {
+        const t = String(i.text ?? "");
+        if (t.startsWith("Found ") && t.includes("product")) return t;
+      }
+    }
+  }
+  return "";
 }
 
 function extractFirstProductFromCard(card: Record<string, unknown> | null): { product_id: string; product_name?: string } | null {
@@ -250,6 +279,8 @@ export type ChatPageProps = {
   showSideNav?: boolean;
   /** When user returns from Stripe with payment_success, add confirmation message */
   paymentSuccessOrderId?: string | null;
+  /** Thread ID from return URL; used to restore thread if localStorage was cleared */
+  paymentSuccessThreadId?: string;
   /** Called after payment success message is shown. Parent should clear URL params. */
   onPaymentSuccessHandled?: () => void;
 };
@@ -265,6 +296,7 @@ export function ChatPage(props: ChatPageProps = {}) {
     embeddedInLanding,
     showSideNav: showSideNavProp,
     paymentSuccessOrderId,
+    paymentSuccessThreadId,
     onPaymentSuccessHandled,
   } = props;
   const typingEnabled = chatConfig?.chat_typing_enabled !== false;
@@ -283,7 +315,15 @@ export function ChatPage(props: ChatPageProps = {}) {
   const [preCheckoutOrderId, setPreCheckoutOrderId] = useState<string | null>(null);
   const [showPostCheckoutSignInBanner, setShowPostCheckoutSignInBanner] = useState(false);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "like" | "dislike">>({});
-  const [discoveryCycleIndex, setDiscoveryCycleIndex] = useState<Record<string, number>>({});
+  const [latestOrder, setLatestOrder] = useState<{
+    id: string;
+    status: string;
+    payment_status: string;
+    total_amount: number;
+    currency: string;
+    created_at: string;
+    items?: Array<{ item_name: string; quantity: number; total_price: number }>;
+  } | null>(null);
   const e2eEnabled = e2eProp ?? true;
   const sessionId = useSessionId();
   const { isSignedIn } = useAuthState();
@@ -314,7 +354,14 @@ export function ChatPage(props: ChatPageProps = {}) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (hydrated && paymentSuccessThreadId && !threadId) {
+      setThreadId(paymentSuccessThreadId);
+    }
+  }, [hydrated, paymentSuccessThreadId, threadId, setThreadId]);
+
   const prevLoadedThreadIdRef = useRef<string | null>(null);
+  const paymentSuccessHandledRef = useRef(false);
   useEffect(() => {
     if (!hydrated || !threadId) return;
     if (prevLoadedThreadIdRef.current === threadId) return;
@@ -338,12 +385,24 @@ export function ChatPage(props: ChatPageProps = {}) {
             isFromHistory: true,
           })
         );
+        if (paymentSuccessOrderId && !paymentSuccessHandledRef.current) {
+          const confirmMsg = { role: "assistant" as const, content: "Payment confirmed! Thank you for your order." };
+          msgs.push({
+            ...confirmMsg,
+            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          });
+          paymentSuccessHandledRef.current = true;
+          persistMessage(confirmMsg);
+          if (!isSignedIn) setShowPostCheckoutSignInBanner(true);
+          onPaymentSuccessHandled?.();
+        }
         setMessages(msgs);
         if (data.thread?.bundle_id) setBundleId(data.thread.bundle_id);
         setPendingApprovals(data.pending_approvals ?? []);
+        setLatestOrder(data.thread?.latest_order ?? null);
       })
       .catch(() => {});
-  }, [hydrated, threadId, anonymousId, userId, setBundleId]);
+  }, [hydrated, threadId, anonymousId, userId, setBundleId, paymentSuccessOrderId, persistMessage, isSignedIn, onPaymentSuccessHandled]);
 
   const [threads, setThreads] = useState<Array<{ id: string; title: string; updated_at: string }>>([]);
   const fetchThreads = useCallback(() => {
@@ -370,6 +429,7 @@ export function ChatPage(props: ChatPageProps = {}) {
       setThreadId(id);
       setMessages([]);
       setPendingApprovals([]);
+      setLatestOrder(null);
       if (!id) setBundleId(null);
       fetchThreads(); // Refresh list so previous conversation appears when switching to new chat
     },
@@ -487,6 +547,8 @@ export function ChatPage(props: ChatPageProps = {}) {
         } else {
           payload.user_id = sessionId;
         }
+        if (bundleId) payload.bundle_id = bundleId;
+        if (latestOrder?.id) payload.order_id = latestOrder.id;
 
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -543,7 +605,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (fromPrompt) onPromptSent?.();
       }
     },
-    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId, fetchThreads]
+    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId, fetchThreads, bundleId, latestOrder]
   );
 
   const lastSentPromptRef = useRef<string | null>(null);
@@ -557,16 +619,15 @@ export function ChatPage(props: ChatPageProps = {}) {
     if (!promptToSend?.trim()) lastSentPromptRef.current = null;
   }, [promptToSend]);
 
-  const paymentSuccessHandledRef = useRef(false);
   useEffect(() => {
     if (!paymentSuccessOrderId || !hydrated || paymentSuccessHandledRef.current) return;
+    if (threadId && (userId || anonymousId)) return;
     const content = "Payment confirmed! Thank you for your order.";
     addMessage({ role: "assistant", content });
-    persistMessage({ role: "assistant", content });
-    if (!userId) setShowPostCheckoutSignInBanner(true);
+    if (!isSignedIn) setShowPostCheckoutSignInBanner(true);
     paymentSuccessHandledRef.current = true;
     onPaymentSuccessHandled?.();
-  }, [paymentSuccessOrderId, hydrated, threadId, addMessage, persistMessage, onPaymentSuccessHandled, userId]);
+  }, [paymentSuccessOrderId, hydrated, threadId, userId, anonymousId, addMessage, onPaymentSuccessHandled, isSignedIn]);
 
   const handleAction = useCallback(
     async (data: ActionPayload) => {
@@ -752,6 +813,24 @@ export function ChatPage(props: ChatPageProps = {}) {
           return;
         }
 
+        if (action === "edit_order") {
+          const bid = data.bundle_id || bundleId;
+          if (bid) {
+            const res = await fetch(`/api/bundles/${bid}`);
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || "Bundle not found");
+            const addMsg = { role: "assistant" as const, content: json.summary, adaptiveCard: json.adaptive_card };
+            addMessage(addMsg);
+            persistMessage(addMsg);
+            setBundleId(bid);
+            return;
+          }
+          const addMsg = { role: "assistant" as const, content: "What would you like to change? You can add more items or remove items from your bundle." };
+          addMessage(addMsg);
+          persistMessage(addMsg);
+          return;
+        }
+
         if (action === "add_more") {
           const addMsg = { role: "assistant" as const, content: "What else would you like to add? Try searching for more products." };
           addMessage(addMsg);
@@ -770,7 +849,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         }
 
         if (action === "add_to_favorites" && data.product_id) {
-          if (!userId) {
+          if (!isSignedIn) {
             const addMsg = { role: "assistant" as const, content: "Sign in to save favorites." };
             addMessage(addMsg);
             persistMessage(addMsg);
@@ -808,7 +887,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         setLoading(false);
       }
     },
-    [addMessage, persistMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId, setShowPostCheckoutSignInBanner, setPendingPhoneOrderId, setPreCheckoutOrderId]
+    [addMessage, persistMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId, isSignedIn, setShowPostCheckoutSignInBanner, setPendingPhoneOrderId, setPreCheckoutOrderId]
   );
 
   const submitFeedback = useCallback(
@@ -918,6 +997,30 @@ export function ChatPage(props: ChatPageProps = {}) {
               })}
             </div>
           )}
+          {latestOrder && (
+            <div className="w-full max-w-3xl mx-auto mb-4">
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <p className="font-medium text-emerald-400">
+                      Order #{latestOrder.id.slice(0, 8)}… • {latestOrder.status}
+                    </p>
+                    <p className="text-sm text-slate-400 mt-0.5">
+                      {latestOrder.currency} {latestOrder.total_amount.toFixed(2)} • Paid
+                    </p>
+                    {latestOrder.items && latestOrder.items.length > 0 && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        {latestOrder.items.map((i) => `${i.item_name} × ${i.quantity}`).join(", ")}
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Continue chatting below for order updates or support.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           {messages.length === 0 && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -1000,20 +1103,54 @@ export function ChatPage(props: ChatPageProps = {}) {
                       </p>
                     )}
                     {m.adaptiveCard && (() => {
-                      const rawCard = filterE2EActions(m.adaptiveCard, e2eEnabled);
+                      const rawCard = filterE2EActions(m.adaptiveCard, e2eEnabled) as Record<string, unknown>;
                       const productContainers = extractProductContainersFromCard(rawCard);
-                      const canCycle = productContainers.length >= 2 && productContainers.length <= MAX_DISCOVERY_CYCLE;
-                      const cycleIdx = canCycle ? (discoveryCycleIndex[m.id] ?? 0) % productContainers.length : 0;
-                      const displayCard = canCycle
-                        ? buildCycledProductCard(rawCard as Record<string, unknown>, productContainers, cycleIdx)
-                        : rawCard;
+                      const products = productContainers
+                        .map((c) => extractProductInfoFromContainer(c))
+                        .filter((p): p is ProductInfo => p !== null);
+                      const header = getHeaderTextFromCard(rawCard) || (products.length > 0 ? `Found ${products.length} product(s)` : "");
+                      if (products.length > 0) {
+                        return (
+                          <div className="mt-3 w-full min-w-0 space-y-3 text-sm" style={{ fontSize: `${fontSizePx}px` }}>
+                            <p className="font-medium">{header}</p>
+                            {products.map((p, idx) => (
+                              <div key={p.product_id} className="rounded-lg bg-[var(--card)]/60 px-3 py-2 border border-[var(--border)]/50">
+                                <p className="text-[rgb(var(--color-text-secondary))] text-xs mb-1">
+                                  Option {idx + 1} of {products.length}
+                                </p>
+                                <p className="font-medium">{p.name}</p>
+                                {p.price && <p className="text-sm text-[rgb(var(--color-text-secondary))]">{p.price}</p>}
+                                <div className="mt-2 flex gap-2 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAction({ action: "add_to_bundle", product_id: p.product_id })}
+                                    className="text-xs px-2 py-1 rounded bg-[var(--primary-color)]/20 text-[var(--primary-color)] hover:bg-[var(--primary-color)]/30 transition-colors"
+                                  >
+                                    Add to Bundle
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAction({ action: "view_details", product_id: p.product_id })}
+                                    className="text-xs px-2 py-1 rounded border border-[var(--border)] text-[rgb(var(--color-text-secondary))] hover:bg-[var(--border)]/30 transition-colors"
+                                  >
+                                    Details
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAction({ action: "add_to_favorites", product_id: p.product_id, product_name: p.product_name || p.name })}
+                                    className="text-xs px-2 py-1 rounded border border-[var(--border)] text-[rgb(var(--color-text-secondary))] hover:bg-[var(--border)]/30 transition-colors"
+                                  >
+                                    Favorite
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }
                       return (
                         <div className="mt-3 w-full min-w-0">
-                          <AdaptiveCardRenderer
-                            card={displayCard}
-                            onAction={handleAction}
-                            className="w-full"
-                          />
+                          <AdaptiveCardRenderer card={rawCard} onAction={handleAction} className="w-full" />
                         </div>
                       );
                     })()}
@@ -1131,18 +1268,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                         type="button"
                         aria-label="Look for more options"
                         title="Look for more options"
-                        onClick={() => {
-                          const productContainers = extractProductContainersFromCard(m.adaptiveCard ?? null);
-                          const canCycle = productContainers.length >= 2 && productContainers.length <= MAX_DISCOVERY_CYCLE;
-                          if (canCycle) {
-                            setDiscoveryCycleIndex((prev) => {
-                              const idx = (prev[m.id] ?? 0) + 1;
-                              return { ...prev, [m.id]: idx % productContainers.length };
-                            });
-                          } else {
-                            sendMessage("Show me more options", false);
-                          }
-                        }}
+                        onClick={() => sendMessage("Show me more options", false)}
                         className="rounded p-1.5 text-slate-400 transition-colors hover:bg-[var(--border)] hover:text-white"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1225,6 +1351,7 @@ export function ChatPage(props: ChatPageProps = {}) {
       {paymentOrderId && (
         <PaymentModal
           orderId={paymentOrderId}
+          threadId={threadId}
           onClose={() => setPaymentOrderId(null)}
           onSuccess={() => {
             const confirmMsg = { role: "assistant" as const, content: "Payment confirmed! Thank you for your order." };
@@ -1290,7 +1417,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         )}
       </AnimatePresence>
 
-      {showPostCheckoutSignInBanner && !userId && hasClerk && (
+      {showPostCheckoutSignInBanner && !isSignedIn && hasClerk && (
         <div className="fixed bottom-20 left-4 right-4 z-50 mx-auto max-w-2xl md:left-1/2 md:right-auto md:-translate-x-1/2">
           <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-center justify-between gap-4 shadow-lg">
             <p className="text-sm text-[var(--foreground)]">

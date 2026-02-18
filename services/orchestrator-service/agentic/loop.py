@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from clients import get_order_status
 from .planner import plan_next_action
 from .tools import execute_tool
 
@@ -208,6 +209,8 @@ async def run_agentic_loop(
     platform: Optional[str] = None,
     thread_id: Optional[str] = None,
     messages: Optional[List[Dict[str, Any]]] = None,
+    bundle_id: Optional[str] = None,
+    order_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run the agentic decision loop until completion.
@@ -246,6 +249,8 @@ async def run_agentic_loop(
         "last_tool_result": None,
         "iteration": 0,
         "agent_reasoning": [],
+        "bundle_id": bundle_id,
+        "order_id": order_id,
     }
 
     intent_data = None
@@ -336,6 +341,11 @@ async def run_agentic_loop(
                 tool_args.setdefault("platform", platform)
                 tool_args.setdefault("thread_id", thread_id)
 
+            if tool_name == "track_order":
+                tool_args = dict(tool_args)
+                if not tool_args.get("order_id") and state.get("order_id"):
+                    tool_args["order_id"] = state["order_id"]
+
             if tool_name == "discover_composite" and intent_data and intent_data.get("intent_type") == "discover_composite":
                 tool_args = dict(tool_args)
                 if not tool_args.get("search_queries"):
@@ -368,6 +378,7 @@ async def run_agentic_loop(
                 web_search_fn=_web_search,
                 get_weather_fn=_get_weather,
                 get_upcoming_occasions_fn=_get_upcoming_occasions,
+                track_order_fn=get_order_status,
             )
 
             state["last_tool_result"] = result
@@ -440,6 +451,8 @@ async def run_agentic_loop(
             elif tool_name == "create_standing_intent":
                 intent_data = intent_data or {}
                 intent_data["standing_intent"] = result
+            elif tool_name == "track_order":
+                engagement_data["order_status"] = result
             elif tool_name == "complete":
                 summary = (result.get("summary") or "").strip()
                 if summary:

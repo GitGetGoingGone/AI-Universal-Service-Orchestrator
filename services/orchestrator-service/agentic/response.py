@@ -45,9 +45,18 @@ def _build_context(result: Dict[str, Any]) -> str:
     intent_type = intent.get("intent_type", "unknown")
     parts.append(f"Intent: {intent_type}")
 
-    # Add engagement context (weather, events, web search) when available
+    # Add engagement context (weather, events, web search, order status) when available
     if engagement:
         eng_parts = []
+        if engagement.get("order_status") and "error" not in engagement.get("order_status", {}):
+            os = engagement["order_status"]
+            status = os.get("status", "unknown")
+            payment = os.get("payment_status", "")
+            total = os.get("total_amount")
+            curr = os.get("currency", "USD")
+            items = os.get("items") or []
+            item_str = ", ".join(f"{i.get('item_name', '')} x{i.get('quantity', 1)}" for i in items[:5] if isinstance(i, dict))
+            eng_parts.append(f"Order status: {status} (payment: {payment}). Total: {curr} {total}. Items: {item_str}")
         if engagement.get("weather"):
             w = engagement["weather"]
             eng_parts.append(f"Weather in {w.get('location', '')}: {w.get('description', '')} ({w.get('temp')}°F)" if w.get("temp") else f"Weather: {w.get('description', '')}")
@@ -61,7 +70,10 @@ def _build_context(result: Dict[str, Any]) -> str:
             parts.append("Engagement context: " + ". ".join(eng_parts))
 
     if intent_type in ("checkout", "track", "support"):
-        parts.append(f"User needs help with {intent_type}. Direct them appropriately.")
+        if engagement.get("order_status") and "error" not in engagement.get("order_status", {}):
+            parts.append("Order status was fetched. Summarize it naturally for the user (status, items, total). Do not ask for order ID.")
+        else:
+            parts.append(f"User needs help with {intent_type}. Direct them appropriately.")
     elif intent_type == "browse":
         parts.append("User is browsing. Engage conversationally. Ask what they're thinking — special occasion, gifts, exploring? Do NOT list all categories.")
     elif intent_type == "discover_composite":
