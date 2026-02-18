@@ -1,8 +1,11 @@
 """Chat endpoint - Agentic AI with Intent → Discovery orchestration."""
 
-from typing import Any, Dict, List, Literal, Optional
+import asyncio
+import json
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from clients import (
@@ -18,6 +21,131 @@ from packages.shared.utils.api_response import chat_first_response, request_id_f
 from packages.shared.json_ld.error import error_ld
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
+
+
+async def _stream_chat_events(
+    *,
+    body: ChatRequest,
+    agentic: bool,
+    user_id: Optional[str],
+    _resolve: Callable,
+    _discover: Callable,
+    _create_standing_intent: Callable,
+    adaptive_cards: Optional[bool],
+    request_id: str,
+):
+    """Async generator yielding SSE events for streaming chat."""
+    queue: asyncio.Queue = asyncio.Queue()
+    result_holder: List[Optional[Dict]] = [None]
+    err_holder: List[Optional[Exception]] = [None]
+
+    async def on_thinking(msg: str, ctx: Optional[Dict]) -> None:
+        await queue.put(("thinking", {"text": msg, "step": (ctx or {}).get("step", "")}))
+
+    async def run_loop() -> None:
+        try:
+            r = await run_agentic_loop(
+                body.text,
+                user_id=user_id,
+                limit=body.limit,
+                resolve_intent_fn=_resolve,
+                discover_products_fn=_discover,
+                start_orchestration_fn=start_orchestration,
+                create_standing_intent_fn=_create_standing_intent,
+                use_agentic=agentic,
+                platform=body.platform,
+                thread_id=body.thread_id,
+                messages=body.messages,
+                bundle_id=body.bundle_id,
+                order_id=body.order_id,
+                on_thinking=on_thinking,
+            )
+            result_holder[0] = r
+        except Exception as e:
+            err_holder[0] = e
+        finally:
+            await queue.put(("complete", None))
+
+    loop_task = asyncio.create_task(run_loop())
+
+    while True:
+        try:
+            event_type, data = await asyncio.wait_for(queue.get(), timeout=0.5)
+        except asyncio.TimeoutError:
+            yield "event: ping\ndata: {}\n\n"
+            continue
+        if event_type == "thinking":
+            yield f"event: thinking\ndata: {json.dumps(data)}\n\n"
+        elif event_type == "complete":
+            break
+
+    await loop_task
+
+    if err_holder[0]:
+        yield f"event: error\ndata: {json.dumps({'error': str(err_holder[0])})}\n\n"
+        return
+
+    result = result_holder[0]
+    if not result:
+        yield f"event: error\ndata: {json.dumps({'error': 'No result'})}\n\n"
+        return
+
+    if "error" in result:
+        yield f"event: error\ndata: {json.dumps({'error': result['error']})}\n\n"
+        return
+
+    use_adaptive_cards = True
+    if adaptive_cards is not None:
+        use_adaptive_cards = adaptive_cards
+    else:
+        try:
+            from db import get_adaptive_cards_setting
+            use_adaptive_cards = await get_adaptive_cards_setting(
+                partner_id=body.partner_id,
+                user_id=user_id,
+            )
+        except Exception:
+            pass
+
+    adaptive_card = result.get("adaptive_card") if use_adaptive_cards else None
+    agent_reasoning = result.get("agent_reasoning", [])
+    if adaptive_card and agent_reasoning:
+        reasoning_text = " • ".join(r for r in agent_reasoning if r)
+        if reasoning_text:
+            card_body = list(adaptive_card.get("body", []))
+            card_body.insert(
+                0,
+                {
+                    "type": "Container",
+                    "style": "default",
+                    "items": [
+                        {"type": "TextBlock", "text": reasoning_text[:200], "size": "Small", "wrap": True},
+                    ],
+                },
+            )
+            adaptive_card = {**adaptive_card, "body": card_body}
+
+    planner_message = (result.get("planner_complete_message") or "").strip()
+    pd = result.get("data", {}).get("products")
+    has_products = bool(pd and isinstance(pd, dict) and (pd.get("products") or pd.get("categories")))
+    generic_messages = ("processed your request.", "done.", "done")
+    if planner_message and not (has_products and planner_message.lower() in generic_messages):
+        summary = planner_message
+    else:
+        summary = await generate_engagement_response(body.text, result)
+        if not summary:
+            summary = _build_summary(result)
+
+    response_data = chat_first_response(
+        data=result.get("data", {}),
+        machine_readable=result.get("machine_readable", {}),
+        adaptive_card=adaptive_card,
+        request_id=request_id,
+        summary=summary,
+        agent_reasoning=agent_reasoning,
+    )
+    body_json = json.dumps(response_data, default=str)
+    yield f"event: done\ndata: {body_json}\n\n"
 
 
 class ChatRequest(BaseModel):
@@ -46,6 +174,10 @@ async def chat(
     adaptive_cards: Optional[bool] = Query(
         None,
         description="Override adaptive cards: true=show, false=conversational only. If omitted, uses platform/partner/user settings.",
+    ),
+    stream: bool = Query(
+        False,
+        description="When true, return SSE stream with thinking events and final done event.",
     ),
 ):
     """
@@ -124,6 +256,26 @@ async def chat(
             platform=platform,
             thread_id=thread_id,
             user_id=user_id,
+        )
+
+    if stream:
+        return StreamingResponse(
+            _stream_chat_events(
+                body=body,
+                agentic=agentic,
+                user_id=user_id,
+                _resolve=_resolve,
+                _discover=_discover,
+                _create_standing_intent=_create_standing_intent,
+                adaptive_cards=adaptive_cards,
+                request_id=request_id,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     try:

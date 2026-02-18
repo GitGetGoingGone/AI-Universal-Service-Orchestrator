@@ -1,7 +1,7 @@
 """Agentic decision loop: Observe → Reason → Plan → Execute → Reflect."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import httpx
 
@@ -211,6 +211,7 @@ async def run_agentic_loop(
     messages: Optional[List[Dict[str, Any]]] = None,
     bundle_id: Optional[str] = None,
     order_id: Optional[str] = None,
+    on_thinking: Optional[Callable[[str, Optional[Dict]], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
     """
     Run the agentic decision loop until completion.
@@ -290,6 +291,7 @@ async def run_agentic_loop(
             intent_data = intent_result.get("data", intent_result)
             state["last_tool_result"] = intent_result
             state["agent_reasoning"].append("Intent-first: resolved user message.")
+            await _emit_thinking(on_thinking, "intent_resolved", intent_data or {})
 
             # Rules layer: upsell, surge, promo (after intent)
             try:
@@ -343,6 +345,11 @@ async def run_agentic_loop(
             plan = None
 
         if plan is None:
+            ctx = intent_data or {}
+            if rec == "complete_with_probing":
+                await _emit_thinking(on_thinking, "before_complete_probing", ctx)
+            elif rec == "handle_unrelated":
+                await _emit_thinking(on_thinking, "before_handle_unrelated", ctx)
             plan = await plan_next_action(
                 user_message, state, max_iterations=max_iterations, llm_config=llm_config
             )
@@ -439,6 +446,20 @@ async def run_agentic_loop(
                 if not tool_args.get("order_id") and state.get("order_id"):
                     tool_args["order_id"] = state["order_id"]
 
+            # Emit thinking before tool execution
+            ctx = dict(intent_data or {})
+            ctx["location"] = ctx.get("location") or _extract_location(intent_data) or tool_args.get("location")
+            ctx["query"] = tool_args.get("query") or intent_data.get("search_query")
+            ctx["experience_name"] = tool_args.get("experience_name") or (intent_data or {}).get("experience_name")
+            if tool_name == "get_weather":
+                await _emit_thinking(on_thinking, "before_weather", {**ctx, "location": ctx.get("location") or tool_args.get("location", "your area")})
+            elif tool_name == "get_upcoming_occasions":
+                await _emit_thinking(on_thinking, "before_occasions", {**ctx, "location": ctx.get("location") or tool_args.get("location", "your area")})
+            elif tool_name == "discover_products":
+                await _emit_thinking(on_thinking, "before_discover_products", {**ctx, "query": ctx.get("query") or "options"})
+            elif tool_name == "discover_composite":
+                await _emit_thinking(on_thinking, "before_discover_composite", ctx)
+
             if tool_name == "discover_composite" and intent_data and intent_data.get("intent_type") == "discover_composite":
                 tool_args = dict(tool_args)
                 if not tool_args.get("search_queries"):
@@ -488,14 +509,19 @@ async def run_agentic_loop(
                 engagement_data["web_search"] = result.get("data", result)
             elif tool_name == "get_weather":
                 engagement_data["weather"] = result.get("data", result)
+                wd = result.get("data", result) or {}
+                await _emit_thinking(on_thinking, "after_weather", {"weather_desc": wd.get("description", ""), "location": wd.get("location", "")})
             elif tool_name == "get_upcoming_occasions":
                 engagement_data["occasions"] = result.get("data", result)
             elif tool_name == "discover_composite":
                 products_data = result.get("data", result)
                 adaptive_card = result.get("adaptive_card")
                 machine_readable = result.get("machine_readable")
+                pc = (products_data or {}).get("products") or []
+                await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0})
                 # LLM-suggested bundle options: 2-4 options, each one product per category (when enabled)
                 if products_data and (products_data.get("categories") or products_data.get("products")):
+                    await _emit_thinking(on_thinking, "before_bundle", intent_data or {})
                     try:
                         from api.admin import _get_platform_config
                         cfg = _get_platform_config() or {}
@@ -541,6 +567,9 @@ async def run_agentic_loop(
                 products_data = result.get("data", result)
                 adaptive_card = result.get("adaptive_card")
                 machine_readable = result.get("machine_readable")
+                pd = products_data or {}
+                pc = pd.get("products") or []
+                await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0})
             elif tool_name == "create_standing_intent":
                 intent_data = intent_data or {}
                 intent_data["standing_intent"] = result
@@ -551,6 +580,8 @@ async def run_agentic_loop(
                 if summary:
                     state["planner_complete_message"] = summary
                 break
+
+    await _emit_thinking(on_thinking, "before_response", intent_data or {})
 
     # Build final response
     out = _build_response(
@@ -650,6 +681,46 @@ def _extract_budget(intent_data: Optional[Dict[str, Any]]) -> Optional[int]:
                 except (TypeError, ValueError):
                     pass
     return None
+
+
+def _thinking_message(step: str, context: Dict[str, Any]) -> str:
+    """Derive dynamic thinking message from step and current state."""
+    templates = {
+        "intent_resolved": "Understanding what you're looking for...",
+        "before_complete_probing": "Let me ask a few questions to tailor this...",
+        "before_handle_unrelated": "I'd be happy to show you options! Let me put something together...",
+        "before_weather": "Looking up weather for {location}...",
+        "after_weather": None,  # Dynamic from weather_desc
+        "before_occasions": "Checking what's happening in {location}...",
+        "before_discover_products": "Looking for the best {query}...",
+        "before_discover_composite": "Looking for the best options for your {experience_name}...",
+        "after_discover": "Wow, look at all the options we have, let me pick the best...",
+        "before_bundle": "Curating your perfect bundle...",
+        "before_response": "Putting it all together...",
+    }
+    msg = templates.get(step)
+    if msg is None and step == "after_weather":
+        desc = (context.get("weather_desc") or "").lower()
+        if any(w in desc for w in ("rain", "storm", "snow", "chilly", "cold")):
+            return "Looks chilly next week - maybe pick a different day?"
+        return "Looks perfect for outdoor plans!"
+    if msg is None:
+        return "Thinking..."
+    loc = context.get("location") or "your area"
+    query = context.get("query") or context.get("search_query") or "options"
+    exp = context.get("experience_name") or "experience"
+    return msg.format(location=loc, query=query, experience_name=exp)
+
+
+async def _emit_thinking(
+    on_thinking: Optional[Callable[[str, Optional[Dict]], Awaitable[None]]],
+    step: str,
+    context: Dict[str, Any],
+) -> None:
+    """Emit thinking message if callback provided."""
+    if on_thinking:
+        msg = _thinking_message(step, context)
+        await on_thinking(msg, {"step": step, **context})
 
 
 def _build_response(

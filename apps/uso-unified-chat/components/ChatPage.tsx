@@ -322,6 +322,7 @@ export function ChatPage(props: ChatPageProps = {}) {
   >([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [thinkingText, setThinkingText] = useState<string | null>(null);
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
   const [pendingPhoneOrderId, setPendingPhoneOrderId] = useState<string | null>(null);
   const [preCheckoutOrderId, setPreCheckoutOrderId] = useState<string | null>(null);
@@ -561,7 +562,9 @@ export function ChatPage(props: ChatPageProps = {}) {
         }
         if (bundleId) payload.bundle_id = bundleId;
         if (latestOrder?.id) payload.order_id = latestOrder.id;
+        payload.stream = true;
 
+        setThinkingText(null);
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -579,51 +582,127 @@ export function ChatPage(props: ChatPageProps = {}) {
           error?: string;
           adaptive_card?: Record<string, unknown>;
         };
-        let data: ChatResponse;
-        try {
-          data = (await res.json()) as ChatResponse;
-        } catch {
-          throw new Error(res.ok ? "Invalid response" : `HTTP ${res.status}`);
-        }
-        if (!res.ok) {
-          const errMsg = data?.error || `HTTP ${res.status}`;
-          throw new Error(errMsg);
-        }
 
-        const productList = data.data?.products?.products ?? [];
-        const assistantContent =
-          data.summary ??
-          (productList.length > 0
-            ? `Found ${productList.length} products`
-            : data.data?.text ?? data.message ?? JSON.stringify(data));
-
-        const newThreadId = (data as { thread_id?: string }).thread_id;
-        const threadTitle = (data as { thread_title?: string }).thread_title;
-        if (newThreadId && !threadId) {
-          setThreadId(newThreadId);
-          setThreads((prev) => {
-            if (prev.some((t) => t.id === newThreadId)) return prev;
-            return [
-              {
-                id: newThreadId,
-                title: threadTitle || userMessage.slice(0, 50) || "New chat",
-                updated_at: new Date().toISOString(),
-              },
-              ...prev,
-            ];
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("text/event-stream") && res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let data: ChatResponse = {};
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n\n");
+            buffer = lines.pop() || "";
+            for (const block of lines) {
+              let eventType = "";
+              let eventData = "";
+              for (const line of block.split("\n")) {
+                if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+                else if (line.startsWith("data: ")) eventData = line.slice(6);
+              }
+              if (eventType === "thinking" && eventData) {
+                try {
+                  const parsed = JSON.parse(eventData) as { text?: string };
+                  setThinkingText(parsed.text || "Thinking...");
+                } catch {
+                  setThinkingText(eventData || "Thinking...");
+                }
+              } else if (eventType === "done" && eventData) {
+                try {
+                  data = JSON.parse(eventData) as ChatResponse;
+                } catch {
+                  /* ignore */
+                }
+              } else if (eventType === "error" && eventData) {
+                try {
+                  const err = JSON.parse(eventData) as { error?: string };
+                  throw new Error(err.error || "Stream error");
+                } catch (e) {
+                  if (e instanceof Error) throw e;
+                  throw new Error("Stream error");
+                }
+              }
+            }
+          }
+          if (!res.ok) {
+            const errMsg = (data as { error?: string }).error || `HTTP ${res.status}`;
+            throw new Error(errMsg);
+          }
+          const productList = data.data?.products?.products ?? [];
+          const assistantContent =
+            data.summary ??
+            (productList.length > 0
+              ? `Found ${productList.length} products`
+              : data.data?.text ?? data.message ?? JSON.stringify(data));
+          const newThreadId = (data as { thread_id?: string }).thread_id;
+          const threadTitle = (data as { thread_title?: string }).thread_title;
+          if (newThreadId && !threadId) {
+            setThreadId(newThreadId);
+            setThreads((prev) => {
+              if (prev.some((t) => t.id === newThreadId)) return prev;
+              return [
+                {
+                  id: newThreadId,
+                  title: threadTitle || userMessage.slice(0, 50) || "New chat",
+                  updated_at: new Date().toISOString(),
+                },
+                ...prev,
+              ];
+            });
+          }
+          fetchThreads();
+          addMessage({
+            role: "assistant",
+            content: assistantContent,
+            adaptiveCard: data.adaptive_card,
+          });
+        } else {
+          let data: ChatResponse;
+          try {
+            data = (await res.json()) as ChatResponse;
+          } catch {
+            throw new Error(res.ok ? "Invalid response" : `HTTP ${res.status}`);
+          }
+          if (!res.ok) {
+            const errMsg = data?.error || `HTTP ${res.status}`;
+            throw new Error(errMsg);
+          }
+          const productList = data.data?.products?.products ?? [];
+          const assistantContent =
+            data.summary ??
+            (productList.length > 0
+              ? `Found ${productList.length} products`
+              : data.data?.text ?? data.message ?? JSON.stringify(data));
+          const newThreadId = (data as { thread_id?: string }).thread_id;
+          const threadTitle = (data as { thread_title?: string }).thread_title;
+          if (newThreadId && !threadId) {
+            setThreadId(newThreadId);
+            setThreads((prev) => {
+              if (prev.some((t) => t.id === newThreadId)) return prev;
+              return [
+                {
+                  id: newThreadId,
+                  title: threadTitle || userMessage.slice(0, 50) || "New chat",
+                  updated_at: new Date().toISOString(),
+                },
+                ...prev,
+              ];
+            });
+          }
+          fetchThreads();
+          addMessage({
+            role: "assistant",
+            content: assistantContent,
+            adaptiveCard: data.adaptive_card,
           });
         }
-        fetchThreads();
-
-        addMessage({
-          role: "assistant",
-          content: assistantContent,
-          adaptiveCard: data.adaptive_card,
-        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         addMessage({ role: "assistant", content: `Error: ${msg}` });
       } finally {
+        setThinkingText(null);
         setLoading(false);
         if (fromPrompt) onPromptSent?.();
       }
@@ -1358,7 +1437,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                     className="ml-0.5"
                     style={{ fontSize: thinkingFontSizePx, color: thinkingColor }}
                   >
-                    Thinking...
+                    {thinkingText ?? "Thinking..."}
                   </span>
                 </div>
               </div>
