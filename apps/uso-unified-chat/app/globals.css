@@ -121,6 +121,19 @@ body {
   animation: typing-dot-3 1.4s ease-in-out 0.4s infinite;
 }
 
+/* Markdown in chat messages */
+.chat-markdown p { margin: 0.25em 0; }
+.chat-markdown p:first-child { margin-top: 0; }
+.chat-markdown p:last-child { margin-bottom: 0; }
+.chat-markdown ul, .chat-markdown ol { margin: 0.25em 0; padding-left: 1.25em; }
+.chat-markdown li { margin: 0.125em 0; }
+.chat-markdown strong { font-weight: 600; }
+.chat-markdown em { font-style: italic; }
+.chat-markdown code { background: rgba(255,255,255,0.1); padding: 0.125em 0.25em; border-radius: 4px; font-size: 0.9em; }
+.chat-markdown pre { background: rgba(255,255,255,0.08); padding: 0.5em; border-radius: 6px; overflow-x: auto; margin: 0.5em 0; }
+.chat-markdown pre code { background: none; padding: 0; }
+.chat-markdown a { color: var(--primary-color); text-decoration: underline; }
+
 /* Thinking indicator - fade and pulse animations */
 @keyframes thinking-fade {
   0%, 100% { opacity: 0.4; }

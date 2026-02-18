@@ -36,6 +36,7 @@ function FlipWord() {
     </div>
   );
 }
+import ReactMarkdown from "react-markdown";
 import { useAuthState, hasClerk } from "@/components/AuthWrapper";
 import { SignInButton } from "@clerk/nextjs";
 import { AdaptiveCardRenderer, type ActionPayload } from "@/components/AdaptiveCardRenderer";
@@ -1064,7 +1065,7 @@ export function ChatPage(props: ChatPageProps = {}) {
       <main
         className={`h-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 py-6 ${embeddedInLanding ? "border border-[var(--border)] rounded-xl" : ""} ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}
       >
-        <div className={`mx-auto min-w-0 space-y-6 ${messages.length === 0 ? "flex w-full max-w-2xl flex-col items-center" : "max-w-3xl"}`}>
+        <div className={`mx-auto min-w-0 w-full max-w-3xl space-y-6 ${messages.length === 0 ? "flex flex-col items-center" : ""}`}>
           {embeddedInLanding && (userId || anonymousId) && (
             <div className="flex justify-end">
               <select
@@ -1205,16 +1206,16 @@ export function ChatPage(props: ChatPageProps = {}) {
                 exit={{ opacity: 0 }}
                 className={`flex min-w-0 w-full ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                <div className="flex min-w-0 flex-col gap-1">
+                <div className="flex min-w-0 w-full flex-col gap-1">
                   <div
-                    className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 ${
+                    className={`min-w-0 rounded-2xl px-4 py-3 ${
                       m.role === "user"
-                        ? "bg-[var(--primary-color)] text-[var(--primary-foreground)]"
-                        : "bg-[var(--card)] text-[var(--card-foreground)]"
+                        ? "max-w-[85%] self-end bg-[var(--primary-color)] text-[var(--primary-foreground)]"
+                        : "w-full max-w-full bg-[var(--card)] text-[var(--card-foreground)]"
                     }`}
                   >
                     {m.content && (
-                      <p className="whitespace-pre-wrap" style={{ fontSize: `${fontSizePx}px` }}>
+                      <div className="chat-markdown" style={{ fontSize: `${fontSizePx}px` }}>
                         {m.role === "assistant" && typingEnabled && !m.isFromHistory ? (
                           <TypewriterText
                             text={m.content}
@@ -1222,9 +1223,9 @@ export function ChatPage(props: ChatPageProps = {}) {
                             enabled={typingEnabled}
                           />
                         ) : (
-                          m.content
+                          <ReactMarkdown>{m.content}</ReactMarkdown>
                         )}
-                      </p>
+                      </div>
                     )}
                     {m.adaptiveCard && (() => {
                       const rawCard = filterE2EActions(m.adaptiveCard, e2eEnabled) as Record<string, unknown>;
