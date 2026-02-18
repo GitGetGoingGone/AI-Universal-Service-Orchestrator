@@ -16,6 +16,9 @@ async def resolve_intent(
     text: str,
     user_id: Optional[str] = None,
     last_suggestion: Optional[str] = None,
+    recent_conversation: Optional[List[Dict[str, Any]]] = None,
+    probe_count: Optional[int] = None,
+    thread_context: Optional[Dict[str, Any]] = None,
     force_model: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -50,15 +53,20 @@ async def resolve_intent(
     if not system_prompt or not system_prompt.strip():
         logger.warning("Intent: No prompt from DB or file; using minimal fallback. Configure model_interaction_prompts or ensure packages/shared/prompts/intent_system.txt exists.")
         system_prompt = (
-            'You are an intent classifier. Return JSON: {"intent_type":"discover|checkout|track|support|browse","search_query":"","entities":[],"confidence_score":0.7}. '
-            "Use discover_composite for date night, birthday party, picnic."
+            'You are an intent classifier. Return JSON: {"intent_type":"discover|discover_composite|checkout|track|support|browse","search_query":"","search_queries":[],"experience_name":"","entities":[],"confidence_score":0.7}. '
+            "Use discover_composite for composed experiences (date night, birthday, picnic, anniversary, brunch, etc.)."
         )
     enabled = prompt_cfg.get("enabled", True) if prompt_cfg else True
     max_tokens = prompt_cfg.get("max_tokens", 500) if prompt_cfg else 500
 
     if llm_config and enabled and llm_config.get("api_key"):
         try:
-            result = await _llm_resolve(text, last_suggestion, llm_config, system_prompt, max_tokens)
+            result = await _llm_resolve(
+                text, last_suggestion, llm_config, system_prompt, max_tokens,
+                recent_conversation=recent_conversation,
+                probe_count=probe_count,
+                thread_context=thread_context,
+            )
             if result:
                 return result
             if force_model:
@@ -69,7 +77,12 @@ async def resolve_intent(
                 raise
             logger.warning("Intent LLM failed, falling back to heuristics: %s", e)
 
-    return _heuristic_resolve(text, last_suggestion)
+    return _heuristic_resolve(
+        text, last_suggestion,
+        recent_conversation=recent_conversation,
+        probe_count=probe_count,
+        thread_context=thread_context,
+    )
 
 
 async def _llm_resolve(
@@ -78,6 +91,10 @@ async def _llm_resolve(
     llm_config: Dict[str, Any],
     system_prompt: str,
     max_tokens: int = 500,
+    *,
+    recent_conversation: Optional[List[Dict[str, Any]]] = None,
+    probe_count: Optional[int] = None,
+    thread_context: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Call LLM to resolve intent. Returns parsed result or None on failure."""
     from packages.shared.platform_llm import get_llm_chat_client
@@ -92,6 +109,22 @@ async def _llm_resolve(
     user_content = f"User message: {text[:1500]}"
     if last_suggestion:
         user_content += f"\n\nLast assistant suggestion (for refinement context): {last_suggestion[:500]}"
+    if recent_conversation:
+        conv_str = "\n".join(
+            f"{m.get('role', '')}: {(m.get('content') or '')[:80]}" for m in recent_conversation[-4:]
+        )
+        if conv_str:
+            user_content += f"\n\nRecent conversation:\n{conv_str[:400]}"
+    if probe_count is not None and probe_count > 0:
+        user_content += f"\n\nProbe count: {probe_count}"
+    if thread_context:
+        parts = []
+        if thread_context.get("order_id"):
+            parts.append("order_id")
+        if thread_context.get("bundle_id"):
+            parts.append("bundle_id")
+        if parts:
+            user_content += f"\n\nThread context: {', '.join(parts)}"
     user_content += "\n\nReturn valid JSON only, no other text."
 
     try:
@@ -145,13 +178,59 @@ async def _llm_resolve(
         if intent_type == "discover_composite":
             out["search_queries"] = parsed.get("search_queries") or []
             out["experience_name"] = (parsed.get("experience_name") or "experience")[:200]
+            if parsed.get("unrelated_to_probing"):
+                out["unrelated_to_probing"] = True
+        rec = parsed.get("recommended_next_action")
+        if rec and str(rec) in ("discover_composite", "discover_products", "complete_with_probing", "handle_unrelated", "complete"):
+            out["recommended_next_action"] = str(rec)
         return out
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         logger.warning("Intent LLM parse error: %s", e)
         return None
 
 
-def _heuristic_resolve(text: str, last_suggestion: Optional[str] = None) -> Dict[str, Any]:
+# Generic search_queries for composite experiences (heuristic fallback only).
+# Works for many experience types: birthday, anniversary, date night, picnic, brunch, etc.
+_GENERIC_COMPOSITE_QUERIES = ["gifts", "dinner", "flowers"]
+
+
+def _extract_experience_name(text: str) -> Optional[str]:
+    """Extract experience name from probing/context text using common patterns."""
+    if not text or not isinstance(text, str):
+        return None
+    lower = text.strip().lower()
+    # Patterns: "plan a date night", "for your birthday party", "for a picnic", "anniversary dinner"
+    patterns = [
+        r"plan\s+(?:a|an|the)\s+([a-z]+(?:\s+[a-z]+){0,2})",
+        r"for\s+your\s+([a-z]+(?:\s+[a-z]+){0,2})",
+        r"for\s+(?:a|an)\s+([a-z]+(?:\s+[a-z]+)?)",
+        r"([a-z]+)\s+party",
+        r"([a-z]+)\s+celebration",
+        r"([a-z]+)\s+experience",
+    ]
+    for pat in patterns:
+        m = re.search(pat, lower)
+        if m:
+            name = m.group(1).strip()
+            if len(name) > 2 and name not in ("the", "a", "an", "your", "our"):
+                return name.replace(" ", "_") if " " in name else name
+    return None
+
+
+def _experience_from_probing(last_suggestion_lower: str) -> tuple:
+    """Derive search_queries and experience_name from probing context in last_suggestion."""
+    exp = _extract_experience_name(last_suggestion_lower)
+    return (_GENERIC_COMPOSITE_QUERIES, exp or "experience")
+
+
+def _heuristic_resolve(
+    text: str,
+    last_suggestion: Optional[str] = None,
+    *,
+    recent_conversation: Optional[List[Dict[str, Any]]] = None,
+    probe_count: Optional[int] = None,
+    thread_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Heuristic fallback using action-word stripping."""
     text_lower = text.strip().lower()
     if not text_lower or text_lower in ("hi", "hello", "hey", "help"):
@@ -160,22 +239,23 @@ def _heuristic_resolve(text: str, last_suggestion: Optional[str] = None) -> Dict
             "search_query": "",
             "entities": [],
             "confidence_score": 0.5,
+            "recommended_next_action": "discover_products",
         }
 
     # Checkout/track/support keywords
     if any(w in text_lower for w in ("checkout", "pay", "payment", "order")):
-        return {"intent_type": "checkout", "search_query": "", "entities": [], "confidence_score": 0.7}
+        return {"intent_type": "checkout", "search_query": "", "entities": [], "confidence_score": 0.7, "recommended_next_action": "complete"}
     if any(w in text_lower for w in ("track", "status", "where is", "shipped")):
-        return {"intent_type": "track", "search_query": "", "entities": [], "confidence_score": 0.7}
+        return {"intent_type": "track", "search_query": "", "entities": [], "confidence_score": 0.7, "recommended_next_action": "complete"}
     if any(w in text_lower for w in ("support", "help", "complaint", "refund")):
-        return {"intent_type": "support", "search_query": "", "entities": [], "confidence_score": 0.7}
+        return {"intent_type": "support", "search_query": "", "entities": [], "confidence_score": 0.7, "recommended_next_action": "complete"}
 
     # discover_composite: follow-up to probing (last_suggestion asked for date/budget/dietary/location)
     if last_suggestion:
         ls_lower = (last_suggestion or "").lower()
-        probe_keywords = ("date night", "plan a date", "birthday party", "budget", "dietary", "preferences", "what date", "location", "occasion", "add flowers", "add something")
+        probe_keywords = ("plan a ", "plan an ", "party", "budget", "dietary", "preferences", "what date", "location", "occasion", "add flowers", "add something")
         if any(k in ls_lower for k in probe_keywords):
-            # User is answering our probing questions
+            # User is answering our probing questions (date, budget, location, etc.)
             detail_indicators = [
                 "$", "dollar", "budget", "vegetarian", "vegan", "around", "dallas", "nyc", "location",
                 "casual", "romantic", "adventurous",
@@ -193,41 +273,46 @@ def _heuristic_resolve(text: str, last_suggestion: Optional[str] = None) -> Dict
                 entities = []
                 if "dallas" in text_lower or "dallas" in text:
                     entities.append({"type": "location", "value": "Dallas"})
+                sq, exp = _experience_from_probing(ls_lower)
                 return {
                     "intent_type": "discover_composite",
-                    "search_queries": ["flowers", "dinner", "movies"],
-                    "experience_name": "date night",
+                    "search_queries": sq,
+                    "experience_name": exp,
                     "entities": entities,
                     "confidence_score": 0.75,
+                    "recommended_next_action": "discover_composite",
                 }
+            # User did not answer our probing questions (anything: "show more options", "what's the weather", etc.)
+            sq, exp = _experience_from_probing(ls_lower)
+            return {
+                "intent_type": "discover_composite",
+                "search_queries": sq,
+                "experience_name": exp,
+                "entities": [],
+                "unrelated_to_probing": True,
+                "confidence_score": 0.7,
+                "recommended_next_action": "handle_unrelated",
+            }
 
-    # discover_composite: heuristic detection for common experience phrases
-    if "date night" in text_lower or ("plan" in text_lower and "date" in text_lower):
+    # discover_composite: heuristic detection for composite experience phrases
+    # "plan a X", "X party", "X celebration", "for a X" - supports many experience types
+    composite_indicators = (
+        "plan a ", "plan an ", "plan the ",
+        " party", " celebration", " experience",
+        "plan ", "organize ", "put together ",
+    )
+    if any(ind in text_lower for ind in composite_indicators) or re.search(
+        r"\b(plan|organize|arrange)\b.*\b(date|birthday|picnic|anniversary|brunch|dinner|outing)\b", text_lower
+    ):
+        exp = _extract_experience_name(text_lower) or "experience"
         return {
             "intent_type": "discover_composite",
             "search_query": "",
-            "search_queries": ["flowers", "dinner", "movies"],
-            "experience_name": "date night",
+            "search_queries": _GENERIC_COMPOSITE_QUERIES,
+            "experience_name": exp,
             "entities": [],
             "confidence_score": 0.7,
-        }
-    if "birthday" in text_lower and ("party" in text_lower or "celebration" in text_lower):
-        return {
-            "intent_type": "discover_composite",
-            "search_query": "",
-            "search_queries": ["cake", "flowers", "gifts"],
-            "experience_name": "birthday",
-            "entities": [],
-            "confidence_score": 0.7,
-        }
-    if "picnic" in text_lower:
-        return {
-            "intent_type": "discover_composite",
-            "search_query": "",
-            "search_queries": ["basket", "blanket", "food"],
-            "experience_name": "picnic",
-            "entities": [],
-            "confidence_score": 0.7,
+            "recommended_next_action": "complete_with_probing",
         }
 
     # Single-category discover: use "gifts" when user asks for gifts (better catalog match)
@@ -247,4 +332,5 @@ def _heuristic_resolve(text: str, last_suggestion: Optional[str] = None) -> Dict
         "search_query": derived if derived else "browse",
         "entities": entities,
         "confidence_score": 0.6,
+        "recommended_next_action": "discover_products",
     }

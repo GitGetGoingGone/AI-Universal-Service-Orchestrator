@@ -157,6 +157,42 @@ type Config = {
   };
   enable_composite_bundle_suggestion?: boolean;
   force_model_based_intent?: boolean;
+  upsell_surge_rules?: {
+    enabled: boolean;
+    upsell_rules: Array<{
+      id: string;
+      name: string;
+      conditions: { intent_types?: string[]; occasion_contains?: string[]; purchase_intent_min?: string };
+      addon_categories: string[];
+      boost_in_results?: boolean;
+      upsell_message?: string;
+    }>;
+    surge_rules: Array<{
+      id: string;
+      name: string;
+      conditions: { intent_types?: string[]; purchase_intent_min?: string; urgency_signals?: string[] };
+      surge_pct: number;
+      max_surge_pct?: number;
+    }>;
+    promo_rules: Array<{
+      id: string;
+      name: string;
+      conditions: { intent_types?: string[]; trigger?: string; min_bundle_items?: number };
+      discount_pct: number;
+      discount_type?: string;
+      product_ids?: string[];
+      category_queries?: string[];
+      promo_message?: string;
+      max_discount_per_order_cents?: number;
+    }>;
+  };
+  thinking_ui?: {
+    font_size_px?: number;
+    color?: string;
+    animation_type?: string;
+    animation_speed_ms?: number;
+  };
+  thinking_messages?: Record<string, string>;
 };
 
 export function ConfigEditor() {
@@ -171,6 +207,8 @@ export function ConfigEditor() {
   const [rankingExpanded, setRankingExpanded] = useState(true);
   const [sponsorshipExpanded, setSponsorshipExpanded] = useState(true);
   const [compositeDiscoveryExpanded, setCompositeDiscoveryExpanded] = useState(true);
+  const [upsellSurgeExpanded, setUpsellSurgeExpanded] = useState(false);
+  const [thinkingProgressExpanded, setThinkingProgressExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<"general" | "llm" | "discovery" | "integrations">("general");
   const [externalApiProviders, setExternalApiProviders] = useState<ExternalApiProvider[]>([]);
   const [addingExternalApi, setAddingExternalApi] = useState(false);
@@ -282,6 +320,9 @@ export function ConfigEditor() {
           },
           enable_composite_bundle_suggestion: data.enable_composite_bundle_suggestion ?? true,
           force_model_based_intent: data.force_model_based_intent ?? false,
+          upsell_surge_rules: data.upsell_surge_rules ?? { enabled: false, upsell_rules: [], surge_rules: [], promo_rules: [] },
+          thinking_ui: data.thinking_ui ?? { font_size_px: 14, color: "#94a3b8", animation_type: "dots", animation_speed_ms: 1000 },
+          thinking_messages: data.thinking_messages ?? {},
         });
       })
       .catch(() => {})
@@ -395,6 +436,9 @@ export function ConfigEditor() {
           composite_discovery_config: config.composite_discovery_config,
           enable_composite_bundle_suggestion: config.enable_composite_bundle_suggestion,
           force_model_based_intent: config.force_model_based_intent,
+          upsell_surge_rules: config.upsell_surge_rules,
+          thinking_ui: config.thinking_ui,
+          thinking_messages: config.thinking_messages,
         }),
       });
       if (!res.ok) throw new Error("Failed");
@@ -1611,6 +1655,164 @@ export function ConfigEditor() {
                   <p className="text-xs text-amber-600 mt-1">Percentages sum to {total}% (should be 100%)</p>
                 ) : null;
               })()}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
+        <button
+          type="button"
+          onClick={() => setUpsellSurgeExpanded((e) => !e)}
+          className="flex items-center justify-between w-full text-left font-medium"
+        >
+          Upsell & Surge Rules
+          <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+            {upsellSurgeExpanded ? "−" : "+"}
+          </span>
+        </button>
+        {upsellSurgeExpanded && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Configure upsell add-ons, surge pricing, and promotional products at discount when added before checkout.
+              Rules are evaluated after intent resolution.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="upsell_surge_enabled"
+                checked={config.upsell_surge_rules?.enabled ?? false}
+                onChange={(e) =>
+                  setConfig((c) => ({
+                    ...c,
+                    upsell_surge_rules: {
+                      ...c.upsell_surge_rules,
+                      enabled: e.target.checked,
+                      upsell_rules: c.upsell_surge_rules?.upsell_rules ?? [],
+                      surge_rules: c.upsell_surge_rules?.surge_rules ?? [],
+                      promo_rules: c.upsell_surge_rules?.promo_rules ?? [],
+                    },
+                  }))
+                }
+              />
+              <label htmlFor="upsell_surge_enabled">Enable upsell and surge rules</label>
+            </div>
+            <p className="text-xs text-[rgb(var(--color-text-secondary))]">
+              Add rules via JSON editor or extend the config API. Default: disabled. Rules use intent_type, occasion,
+              purchase_intent, urgency_signals. Promo rules support trigger: before_checkout, min_bundle_items.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
+        <button
+          type="button"
+          onClick={() => setThinkingProgressExpanded((e) => !e)}
+          className="flex items-center justify-between w-full text-left font-medium"
+        >
+          Thinking Progress
+          <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+            {thinkingProgressExpanded ? "−" : "+"}
+          </span>
+        </button>
+        {thinkingProgressExpanded && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Display settings for thinking progress messages shown while the chat is loading. Font size, color, and animation.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm mb-1">Font size (px)</label>
+                <input
+                  type="number"
+                  min={12}
+                  max={24}
+                  value={config.thinking_ui?.font_size_px ?? 14}
+                  onChange={(e) =>
+                    setConfig((c) => ({
+                      ...c,
+                      thinking_ui: {
+                        ...c.thinking_ui,
+                        font_size_px: Math.max(12, Math.min(24, Number(e.target.value) || 14)),
+                      },
+                    }))
+                  }
+                  className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Color</label>
+                <div className="flex gap-2">
+                  <input
+                    type="color"
+                    value={config.thinking_ui?.color ?? "#94a3b8"}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        thinking_ui: { ...c.thinking_ui, color: e.target.value },
+                      }))
+                    }
+                    className="h-10 w-14 rounded border border-[rgb(var(--color-border))] cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={config.thinking_ui?.color ?? "#94a3b8"}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        thinking_ui: { ...c.thinking_ui, color: e.target.value },
+                      }))
+                    }
+                    className="flex-1 px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm mb-1">Animation</label>
+                <select
+                  value={config.thinking_ui?.animation_type ?? "dots"}
+                  onChange={(e) =>
+                    setConfig((c) => ({
+                      ...c,
+                      thinking_ui: {
+                        ...c.thinking_ui,
+                        animation_type: e.target.value as "pulse" | "fade" | "dots" | "none",
+                      },
+                    }))
+                  }
+                  className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                >
+                  <option value="dots">Dots</option>
+                  <option value="pulse">Pulse</option>
+                  <option value="fade">Fade</option>
+                  <option value="none">None</option>
+                </select>
+              </div>
+              {(config.thinking_ui?.animation_type === "pulse" || config.thinking_ui?.animation_type === "fade") && (
+                <div>
+                  <label className="block text-sm mb-1">Animation speed (ms)</label>
+                  <input
+                    type="number"
+                    min={200}
+                    max={3000}
+                    step={100}
+                    value={config.thinking_ui?.animation_speed_ms ?? 1000}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        thinking_ui: {
+                          ...c.thinking_ui,
+                          animation_speed_ms: Math.max(200, Math.min(3000, Number(e.target.value) || 1000)),
+                        },
+                      }))
+                    }
+                    className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}

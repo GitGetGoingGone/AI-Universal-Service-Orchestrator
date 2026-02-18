@@ -22,6 +22,13 @@ type EmbedConfig = {
   e2e_payment?: boolean;
   chat_typing_enabled?: boolean;
   chat_typing_speed_ms?: number;
+  thinking_ui?: {
+    font_size_px?: number;
+    color?: string;
+    animation_type?: string;
+    animation_speed_ms?: number;
+  };
+  thinking_messages?: Record<string, string>;
 };
 
 function EmbedContent() {
@@ -101,6 +108,8 @@ function EmbedContent() {
           chat_typing_enabled: config?.chat_typing_enabled,
           chat_typing_speed_ms: config?.chat_typing_speed_ms,
           font_size_px: config?.font_size_px,
+          thinking_ui: config?.thinking_ui,
+          thinking_messages: config?.thinking_messages,
         }}
         embeddedInLanding
         showSideNav={false}

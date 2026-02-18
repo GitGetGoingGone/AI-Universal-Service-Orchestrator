@@ -66,6 +66,15 @@ def get_composite_discovery_config() -> Dict[str, Any]:
     return {"products_per_category": 5, "sponsorship_enabled": True}
 
 
+def get_upsell_surge_rules() -> Dict[str, Any]:
+    """Get upsell_surge_rules from platform_config. Used for upsell, surge, promo rules."""
+    cfg = _get_platform_config()
+    rules = (cfg or {}).get("upsell_surge_rules")
+    if isinstance(rules, dict):
+        return rules
+    return {"enabled": False, "upsell_rules": [], "surge_rules": [], "promo_rules": []}
+
+
 def _update_platform_config(updates: Dict[str, Any]) -> bool:
     client = get_supabase()
     if not client:

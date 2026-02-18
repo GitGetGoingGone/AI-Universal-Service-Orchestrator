@@ -263,11 +263,18 @@ export type ChatPageProps = {
   partnerId?: string;
   e2eEnabled?: boolean;
   welcomeMessage?: string;
-  /** Chat display config: typing effect, font size */
+  /** Chat display config: typing effect, font size, thinking UI */
   chatConfig?: {
     chat_typing_enabled?: boolean;
     chat_typing_speed_ms?: number;
     font_size_px?: number;
+    thinking_ui?: {
+      font_size_px?: number;
+      color?: string;
+      animation_type?: string;
+      animation_speed_ms?: number;
+    };
+    thinking_messages?: Record<string, string>;
   };
   /** When set, programmatically send this prompt. Cleared via onPromptSent. */
   promptToSend?: string;
@@ -302,6 +309,11 @@ export function ChatPage(props: ChatPageProps = {}) {
   const typingEnabled = chatConfig?.chat_typing_enabled !== false;
   const typingSpeedMs = Math.max(10, Math.min(200, chatConfig?.chat_typing_speed_ms ?? 30));
   const fontSizePx = Math.max(12, Math.min(24, chatConfig?.font_size_px ?? 14));
+  const thinkingUi = chatConfig?.thinking_ui ?? {};
+  const thinkingFontSizePx = Math.max(12, Math.min(24, thinkingUi.font_size_px ?? 14));
+  const thinkingColor = thinkingUi.color ?? "#94a3b8";
+  const thinkingAnimation = thinkingUi.animation_type ?? "dots";
+  const thinkingSpeedMs = Math.max(200, Math.min(3000, thinkingUi.animation_speed_ms ?? 1000));
   const showSideNav = showSideNavProp ?? !embeddedInLanding;
   const { collapsed: sideNavCollapsed, toggle: toggleSideNav } = useSideNavCollapsed();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1301,11 +1313,53 @@ export function ChatPage(props: ChatPageProps = {}) {
               className="flex justify-start"
             >
               <div className="rounded-2xl bg-[var(--card)] px-4 py-3">
-                <div className="flex items-center gap-1">
-                  <span className="inline-block h-2 w-2 animate-typing-1 rounded-full bg-slate-400" />
-                  <span className="inline-block h-2 w-2 animate-typing-2 rounded-full bg-slate-400" />
-                  <span className="inline-block h-2 w-2 animate-typing-3 rounded-full bg-slate-400" />
-                  <span className="ml-1 h-4 w-0.5 animate-pulse rounded-sm bg-slate-400" aria-hidden />
+                <div className="flex items-center gap-2">
+                  {thinkingAnimation === "dots" && (
+                    <>
+                      <span
+                        className="inline-block h-2 w-2 animate-typing-1 rounded-full"
+                        style={{ backgroundColor: thinkingColor }}
+                      />
+                      <span
+                        className="inline-block h-2 w-2 animate-typing-2 rounded-full"
+                        style={{ backgroundColor: thinkingColor }}
+                      />
+                      <span
+                        className="inline-block h-2 w-2 animate-typing-3 rounded-full"
+                        style={{ backgroundColor: thinkingColor }}
+                      />
+                    </>
+                  )}
+                  {thinkingAnimation === "pulse" && (
+                    <span
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{
+                        backgroundColor: thinkingColor,
+                        animation: `thinking-pulse ${thinkingSpeedMs}ms ease-in-out infinite`,
+                      }}
+                    />
+                  )}
+                  {thinkingAnimation === "fade" && (
+                    <span
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{
+                        backgroundColor: thinkingColor,
+                        animation: `thinking-fade ${thinkingSpeedMs}ms ease-in-out infinite`,
+                      }}
+                    />
+                  )}
+                  {thinkingAnimation === "none" && (
+                    <span
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ backgroundColor: thinkingColor }}
+                    />
+                  )}
+                  <span
+                    className="ml-0.5"
+                    style={{ fontSize: thinkingFontSizePx, color: thinkingColor }}
+                  >
+                    Thinking...
+                  </span>
                 </div>
               </div>
             </motion.div>

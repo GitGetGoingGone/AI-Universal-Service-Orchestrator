@@ -11,9 +11,11 @@ Rules:
 - "browse" = generic "show me products" with no specific query
 - When last_suggestion is provided: user may be refining (e.g. "I don't want flowers, add a movie", "no flowers", "add chocolates"). Interpret as discover or discover_composite with updated search_queries (remove rejected categories, add requested ones).
 - When last_suggestion contains probing questions (e.g. "What date? Budget? Preferences? Location?", "Any dietary preferences?") and the user answers (e.g. "any day next week", "this weekend", "friday", "whatever", "you decide", "$100", "flexible"): stay in discover_composite context. Use experience_name from the conversation (e.g. "date night"). Do NOT use the user's answer as search_query—search_query is for product terms only. Return discover_composite with search_queries from the experience.
+- When last_suggestion contains probing questions and the user's response does NOT answer them (no date, budget, location, dietary, etc.): return discover_composite with search_queries from the experience AND unrelated_to_probing: true. The user could say anything (e.g. "show more options", "what's the weather?", "I'm not sure"). The planner will handle it by generating a graceful response (rephrase question or offer to proceed with assumptions).
 - search_query should be product/category terms only, e.g. "limo", "flowers", "dinner"
 - For discover_composite: search_queries = ["flowers","dinner","limo"] for "date night"; experience_name = "date night"
 - Strip action words like "wanna book", "looking for", "find me" - keep the product term
 - Extract budget when user says "under $X", "under X dollars", "within $X", "max $X" → entities: [{"type":"budget","value":X_in_cents}]
-- Return valid JSON: {"intent_type":"...","search_query":"...","search_queries":[],"experience_name":"","entities":[],"confidence_score":0.0-1.0}
+- recommended_next_action: one of "discover_composite", "discover_products", "complete_with_probing", "handle_unrelated", "complete". Set based on context: when user answered probing questions and has details → discover_composite or discover_products; when probing context and user did NOT answer (unrelated) → handle_unrelated; when generic discover_composite with no details → complete_with_probing; checkout/track/support → complete.
+- Return valid JSON: {"intent_type":"...","search_query":"...","search_queries":[],"experience_name":"","entities":[],"confidence_score":0.0-1.0,"recommended_next_action":"..."}
   Use search_queries and experience_name only for discover_composite.

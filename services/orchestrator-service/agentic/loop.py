@@ -242,6 +242,20 @@ async def run_agentic_loop(
             if any(k in content for k in probe_keywords):
                 probe_count += 1
 
+    # Build recent_conversation and thread_context for intent-first
+    recent_conversation = None
+    if messages:
+        recent_conversation = [
+            {"role": m.get("role", ""), "content": (m.get("content") or "")[:150]}
+            for m in messages[-6:]
+            if isinstance(m, dict) and m.get("content")
+        ]
+    thread_context = {}
+    if bundle_id:
+        thread_context["bundle_id"] = bundle_id
+    if order_id:
+        thread_context["order_id"] = order_id
+
     state = {
         "messages": messages or [],
         "last_suggestion": last_suggestion,
@@ -264,14 +278,86 @@ async def run_agentic_loop(
     for iteration in range(max_iterations):
         state["iteration"] = iteration
 
-        plan = await plan_next_action(
-            user_message, state, max_iterations=max_iterations, llm_config=llm_config
-        )
+        # Intent-first: call intent on iteration 0 before planner
+        if iteration == 0 and intent_data is None and resolve_intent_fn:
+            intent_result = await resolve_intent_fn(
+                user_message,
+                last_suggestion=last_suggestion,
+                recent_conversation=recent_conversation,
+                probe_count=probe_count,
+                thread_context=thread_context if thread_context else None,
+            )
+            intent_data = intent_result.get("data", intent_result)
+            state["last_tool_result"] = intent_result
+            state["agent_reasoning"].append("Intent-first: resolved user message.")
+
+            # Rules layer: upsell, surge, promo (after intent)
+            try:
+                from api.admin import get_upsell_surge_rules
+                from agentic.rules import evaluate_upsell_surge_rules
+                rules_cfg = get_upsell_surge_rules()
+                bundle_item_count = 0  # TODO: get from bundle when available
+                rules_out = evaluate_upsell_surge_rules(
+                    intent_data or {},
+                    rules_cfg,
+                    bundle_item_count=bundle_item_count,
+                )
+                if rules_out.get("addon_categories") or rules_out.get("promo_products") or rules_out.get("apply_surge"):
+                    engagement_data["upsell_surge"] = rules_out
+            except Exception as e:
+                logger.debug("Rules layer skipped: %s", e)
+
+        # Use recommended_next_action when present (iteration 0 only) to decide next step
+        rec = (intent_data or {}).get("recommended_next_action") if iteration == 0 else None
+        if rec and rec in ("discover_composite", "discover_products") and intent_data:
+            if rec == "discover_composite" and intent_data.get("intent_type") == "discover_composite":
+                plan = {
+                    "action": "tool",
+                    "tool_name": "discover_composite",
+                    "tool_args": {
+                        "search_queries": intent_data.get("search_queries") or ["flowers", "dinner", "movies"],
+                        "experience_name": intent_data.get("experience_name") or "experience",
+                        "location": _extract_location(intent_data),
+                        "budget_max": _extract_budget(intent_data),
+                    },
+                    "reasoning": "Intent recommended discover_composite.",
+                }
+            elif rec == "discover_products" and intent_data.get("intent_type") in ("discover", "browse"):
+                sq = intent_data.get("search_query") or "browse"
+                plan = {
+                    "action": "tool",
+                    "tool_name": "discover_products",
+                    "tool_args": {
+                        "query": sq,
+                        "limit": limit,
+                        "location": _extract_location(intent_data),
+                        "budget_max": _extract_budget(intent_data),
+                    },
+                    "reasoning": "Intent recommended discover_products.",
+                }
+            else:
+                plan = None
+            if plan:
+                rec = None  # Consume so we don't skip planner again
+        else:
+            plan = None
+
+        if plan is None:
+            plan = await plan_next_action(
+                user_message, state, max_iterations=max_iterations, llm_config=llm_config
+            )
 
         if plan.get("action") == "complete":
             msg = (plan.get("message") or "").strip()
             msg_lower = msg.lower()
             is_probing_msg = "?" in msg or any(k in msg_lower for k in probe_keywords)
+            # When intent has unrelated_to_probing, use graceful message (rephrase or offer assumptions)
+            if intent_data and intent_data.get("unrelated_to_probing"):
+                if not msg or msg == "Done.":
+                    msg = "I'd be happy to show you options! I can suggest a classic date night for this weekend—or if you have a specific date in mind, let me know. Should I show you some ideas?"
+                state["agent_reasoning"].append(plan.get("reasoning", ""))
+                state["planner_complete_message"] = msg
+                break
             # Override: if planner said "Done."/empty with no products, and last_suggestion looks like probing,
             # user likely answered our questions—fetch instead of completing
             if (not msg or msg == "Done.") and not products_data and not intent_data:
@@ -331,10 +417,17 @@ async def run_agentic_loop(
                     if budget_cents is not None:
                         tool_args.setdefault("budget_max", budget_cents)
 
-            # Inject last_suggestion for resolve_intent (refinement: "I don't want flowers, add a movie")
-            if tool_name == "resolve_intent" and state.get("last_suggestion"):
+            # Inject context for resolve_intent (intent-first or planner-requested)
+            if tool_name == "resolve_intent":
                 tool_args = dict(tool_args)
-                tool_args.setdefault("last_suggestion", state["last_suggestion"])
+                if state.get("last_suggestion"):
+                    tool_args.setdefault("last_suggestion", state["last_suggestion"])
+                if recent_conversation:
+                    tool_args.setdefault("recent_conversation", recent_conversation)
+                if probe_count is not None:
+                    tool_args.setdefault("probe_count", probe_count)
+                if thread_context:
+                    tool_args.setdefault("thread_context", thread_context)
 
             if tool_name == "create_standing_intent":
                 tool_args = dict(tool_args)

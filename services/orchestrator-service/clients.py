@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -19,6 +19,9 @@ async def resolve_intent_with_fallback(
     text: str,
     user_id: Optional[str] = None,
     last_suggestion: Optional[str] = None,
+    recent_conversation: Optional[List[Dict[str, Any]]] = None,
+    probe_count: Optional[int] = None,
+    thread_context: Optional[Dict[str, Any]] = None,
     force_model: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -28,7 +31,13 @@ async def resolve_intent_with_fallback(
     """
     try:
         return await resolve_intent(
-            text, user_id=user_id, last_suggestion=last_suggestion, force_model=force_model
+            text,
+            user_id=user_id,
+            last_suggestion=last_suggestion,
+            recent_conversation=recent_conversation,
+            probe_count=probe_count,
+            thread_context=thread_context,
+            force_model=force_model,
         )
     except (httpx.HTTPStatusError, httpx.RequestError, RuntimeError) as e:
         if force_model:
@@ -42,6 +51,7 @@ async def resolve_intent_with_fallback(
                 "search_query": query,
                 "entities": [],
                 "confidence_score": 0.5,
+                "recommended_next_action": "discover_products",
             },
             "metadata": {"fallback": True, "reason": str(e)},
         }
@@ -51,6 +61,9 @@ async def resolve_intent(
     text: str,
     user_id: Optional[str] = None,
     last_suggestion: Optional[str] = None,
+    recent_conversation: Optional[List[Dict[str, Any]]] = None,
+    probe_count: Optional[int] = None,
+    thread_context: Optional[Dict[str, Any]] = None,
     force_model: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -62,6 +75,12 @@ async def resolve_intent(
     payload: Dict[str, Any] = {"text": text, "user_id": user_id, "persist": True}
     if last_suggestion:
         payload["last_suggestion"] = last_suggestion
+    if recent_conversation:
+        payload["recent_conversation"] = recent_conversation
+    if probe_count is not None:
+        payload["probe_count"] = probe_count
+    if thread_context:
+        payload["thread_context"] = thread_context
     if force_model:
         payload["force_model"] = True
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:

@@ -75,6 +75,27 @@ export async function PATCH(request: Request) {
       updates.enable_composite_bundle_suggestion = Boolean(body.enable_composite_bundle_suggestion);
     if (body.force_model_based_intent != null)
       updates.force_model_based_intent = Boolean(body.force_model_based_intent);
+    if (body.upsell_surge_rules !== undefined)
+      updates.upsell_surge_rules =
+        body.upsell_surge_rules && typeof body.upsell_surge_rules === "object"
+          ? body.upsell_surge_rules
+          : { enabled: false, upsell_rules: [], surge_rules: [], promo_rules: [] };
+    if (body.thinking_ui !== undefined) {
+      const ui = body.thinking_ui && typeof body.thinking_ui === "object" ? body.thinking_ui : {};
+      updates.thinking_ui = {
+        font_size_px: Math.max(12, Math.min(24, Number(ui.font_size_px) || 14)),
+        color: /^#[0-9A-Fa-f]{6}$/.test(String(ui.color ?? "")) ? String(ui.color) : "#94a3b8",
+        animation_type: ["pulse", "fade", "dots", "none"].includes(String(ui.animation_type ?? ""))
+          ? String(ui.animation_type)
+          : "dots",
+        animation_speed_ms: Math.max(200, Math.min(3000, Number(ui.animation_speed_ms) || 1000)),
+      };
+    }
+    if (body.thinking_messages !== undefined)
+      updates.thinking_messages =
+        body.thinking_messages && typeof body.thinking_messages === "object"
+          ? body.thinking_messages
+          : {};
 
     const { data: existing } = await supabase
       .from("platform_config")

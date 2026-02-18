@@ -1,7 +1,7 @@
 """Intent resolution API - Module 4. Chat-First with JSON-LD."""
 
 import asyncio
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
@@ -20,6 +20,9 @@ class ResolveRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000, description="User message to resolve")
     user_id: Optional[str] = Field(None, description="Optional user ID for attribution")
     last_suggestion: Optional[str] = Field(None, description="Previous assistant suggestion for refinement (e.g. 'I don't want flowers, add a movie')")
+    recent_conversation: Optional[List[Dict[str, Any]]] = Field(None, description="Recent user/assistant exchanges for context")
+    probe_count: Optional[int] = Field(None, description="Number of probing rounds so far")
+    thread_context: Optional[Dict[str, Any]] = Field(None, description="Thread context: order_id, bundle_id")
     persist: bool = Field(True, description="Persist intent to database")
     force_model: bool = Field(False, description="When true, use LLM only; do not fall back to heuristics on failure (for ChatGPT/Gemini)")
 
@@ -45,6 +48,9 @@ async def resolve(
         body.text,
         user_id=body.user_id,
         last_suggestion=body.last_suggestion,
+        recent_conversation=body.recent_conversation,
+        probe_count=body.probe_count,
+        thread_context=body.thread_context,
         force_model=body.force_model,
     )
 
@@ -84,6 +90,10 @@ async def resolve(
     if resolved.get("intent_type") == "discover_composite":
         data["search_queries"] = resolved.get("search_queries", [])
         data["experience_name"] = resolved.get("experience_name", "experience")
+        if resolved.get("unrelated_to_probing"):
+            data["unrelated_to_probing"] = True
+    if resolved.get("recommended_next_action"):
+        data["recommended_next_action"] = resolved["recommended_next_action"]
     return chat_first_response(
         data=data,
         machine_readable=machine_readable,

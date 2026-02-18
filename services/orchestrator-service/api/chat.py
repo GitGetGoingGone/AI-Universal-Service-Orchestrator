@@ -86,9 +86,21 @@ async def chat(
         except Exception:
             pass
 
-    async def _resolve(text: str, last_suggestion: Optional[str] = None):
+    async def _resolve(
+        text: str,
+        last_suggestion: Optional[str] = None,
+        recent_conversation: Optional[list] = None,
+        probe_count: Optional[int] = None,
+        thread_context: Optional[dict] = None,
+    ):
         return await resolve_intent_with_fallback(
-            text, user_id=user_id, last_suggestion=last_suggestion, force_model=force_model
+            text,
+            user_id=user_id,
+            last_suggestion=last_suggestion,
+            recent_conversation=recent_conversation,
+            probe_count=probe_count,
+            thread_context=thread_context,
+            force_model=force_model,
         )
 
     async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None, budget_max: Optional[int] = None):

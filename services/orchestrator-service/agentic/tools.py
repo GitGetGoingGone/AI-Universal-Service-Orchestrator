@@ -27,6 +27,9 @@ TOOL_DEFS = [
             "properties": {
                 "text": {"type": "string", "description": "The user's message"},
                 "last_suggestion": {"type": "string", "description": "Previous assistant suggestion for refinement context"},
+                "recent_conversation": {"type": "array", "description": "Recent user/assistant exchanges for context"},
+                "probe_count": {"type": "integer", "description": "Number of probing rounds so far"},
+                "thread_context": {"type": "object", "description": "Thread context: order_id, bundle_id"},
             },
             "required": ["text"],
         },
@@ -281,7 +284,16 @@ async def execute_tool(
             return {"error": "resolve_intent not configured"}
         text = params.get("text", "")
         last_suggestion = params.get("last_suggestion")
-        return await resolve_intent_fn(text, last_suggestion=last_suggestion)
+        recent_conversation = params.get("recent_conversation")
+        probe_count = params.get("probe_count")
+        thread_context = params.get("thread_context")
+        return await resolve_intent_fn(
+            text,
+            last_suggestion=last_suggestion,
+            recent_conversation=recent_conversation,
+            probe_count=probe_count,
+            thread_context=thread_context,
+        )
 
     if name == "discover_products":
         if not discover_products_fn:

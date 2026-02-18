@@ -66,6 +66,15 @@ def _build_context(result: Dict[str, Any]) -> str:
         if engagement.get("web_search", {}).get("results"):
             res = engagement["web_search"]["results"][:2]
             eng_parts.append(f"Web search: {'; '.join((str(r.get('content', r.get('title', '')) or '')[:80] for r in res if isinstance(r, dict)))}")
+        us = engagement.get("upsell_surge") or {}
+        if us.get("addon_categories"):
+            eng_parts.append(f"Upsell add-ons to suggest: {', '.join(us['addon_categories'])}")
+        if us.get("promo_products"):
+            for p in us["promo_products"][:2]:
+                msg = p.get("promo_message") or f"{p.get('discount_pct', 0)}% off when added before checkout"
+                eng_parts.append(f"Promo: {msg}")
+        if us.get("apply_surge") and us.get("surge_pct"):
+            eng_parts.append(f"Surge pricing: {us['surge_pct']}%")
         if eng_parts:
             parts.append("Engagement context: " + ". ".join(eng_parts))
 

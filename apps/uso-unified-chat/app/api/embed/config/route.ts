@@ -19,15 +19,24 @@ export async function GET(req: Request) {
   }
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
-  const { data, error } = await supabase
-    .from("partner_chat_config")
-    .select("*")
-    .eq("partner_id", partnerId)
-    .single();
+  const [partnerResult, platformResult] = await Promise.all([
+    supabase.from("partner_chat_config").select("*").eq("partner_id", partnerId).single(),
+    supabase.from("platform_config").select("thinking_ui, thinking_messages").limit(1).single(),
+  ]);
 
+  const { data, error } = partnerResult;
   if (error && error.code !== "PGRST116") {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  const platformConfig = platformResult.data ?? {};
+  const thinkingUi = platformConfig.thinking_ui ?? {
+    font_size_px: 14,
+    color: "#94a3b8",
+    animation_type: "dots",
+    animation_speed_ms: 1000,
+  };
+  const thinkingMessages = platformConfig.thinking_messages ?? {};
 
   const config = data ?? {
     primary_color: "#1976d2",
@@ -94,5 +103,7 @@ export async function GET(req: Request) {
     e2e_payment: e2eEnabled && (config.e2e_payment !== false),
     chat_typing_enabled: config.chat_typing_enabled !== false,
     chat_typing_speed_ms: Math.max(10, Math.min(200, config.chat_typing_speed_ms ?? 30)),
+    thinking_ui: thinkingUi,
+    thinking_messages: thinkingMessages,
   });
 }
