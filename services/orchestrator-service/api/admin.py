@@ -209,7 +209,73 @@ async def test_interaction(body: TestInteractionBody) -> Dict[str, Any]:
     Test an interaction with the configured model. Sends the interaction's system prompt
     plus a sample user message, returns the model response. Use to verify connection
     and tweak prompts.
+    For interaction_type "intent": calls the Intent service directly to get real resolution
+    (LLM or heuristics), so you can verify intent resolution end-to-end.
     """
+    user_message = body.sample_user_message or DEFAULT_SAMPLE_MESSAGES.get(
+        body.interaction_type, "Test message"
+    )
+
+    # Intent: call Intent service for real resolution (LLM + heuristics fallback)
+    if body.interaction_type == "intent":
+        import json as _json
+
+        async def _call_intent_service() -> Dict[str, Any]:
+            import httpx
+            url = f"{settings.intent_service_url}/api/v1/resolve"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.post(
+                    url,
+                    json={"text": user_message, "persist": False},
+                )
+                if r.status_code != 200:
+                    raise RuntimeError(f"Intent service error: {r.status_code} - {r.text[:200] if r.text else ''}")
+                data = r.json()
+                return data.get("data", data)
+
+        async def _local_resolve() -> Dict[str, Any]:
+            """Fallback when Intent service unreachable: use in-process heuristics."""
+            import sys
+            from pathlib import Path
+            _root = Path(__file__).resolve().parents[3]
+            _intent_path = str(_root / "services" / "intent-service")
+            if _intent_path not in sys.path:
+                sys.path.insert(0, _intent_path)
+            from llm import resolve_intent
+            return await resolve_intent(user_message)
+
+        try:
+            resolved = await _call_intent_service()
+        except Exception as e:
+            try:
+                resolved = await _local_resolve()
+                resolved["_fallback"] = f"Intent service unreachable ({e}), used local heuristics"
+            except Exception as e2:
+                return {
+                    "response": f"Intent service unavailable: {e}\nLocal fallback failed: {e2}",
+                    "resolved": {},
+                    "interaction_type": "intent",
+                    "error": str(e),
+                }
+
+        if not resolved or not resolved.get("intent_type"):
+            resolved = {
+                "intent_type": "discover",
+                "search_query": "browse",
+                "entities": [],
+                "confidence_score": 0.5,
+                "recommended_next_action": "complete_with_probing",
+            }
+
+        return {
+            "response": _json.dumps(resolved, indent=2),
+            "resolved": resolved,
+            "interaction_type": "intent",
+            "intent_type": resolved.get("intent_type"),
+            "search_query": resolved.get("search_query"),
+            "recommended_next_action": resolved.get("recommended_next_action"),
+        }
+
     llm_config = get_llm_config()
     if not llm_config or not llm_config.get("api_key"):
         raise HTTPException(status_code=503, detail="No LLM configured or API key missing.")
@@ -222,10 +288,6 @@ async def test_interaction(body: TestInteractionBody) -> Dict[str, Any]:
         (prompt_cfg.get("system_prompt") if prompt_cfg else None) or ""
     )
     max_tokens = prompt_cfg.get("max_tokens", 500) if prompt_cfg else 500
-
-    user_message = body.sample_user_message or DEFAULT_SAMPLE_MESSAGES.get(
-        body.interaction_type, "Test message"
-    )
 
     provider, chat_client = get_llm_chat_client(llm_config)
     if not chat_client:

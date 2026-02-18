@@ -296,6 +296,14 @@ async def run_agentic_loop(
                 thread_context=thread_context if thread_context else None,
             )
             intent_data = intent_result.get("data", intent_result)
+            if not intent_data or not isinstance(intent_data, dict) or not intent_data.get("intent_type"):
+                intent_data = {
+                    "intent_type": "discover",
+                    "search_query": "browse",
+                    "entities": [],
+                    "confidence_score": 0.5,
+                    "recommended_next_action": "complete_with_probing",
+                }
             state["last_tool_result"] = intent_result
             state["agent_reasoning"].append("Intent-first: resolved user message.")
             await _emit_thinking(on_thinking, "intent_resolved", intent_data or {}, thinking_messages or {})

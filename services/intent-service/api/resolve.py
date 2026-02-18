@@ -54,6 +54,16 @@ async def resolve(
         force_model=body.force_model,
     )
 
+    # Safety: never return empty intent
+    if not resolved or not isinstance(resolved, dict) or not resolved.get("intent_type"):
+        resolved = {
+            "intent_type": "discover",
+            "search_query": "browse",
+            "entities": [],
+            "confidence_score": 0.5,
+            "recommended_next_action": "complete_with_probing",
+        }
+
     intent_id = None
     if body.persist and get_supabase():
         try:

@@ -321,11 +321,17 @@ def _heuristic_resolve(
         derived = "gifts" if not derived else "gifts"
 
     # Generic queries: engage first before discover_products
-    generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have")
+    generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "products", "all")
+    generic_phrases = (
+        "show me", "what do you have", "what have you", "what's available", "what can you", "show me what",
+        "what all products", "what products", "products do you have", "what have you got", "what do you offer",
+        "what do you sell", "what are my options", "what can i get", "what do you got",
+    )
     sq = (derived or "browse").lower().strip()
-    is_generic = not sq or sq in generic_queries or any(g in text_lower for g in ("show me", "what do you have", "what have you", "what's available", "what can you", "show me what"))
+    is_generic = not sq or sq in generic_queries or any(g in text_lower for g in generic_phrases)
     if is_generic:
         rec = "complete_with_probing"
+        sq = "browse"  # Use browse for generic catalog queries
     else:
         rec = "discover_products"
 
@@ -338,7 +344,7 @@ def _heuristic_resolve(
 
     return {
         "intent_type": "discover",
-        "search_query": derived if derived else "browse",
+        "search_query": sq,
         "entities": entities,
         "confidence_score": 0.6,
         "recommended_next_action": rec,
