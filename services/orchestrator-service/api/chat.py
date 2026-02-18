@@ -141,10 +141,8 @@ async def _stream_chat_events(
             adaptive_card = {**adaptive_card, "body": card_body}
 
     planner_message = (result.get("planner_complete_message") or "").strip()
-    pd = result.get("data", {}).get("products")
-    has_products = bool(pd and isinstance(pd, dict) and (pd.get("products") or pd.get("categories")))
     generic_messages = ("processed your request.", "done.", "done")
-    if planner_message and not (has_products and planner_message.lower() in generic_messages):
+    if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
     else:
         summary = await generate_engagement_response(body.text, result)
@@ -343,17 +341,12 @@ async def chat(
             )
             adaptive_card = {**adaptive_card, "body": card_body}
 
-    # If planner chose to complete with a message (e.g. probing questions), use it
-    # Unless it's generic and we have products - then prefer engagement response
+    # Prefer planner message only when it's specific (e.g. probing questions).
+    # For generic fallbacks ("Processed your request.", "Done."), always use engagement response
+    # so the LLM can generate natural, empathetic replies (e.g. "I know, it's a lot to take in!").
     planner_message = (result.get("planner_complete_message") or "").strip()
-    pd = result.get("data", {}).get("products")
-    has_products = bool(
-        pd and isinstance(pd, dict) and (pd.get("products") or pd.get("categories"))
-    )
     generic_messages = ("processed your request.", "done.", "done")
-    if planner_message and not (
-        has_products and planner_message.lower() in generic_messages
-    ):
+    if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
     else:
         summary = await generate_engagement_response(body.text, result)

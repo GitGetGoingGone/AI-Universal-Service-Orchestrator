@@ -952,9 +952,10 @@ export function ChatPage(props: ChatPageProps = {}) {
 
         if (action === "add_to_favorites" && data.product_id) {
           if (!isSignedIn) {
-            const addMsg = { role: "assistant" as const, content: "Sign in to save favorites." };
+            const addMsg = { role: "assistant" as const, content: "Sign in to save favorites — your favorites will sync across devices." };
             addMessage(addMsg);
             persistMessage(addMsg);
+            setShowPostCheckoutSignInBanner(true);
             return;
           }
           const favPayload: Record<string, string> = {
@@ -966,6 +967,7 @@ export function ChatPage(props: ChatPageProps = {}) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(favPayload),
+            credentials: "include",
           });
           const text = await res.text();
           let json: { error?: string } = {};
@@ -974,7 +976,22 @@ export function ChatPage(props: ChatPageProps = {}) {
           } catch {
             json = { error: "Invalid response" };
           }
-          if (!res.ok) throw new Error(json.error || "Failed to save");
+          if (!res.ok) {
+            if (res.status === 401 && json.error?.toLowerCase().includes("sign in")) {
+              const addMsg = { role: "assistant" as const, content: "Sign in to save favorites — your favorites will sync across devices." };
+              addMessage(addMsg);
+              persistMessage(addMsg);
+              setShowPostCheckoutSignInBanner(true);
+              return;
+            }
+            if (res.status === 503) {
+              const addMsg = { role: "assistant" as const, content: "Unable to save favorites right now. Please try again in a moment." };
+              addMessage(addMsg);
+              persistMessage(addMsg);
+              return;
+            }
+            throw new Error(json.error || "Failed to save");
+          }
           const addMsg = { role: "assistant" as const, content: "Saved to My Stuff!" };
           addMessage(addMsg);
           persistMessage(addMsg);
@@ -982,9 +999,14 @@ export function ChatPage(props: ChatPageProps = {}) {
           return;
         }
       } catch (err) {
-        const content = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        const msg = err instanceof Error ? err.message : String(err);
+        const isSignInError = msg.toLowerCase().includes("sign in") && msg.toLowerCase().includes("favorite");
+        const content = isSignInError
+          ? "Sign in to save favorites — your favorites will sync across devices."
+          : `Error: ${msg}`;
         addMessage({ role: "assistant", content });
         persistMessage({ role: "assistant", content });
+        if (isSignInError) setShowPostCheckoutSignInBanner(true);
       } finally {
         setLoading(false);
       }
@@ -1565,7 +1587,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         <div className="fixed bottom-20 left-4 right-4 z-50 mx-auto max-w-2xl md:left-1/2 md:right-auto md:-translate-x-1/2">
           <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-center justify-between gap-4 shadow-lg">
             <p className="text-sm text-[var(--foreground)]">
-              Sign in to save your order and conversation history — access them from any device.
+              Sign in to save your order, favorites, and conversation history — access them from any device.
             </p>
             <div className="flex items-center gap-2 shrink-0">
               <SignInButton mode="modal">

@@ -22,7 +22,11 @@ Tone: smooth, elegant, memorable.
 Do NOT list products. Guide them through structured questions or a curated plan tailored to what they asked for.
 """
 
-RESPONSE_SYSTEM_BROWSE = """User is browsing. Engage conversationally. Ask what they're thinking — special occasion, gifts, exploring options? Do NOT list all categories or products.
+RESPONSE_SYSTEM_BROWSE = """User is browsing or reacting to what you just showed them. Engage conversationally with warmth and empathy.
+
+When the user expresses overwhelm, surprise, or doesn't know what to say (e.g. "I don't know what to say", "wow", "this is amazing", "I can't believe it"), respond naturally — e.g. "I know, it's a lot to take in! Take your time. If you'd like to add anything to your bundle, just say the word." or "Right? Sometimes the best options are the ones that surprise you. Want me to add any of these to your bundle?"
+
+When they're just browsing, ask what they're thinking — special occasion, gifts, exploring options? Do NOT list all categories or products.
 """
 
 RESPONSE_SYSTEM_DISCOVER = """When products found, display as **curated listing** — top 5–6 max. Per entry: name, brief description, and CTA.
@@ -44,6 +48,10 @@ def _build_context(result: Dict[str, Any]) -> str:
     parts = []
     intent_type = intent.get("intent_type", "unknown")
     parts.append(f"Intent: {intent_type}")
+
+    last_suggestion = result.get("last_suggestion")
+    if last_suggestion:
+        parts.append(f"Last thing we showed/said to the user: {str(last_suggestion)[:400]}")
 
     # Add engagement context (weather, events, web search, order status) when available
     if engagement:

@@ -597,6 +597,8 @@ async def run_agentic_loop(
     planner_msg = state.get("planner_complete_message", "").strip()
     if planner_msg:
         out["planner_complete_message"] = planner_msg
+    if last_suggestion:
+        out["last_suggestion"] = last_suggestion
     return out
 
 

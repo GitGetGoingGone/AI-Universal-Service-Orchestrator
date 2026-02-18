@@ -36,25 +36,61 @@ export async function POST(req: Request) {
     try {
       const authResult = await auth();
       clerkUserId = authResult?.userId ?? null;
-    } catch {
+    } catch (authErr) {
+      console.warn("[favorites] Clerk auth failed:", authErr);
       clerkUserId = null;
     }
 
-    if (clerkUserId) {
-      let { data: user } = await supabase
+    if (!clerkUserId) {
+      return NextResponse.json(
+        { error: "Sign in to save favorites" },
+        { status: 401 }
+      );
+    }
+
+    // Resolve or create user in Supabase
+    const { data: user, error: selectError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("clerk_user_id", clerkUserId)
+      .limit(1)
+      .single();
+
+    if (selectError && selectError.code !== "PGRST116") {
+      console.error("[favorites] Supabase users select failed:", selectError);
+      return NextResponse.json(
+        { error: "Unable to save favorites. Database temporarily unavailable." },
+        { status: 503 }
+      );
+    }
+    userId = user?.id ?? null;
+
+    if (!userId) {
+      const { data: created, error: insertError } = await supabase
         .from("users")
+        .insert({ id: crypto.randomUUID(), clerk_user_id: clerkUserId })
         .select("id")
-        .eq("clerk_user_id", clerkUserId)
-        .limit(1)
         .single();
-      userId = user?.id ?? null;
-      // Create user on-the-fly if signed in to Clerk but not yet in our users table
-      if (!userId) {
-        const { data: created } = await supabase
-          .from("users")
-          .insert({ id: crypto.randomUUID(), clerk_user_id: clerkUserId })
-          .select("id")
-          .single();
+
+      if (insertError) {
+        if (insertError.code === "23505") {
+          // Race: user was created by another request; retry select
+          const { data: retry } = await supabase
+            .from("users")
+            .select("id")
+            .eq("clerk_user_id", clerkUserId)
+            .limit(1)
+            .single();
+          userId = retry?.id ?? null;
+        }
+        if (!userId) {
+          console.error("[favorites] Supabase users insert failed:", insertError);
+          return NextResponse.json(
+            { error: "Unable to save favorites. Database temporarily unavailable." },
+            { status: 503 }
+          );
+        }
+      } else {
         userId = created?.id ?? null;
       }
     }
