@@ -195,6 +195,20 @@ type Config = {
   thinking_messages?: Record<string, string>;
 };
 
+function upsellSurgeRulesWithDefaults(
+  c: Config,
+  overrides: Partial<NonNullable<Config["upsell_surge_rules"]>>
+): NonNullable<Config["upsell_surge_rules"]> {
+  const u = c.upsell_surge_rules;
+  return {
+    enabled: u?.enabled ?? false,
+    upsell_rules: u?.upsell_rules ?? [],
+    surge_rules: u?.surge_rules ?? [],
+    promo_rules: u?.promo_rules ?? [],
+    ...overrides,
+  };
+}
+
 export function ConfigEditor() {
   const [config, setConfig] = useState<Config>({});
   const [loading, setLoading] = useState(true);
@@ -212,6 +226,7 @@ export function ConfigEditor() {
   const [activeTab, setActiveTab] = useState<"general" | "llm" | "discovery" | "integrations">("general");
   const [externalApiProviders, setExternalApiProviders] = useState<ExternalApiProvider[]>([]);
   const [addingExternalApi, setAddingExternalApi] = useState(false);
+  const [editingExternalApiId, setEditingExternalApiId] = useState<string | null>(null);
   const [externalApiForm, setExternalApiForm] = useState<Partial<ExternalApiProvider> & { api_key?: string }>({
     name: "",
     api_type: "web_search",
@@ -937,47 +952,176 @@ export function ConfigEditor() {
               </div>
             )}
             {externalApiProviders.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between gap-4 rounded border border-[rgb(var(--color-border))] p-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <span className="font-medium">{p.name}</span>
-                  <span className="ml-2 text-sm text-[rgb(var(--color-text-secondary))]">
-                    {p.api_type}
-                    {p.base_url && ` · ${p.base_url}`}
-                  </span>
-                  {config.active_external_api_ids?.[p.api_type] === p.id && (
-                    <span className="ml-2 rounded bg-[rgb(var(--color-primary))]/20 px-2 py-0.5 text-xs">
-                      Active for {p.api_type}
-                    </span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const next = { ...(config.active_external_api_ids ?? {}), [p.api_type]: p.id };
-                    setConfig((c) => ({ ...c, active_external_api_ids: next }));
-                    try {
-                      await fetch("/api/platform/config", {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ active_external_api_ids: next }),
-                      });
-                    } catch {
-                      alert("Failed to set external API");
-                    }
-                  }}
-                  className="text-sm text-[rgb(var(--color-primary))] hover:underline"
-                >
-                  Use for {p.api_type}
-                </button>
+              <div key={p.id} className="rounded border border-[rgb(var(--color-border))] overflow-hidden">
+                {editingExternalApiId === p.id ? (
+                  <div className="p-4 space-y-3">
+                    <h4 className="font-medium">Edit External API</h4>
+                    <div>
+                      <label className="block text-sm mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={externalApiForm.name ?? p.name}
+                        onChange={(e) => setExternalApiForm((f) => ({ ...f, name: e.target.value }))}
+                        placeholder="e.g. Tavily Search"
+                        className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-1">API Type</label>
+                      <select
+                        value={externalApiForm.api_type ?? p.api_type}
+                        onChange={(e) => setExternalApiForm((f) => ({ ...f, api_type: e.target.value }))}
+                        className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                      >
+                        <option value="web_search">Web Search</option>
+                        <option value="weather">Weather</option>
+                        <option value="events">Events</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-1">Base URL (optional)</label>
+                      <input
+                        type="text"
+                        value={externalApiForm.base_url ?? p.base_url ?? ""}
+                        onChange={(e) => setExternalApiForm((f) => ({ ...f, base_url: e.target.value }))}
+                        placeholder="https://api.example.com"
+                        className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-1">API Key (leave empty to keep current)</label>
+                      <input
+                        type="password"
+                        value={externalApiForm.api_key ?? ""}
+                        onChange={(e) => setExternalApiForm((f) => ({ ...f, api_key: e.target.value }))}
+                        placeholder="••••••••"
+                        className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={async () => {
+                          try {
+                            const baseUrl = (externalApiForm.base_url ?? p.base_url ?? "").trim();
+                            const body: Record<string, unknown> = {
+                              name: externalApiForm.name ?? p.name,
+                              api_type: externalApiForm.api_type ?? p.api_type,
+                              base_url: baseUrl || null,
+                            };
+                            if (externalApiForm.api_key) body.api_key = externalApiForm.api_key;
+                            const res = await fetch(`/api/platform/external-api-providers/${p.id}`, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify(body),
+                            });
+                            if (!res.ok) throw new Error("Failed");
+                            setEditingExternalApiId(null);
+                            setExternalApiForm({ name: "", api_type: "web_search", base_url: "", api_key: "" });
+                            fetchExternalApis();
+                          } catch {
+                            alert("Failed to update external API");
+                          }
+                        }}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setEditingExternalApiId(null);
+                          setExternalApiForm({ name: "", api_type: "web_search", base_url: "", api_key: "" });
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-4 p-3">
+                    <div className="min-w-0 flex-1">
+                      <span className="font-medium">{p.name}</span>
+                      <span className="ml-2 text-sm text-[rgb(var(--color-text-secondary))]">
+                        {p.api_type}
+                        {p.base_url && ` · ${p.base_url}`}
+                      </span>
+                      {config.active_external_api_ids?.[p.api_type] === p.id && (
+                        <span className="ml-2 rounded bg-[rgb(var(--color-primary))]/20 px-2 py-0.5 text-xs">
+                          Active for {p.api_type}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const next = { ...(config.active_external_api_ids ?? {}), [p.api_type]: p.id };
+                          setConfig((c) => ({ ...c, active_external_api_ids: next }));
+                          try {
+                            await fetch("/api/platform/config", {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ active_external_api_ids: next }),
+                            });
+                          } catch {
+                            alert("Failed to set external API");
+                          }
+                        }}
+                        className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                      >
+                        Use for {p.api_type}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddingExternalApi(false);
+                          setExternalApiForm({ name: p.name, api_type: p.api_type, base_url: p.base_url ?? "", api_key: "" });
+                          setEditingExternalApiId(p.id);
+                        }}
+                        className="text-sm text-[rgb(var(--color-text-secondary))] hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
+                          try {
+                            const res = await fetch(`/api/platform/external-api-providers/${p.id}`, {
+                              method: "DELETE",
+                            });
+                            if (!res.ok) throw new Error("Failed");
+                            if (config.active_external_api_ids?.[p.api_type] === p.id) {
+                              const next = { ...(config.active_external_api_ids ?? {}) };
+                              delete next[p.api_type];
+                              setConfig((c) => ({ ...c, active_external_api_ids: next }));
+                              await fetch("/api/platform/config", {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ active_external_api_ids: next }),
+                              });
+                            }
+                            setEditingExternalApiId(null);
+                            fetchExternalApis();
+                          } catch {
+                            alert("Failed to delete external API");
+                          }
+                        }}
+                        className="text-sm text-red-600 hover:underline"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
-            {!addingExternalApi && (
+            {!addingExternalApi && !editingExternalApiId && (
               <button
                 type="button"
-                onClick={() => setAddingExternalApi(true)}
+                onClick={() => {
+                  setEditingExternalApiId(null);
+                  setAddingExternalApi(true);
+                }}
                 className="text-sm text-[rgb(var(--color-primary))] hover:underline"
               >
                 + Add external API
@@ -1685,13 +1829,9 @@ export function ConfigEditor() {
                 onChange={(e) =>
                   setConfig((c) => ({
                     ...c,
-                    upsell_surge_rules: {
-                      ...c.upsell_surge_rules,
+                    upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                       enabled: e.target.checked,
-                      upsell_rules: c.upsell_surge_rules?.upsell_rules ?? [],
-                      surge_rules: c.upsell_surge_rules?.surge_rules ?? [],
-                      promo_rules: c.upsell_surge_rules?.promo_rules ?? [],
-                    },
+                    }),
                   }))
                 }
               />
@@ -1713,12 +1853,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, name: e.target.value } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="flex-1 px-2 py-1 text-sm rounded border border-[rgb(var(--color-border))] mr-2"
@@ -1728,10 +1867,9 @@ export function ConfigEditor() {
                         onClick={() =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).filter((_, j) => j !== i),
-                            },
+                            }),
                           }))
                         }
                         className="text-red-600 text-sm hover:underline"
@@ -1747,14 +1885,13 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
                                 j === i
                                   ? { ...x, conditions: { ...x.conditions, intent_types: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
                                   : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -1766,14 +1903,13 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
                                 j === i
                                   ? { ...x, conditions: { ...x.conditions, occasion_contains: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
                                   : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -1783,12 +1919,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, conditions: { ...x.conditions, purchase_intent_min: e.target.value || undefined } } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -1805,12 +1940,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, addon_categories: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
@@ -1822,12 +1956,11 @@ export function ConfigEditor() {
                           onChange={(e) =>
                             setConfig((c) => ({
                               ...c,
-                              upsell_surge_rules: {
-                                ...c.upsell_surge_rules,
+                              upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                                 upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
                                   j === i ? { ...x, boost_in_results: e.target.checked } : x
                                 ),
-                              },
+                              }),
                             }))
                           }
                         />
@@ -1841,13 +1974,12 @@ export function ConfigEditor() {
                   onClick={() =>
                     setConfig((c) => ({
                       ...c,
-                      upsell_surge_rules: {
-                        ...c.upsell_surge_rules,
+                      upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                         upsell_rules: [
                           ...(c.upsell_surge_rules?.upsell_rules ?? []),
                           { id: crypto.randomUUID(), name: "", conditions: {}, addon_categories: [], boost_in_results: false },
                         ],
-                      },
+                      }),
                     }))
                   }
                   className="text-sm text-[rgb(var(--color-primary))] hover:underline"
@@ -1871,12 +2003,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, name: e.target.value } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="flex-1 px-2 py-1 text-sm rounded border border-[rgb(var(--color-border))] mr-2"
@@ -1886,10 +2017,9 @@ export function ConfigEditor() {
                         onClick={() =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).filter((_, j) => j !== i),
-                            },
+                            }),
                           }))
                         }
                         className="text-red-600 text-sm hover:underline"
@@ -1905,12 +2035,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, surge_pct: Number(e.target.value) || 0 } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -1922,12 +2051,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, max_surge_pct: e.target.value ? Number(e.target.value) : undefined } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -1937,12 +2065,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, conditions: { ...x.conditions, purchase_intent_min: e.target.value || undefined } } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -1959,14 +2086,13 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
                                 j === i
                                   ? { ...x, conditions: { ...x.conditions, intent_types: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
                                   : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -1978,14 +2104,13 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
                                 j === i
                                   ? { ...x, conditions: { ...x.conditions, urgency_signals: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
                                   : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
@@ -1998,13 +2123,12 @@ export function ConfigEditor() {
                   onClick={() =>
                     setConfig((c) => ({
                       ...c,
-                      upsell_surge_rules: {
-                        ...c.upsell_surge_rules,
+                      upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                         surge_rules: [
                           ...(c.upsell_surge_rules?.surge_rules ?? []),
                           { id: crypto.randomUUID(), name: "", conditions: {}, surge_pct: 0 },
                         ],
-                      },
+                      }),
                     }))
                   }
                   className="text-sm text-[rgb(var(--color-primary))] hover:underline"
@@ -2028,12 +2152,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, name: e.target.value } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="flex-1 px-2 py-1 text-sm rounded border border-[rgb(var(--color-border))] mr-2"
@@ -2043,10 +2166,9 @@ export function ConfigEditor() {
                         onClick={() =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).filter((_, j) => j !== i),
-                            },
+                            }),
                           }))
                         }
                         className="text-red-600 text-sm hover:underline"
@@ -2062,12 +2184,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, discount_pct: Number(e.target.value) || 0 } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -2079,14 +2200,13 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
                                 j === i
                                   ? { ...x, conditions: { ...x.conditions, trigger: "before_checkout", min_bundle_items: Number(e.target.value) || 0 } }
                                   : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -2098,14 +2218,13 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
                                 j === i
                                   ? { ...x, conditions: { ...x.conditions, intent_types: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
                                   : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
@@ -2117,12 +2236,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, product_ids: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
@@ -2134,12 +2252,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, category_queries: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
@@ -2151,12 +2268,11 @@ export function ConfigEditor() {
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            upsell_surge_rules: {
-                              ...c.upsell_surge_rules,
+                            upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                               promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
                                 j === i ? { ...x, promo_message: e.target.value } : x
                               ),
-                            },
+                            }),
                           }))
                         }
                         className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
@@ -2169,13 +2285,12 @@ export function ConfigEditor() {
                   onClick={() =>
                     setConfig((c) => ({
                       ...c,
-                      upsell_surge_rules: {
-                        ...c.upsell_surge_rules,
+                      upsell_surge_rules: upsellSurgeRulesWithDefaults(c, {
                         promo_rules: [
                           ...(c.upsell_surge_rules?.promo_rules ?? []),
                           { id: crypto.randomUUID(), name: "", conditions: { trigger: "before_checkout", min_bundle_items: 0 }, discount_pct: 0 },
                         ],
-                      },
+                      }),
                     }))
                   }
                   className="text-sm text-[rgb(var(--color-primary))] hover:underline"
@@ -2331,7 +2446,7 @@ export function ConfigEditor() {
                           ...c,
                           thinking_messages: {
                             ...c.thinking_messages,
-                            [step]: e.target.value || undefined,
+                            [step]: e.target.value,
                           },
                         }))
                       }
