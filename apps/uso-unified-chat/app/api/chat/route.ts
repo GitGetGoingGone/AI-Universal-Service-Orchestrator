@@ -200,7 +200,15 @@ export async function POST(req: Request) {
         .eq("id", resolvedThreadId);
     }
 
-    const response = { ...data, thread_id: resolvedThreadId ?? data.thread_id };
+    const threadTitle =
+      isNewThread && resolvedThreadId
+        ? deriveThreadTitle(data, lastUserMessage) || lastUserMessage.slice(0, 50) || "New chat"
+        : undefined;
+    const response = {
+      ...data,
+      thread_id: resolvedThreadId ?? data.thread_id,
+      ...(threadTitle && { thread_title: threadTitle }),
+    };
     return NextResponse.json(response);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Chat failed";

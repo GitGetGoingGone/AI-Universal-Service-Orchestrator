@@ -586,10 +586,21 @@ export function ChatPage(props: ChatPageProps = {}) {
             : data.data?.text ?? data.message ?? JSON.stringify(data));
 
         const newThreadId = (data as { thread_id?: string }).thread_id;
+        const threadTitle = (data as { thread_title?: string }).thread_title;
         if (newThreadId && !threadId) {
           setThreadId(newThreadId);
+          setThreads((prev) => {
+            if (prev.some((t) => t.id === newThreadId)) return prev;
+            return [
+              {
+                id: newThreadId,
+                title: threadTitle || userMessage.slice(0, 50) || "New chat",
+                updated_at: new Date().toISOString(),
+              },
+              ...prev,
+            ];
+          });
         }
-        // Refresh thread list so new conversations appear and titles stay in sync
         fetchThreads();
 
         addMessage({
