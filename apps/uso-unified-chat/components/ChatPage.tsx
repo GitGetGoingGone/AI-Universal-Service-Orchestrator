@@ -632,11 +632,14 @@ export function ChatPage(props: ChatPageProps = {}) {
             throw new Error(errMsg);
           }
           const productList = data.data?.products?.products ?? [];
-          const assistantContent =
+          let assistantContent =
             data.summary ??
             (productList.length > 0
               ? `Found ${productList.length} products`
-              : data.data?.text ?? data.message ?? JSON.stringify(data));
+              : data.data?.text ?? data.message ?? "");
+          if (!assistantContent || assistantContent === "{}") {
+            assistantContent = "I'm here to help. What would you like to explore—gifts, flowers, experiences, or something else?";
+          }
           const newThreadId = (data as { thread_id?: string }).thread_id;
           const threadTitle = (data as { thread_title?: string }).thread_title;
           if (newThreadId && !threadId) {
@@ -671,11 +674,14 @@ export function ChatPage(props: ChatPageProps = {}) {
             throw new Error(errMsg);
           }
           const productList = data.data?.products?.products ?? [];
-          const assistantContent =
+          let assistantContent =
             data.summary ??
             (productList.length > 0
               ? `Found ${productList.length} products`
-              : data.data?.text ?? data.message ?? JSON.stringify(data));
+              : data.data?.text ?? data.message ?? "");
+          if (!assistantContent || assistantContent === "{}") {
+            assistantContent = "I'm here to help. What would you like to explore—gifts, flowers, experiences, or something else?";
+          }
           const newThreadId = (data as { thread_id?: string }).thread_id;
           const threadTitle = (data as { thread_title?: string }).thread_title;
           if (newThreadId && !threadId) {

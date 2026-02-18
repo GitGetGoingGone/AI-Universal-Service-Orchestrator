@@ -133,14 +133,15 @@ async def _stream_chat_events(
         summary = await generate_engagement_response(body.text, result)
         if not summary:
             summary = _build_summary(result)
-
+    if not summary:
+        summary = "I'm here to help. What would you like to explore?"
     response_data = chat_first_response(
         data=result.get("data", {}),
         machine_readable=result.get("machine_readable", {}),
         adaptive_card=adaptive_card,
         request_id=request_id,
-        summary=summary,
-        agent_reasoning=agent_reasoning,
+        summary=summary or "I'm here to help. What would you like to explore?",
+        agent_reasoning=result.get("agent_reasoning", []),
     )
     body_json = json.dumps(response_data, default=str)
     yield f"event: done\ndata: {body_json}\n\n"
