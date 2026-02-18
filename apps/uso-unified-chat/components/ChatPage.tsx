@@ -155,27 +155,37 @@ const STORAGE_KEY_THREAD = "uso_thread_id";
 const STORAGE_KEY_ANONYMOUS = "uso_anonymous_id";
 const STORAGE_KEY_BUNDLE = "uso_bundle_id";
 
+function getOrCreateAnonymousId(): string {
+  if (typeof window === "undefined") return `anon-${Date.now()}`;
+  const a = localStorage.getItem(STORAGE_KEY_ANONYMOUS);
+  if (a) return a;
+  const newA =
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `anon-${Date.now()}`;
+  localStorage.setItem(STORAGE_KEY_ANONYMOUS, newA);
+  return newA;
+}
+
 function useThreadPersistence() {
-  const [threadId, setThreadIdState] = useState<string | null>(null);
-  const [anonymousId, setAnonymousIdState] = useState<string | null>(null);
-  const [bundleId, setBundleIdState] = useState<string | null>(null);
+  const [threadId, setThreadIdState] = useState<string | null>(() =>
+    typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_THREAD) : null
+  );
+  const [anonymousId, setAnonymousIdState] = useState<string | null>(() =>
+    typeof window !== "undefined" ? getOrCreateAnonymousId() : null
+  );
+  const [bundleId, setBundleIdState] = useState<string | null>(() =>
+    typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_BUNDLE) : null
+  );
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const t = localStorage.getItem(STORAGE_KEY_THREAD);
-    const a = localStorage.getItem(STORAGE_KEY_ANONYMOUS);
+    const a = getOrCreateAnonymousId();
     const b = localStorage.getItem(STORAGE_KEY_BUNDLE);
     if (t) setThreadIdState(t);
-    if (a) setAnonymousIdState(a);
-    else {
-      const newA =
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `anon-${Date.now()}`;
-      setAnonymousIdState(newA);
-      localStorage.setItem(STORAGE_KEY_ANONYMOUS, newA);
-    }
+    setAnonymousIdState(a);
     if (b) setBundleIdState(b);
     setHydrated(true);
   }, []);
@@ -337,7 +347,8 @@ export function ChatPage(props: ChatPageProps = {}) {
 
   const [threads, setThreads] = useState<Array<{ id: string; title: string; updated_at: string }>>([]);
   const fetchThreads = useCallback(() => {
-    const url = userId ? "/api/threads" : anonymousId ? `/api/threads?anonymous_id=${encodeURIComponent(anonymousId)}` : null;
+    const aid = userId ? null : (anonymousId ?? (typeof window !== "undefined" ? getOrCreateAnonymousId() : null));
+    const url = userId ? "/api/threads" : aid ? `/api/threads?anonymous_id=${encodeURIComponent(aid)}` : null;
     if (!url) return;
     fetch(url)
       .then((r) => r.json())
@@ -345,7 +356,8 @@ export function ChatPage(props: ChatPageProps = {}) {
       .catch(() => setThreads([]));
   }, [userId, anonymousId]);
   useEffect(() => {
-    if (userId || anonymousId) fetchThreads();
+    if (userId) fetchThreads();
+    else if (anonymousId || (typeof window !== "undefined" && getOrCreateAnonymousId())) fetchThreads();
   }, [userId, anonymousId, fetchThreads]);
 
   useEffect(() => {
@@ -463,14 +475,15 @@ export function ChatPage(props: ChatPageProps = {}) {
           ),
         };
         if (partnerId) payload.partner_id = partnerId;
+        const effectiveAnonymousId = anonymousId ?? (typeof window !== "undefined" ? getOrCreateAnonymousId() : undefined);
         if (threadId) {
           payload.thread_id = threadId;
           if (userId) payload.user_id = userId;
-          else payload.anonymous_id = anonymousId;
+          else payload.anonymous_id = effectiveAnonymousId;
         } else if (userId) {
           payload.user_id = userId;
-        } else if (anonymousId) {
-          payload.anonymous_id = anonymousId;
+        } else if (effectiveAnonymousId) {
+          payload.anonymous_id = effectiveAnonymousId;
         } else {
           payload.user_id = sessionId;
         }

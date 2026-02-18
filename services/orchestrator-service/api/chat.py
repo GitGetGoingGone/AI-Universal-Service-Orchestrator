@@ -74,8 +74,20 @@ async def chat(
         )
 
     # Resolve intent with user_id captured; uses local fallback when Intent service unavailable
+    # When platform is chatgpt/gemini and force_model_based_intent, use LLM only (no heuristic fallback)
+    force_model = False
+    if body.platform in ("chatgpt", "gemini"):
+        try:
+            from api.admin import _get_platform_config
+            cfg = _get_platform_config() or {}
+            force_model = bool(cfg.get("force_model_based_intent"))
+        except Exception:
+            pass
+
     async def _resolve(text: str, last_suggestion: Optional[str] = None):
-        return await resolve_intent_with_fallback(text, user_id=user_id, last_suggestion=last_suggestion)
+        return await resolve_intent_with_fallback(
+            text, user_id=user_id, last_suggestion=last_suggestion, force_model=force_model
+        )
 
     async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None, budget_max: Optional[int] = None):
         return await discover_products(

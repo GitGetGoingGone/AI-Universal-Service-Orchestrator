@@ -73,6 +73,8 @@ export async function PATCH(request: Request) {
       updates.composite_discovery_config = body.composite_discovery_config;
     if (body.enable_composite_bundle_suggestion != null)
       updates.enable_composite_bundle_suggestion = Boolean(body.enable_composite_bundle_suggestion);
+    if (body.force_model_based_intent != null)
+      updates.force_model_based_intent = Boolean(body.force_model_based_intent);
 
     const { data: existing } = await supabase
       .from("platform_config")

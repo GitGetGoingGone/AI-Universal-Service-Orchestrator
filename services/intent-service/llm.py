@@ -7,31 +7,17 @@ import re
 from typing import Any, Dict, List, Optional
 
 from packages.shared.discovery import derive_search_query
+from packages.shared.prompts import get_intent_system_prompt
 
 logger = logging.getLogger(__name__)
 
-INTENT_SYSTEM = """You are an intent classifier for a multi-vendor order platform.
-Given a user message, extract:
-1. intent_type: one of "discover", "discover_composite", "checkout", "track", "support", "browse"
-2. search_query: the product/category to search for (only for discover intent). Use 1-3 key terms. If unclear, use empty string.
-3. For discover_composite: search_queries (array of product categories) and experience_name (e.g. "date night")
-4. entities: list of {type, value} e.g. [{"type":"location","value":"NYC"}]
 
-Rules:
-- "discover" = user wants to find/browse a single product category
-- "discover_composite" = user wants a composed experience (e.g. "plan a date night", "birthday party", "picnic"). Decompose into product categories.
-- "browse" = generic "show me products" with no specific query
-- When last_suggestion is provided: user may be refining (e.g. "I don't want flowers, add a movie", "no flowers", "add chocolates"). Interpret as discover or discover_composite with updated search_queries (remove rejected categories, add requested ones).
-- search_query should be product/category terms only, e.g. "limo", "flowers", "dinner"
-- For discover_composite: search_queries = ["flowers","dinner","limo"] for "date night"; experience_name = "date night"
-- Strip action words like "wanna book", "looking for", "find me" - keep the product term
-- Extract budget when user says "under $X", "under X dollars", "within $X", "max $X" → entities: [{"type":"budget","value":X_in_cents}]
-- Return valid JSON: {"intent_type":"...","search_query":"...","search_queries":[],"experience_name":"","entities":[],"confidence_score":0.0-1.0}
-  Use search_queries and experience_name only for discover_composite.
-"""
-
-
-async def resolve_intent(text: str, user_id: Optional[str] = None, last_suggestion: Optional[str] = None) -> Dict[str, Any]:
+async def resolve_intent(
+    text: str,
+    user_id: Optional[str] = None,
+    last_suggestion: Optional[str] = None,
+    force_model: bool = False,
+) -> Dict[str, Any]:
     """
     Resolve intent from natural language. Uses LLM when Platform Config is set; else heuristics.
     """
@@ -59,7 +45,14 @@ async def resolve_intent(text: str, user_id: Optional[str] = None, last_suggesti
     elif prompt_cfg is not None and not prompt_cfg.get("enabled", True):
         logger.info("Intent: Intent prompt disabled in Model Interactions, using heuristics")
 
-    system_prompt = (prompt_cfg.get("system_prompt") if prompt_cfg else None) or INTENT_SYSTEM
+    # Single source: DB (model_interaction_prompts) overrides; else packages/shared/prompts/intent_system.txt
+    system_prompt = (prompt_cfg.get("system_prompt") if prompt_cfg else None) or get_intent_system_prompt()
+    if not system_prompt or not system_prompt.strip():
+        logger.warning("Intent: No prompt from DB or file; using minimal fallback. Configure model_interaction_prompts or ensure packages/shared/prompts/intent_system.txt exists.")
+        system_prompt = (
+            'You are an intent classifier. Return JSON: {"intent_type":"discover|checkout|track|support|browse","search_query":"","entities":[],"confidence_score":0.7}. '
+            "Use discover_composite for date night, birthday party, picnic."
+        )
     enabled = prompt_cfg.get("enabled", True) if prompt_cfg else True
     max_tokens = prompt_cfg.get("max_tokens", 500) if prompt_cfg else 500
 
@@ -68,8 +61,12 @@ async def resolve_intent(text: str, user_id: Optional[str] = None, last_suggesti
             result = await _llm_resolve(text, last_suggestion, llm_config, system_prompt, max_tokens)
             if result:
                 return result
+            if force_model:
+                raise RuntimeError("Intent LLM returned no result (force_model=True, no heuristic fallback)")
             logger.info("Intent: LLM returned no result (client or parse failed), using heuristics")
         except Exception as e:
+            if force_model:
+                raise
             logger.warning("Intent LLM failed, falling back to heuristics: %s", e)
 
     return _heuristic_resolve(text, last_suggestion)
@@ -176,10 +173,23 @@ def _heuristic_resolve(text: str, last_suggestion: Optional[str] = None) -> Dict
     # discover_composite: follow-up to probing (last_suggestion asked for date/budget/dietary/location)
     if last_suggestion:
         ls_lower = (last_suggestion or "").lower()
-        if any(k in ls_lower for k in ("date night", "plan a date", "birthday party", "budget", "dietary", "preferences")):
-            # User is answering our probing questions (budget, location, dietary, etc.)
-            detail_indicators = ["$", "dollar", "budget", "vegetarian", "vegan", "around", "dallas", "nyc", "location", "casual", "romantic", "adventurous"]
-            if any(k in text_lower for k in detail_indicators):
+        probe_keywords = ("date night", "plan a date", "birthday party", "budget", "dietary", "preferences", "what date", "location", "occasion", "add flowers", "add something")
+        if any(k in ls_lower for k in probe_keywords):
+            # User is answering our probing questions
+            detail_indicators = [
+                "$", "dollar", "budget", "vegetarian", "vegan", "around", "dallas", "nyc", "location",
+                "casual", "romantic", "adventurous",
+                # Date/time answers: "any day next week", "this weekend", "friday", etc.
+                "any day", "next week", "weekend", "friday", "saturday", "sunday", "tomorrow", "next month",
+                "this weekend", "whenever", "flexible", "tonight", "this week",
+            ]
+            # User answered with specific details (date, budget, location, etc.) or short non-question
+            is_answer = any(k in text_lower for k in detail_indicators) or (
+                len(text_lower) <= 60
+                and not any(text_lower.startswith(q) for q in ("what", "how", "can you", "could you", "i want to", "show me", "find me"))
+                and "?" not in text
+            )
+            if is_answer:
                 entities = []
                 if "dallas" in text_lower or "dallas" in text:
                     entities.append({"type": "location", "value": "Dallas"})

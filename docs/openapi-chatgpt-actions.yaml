@@ -27,7 +27,22 @@ paths:
               properties:
                 text:
                   type: string
-                  description: User message (e.g. "find flowers")
+                  description: Current user message (e.g. "find flowers", "any day next week")
+                messages:
+                  type: array
+                  description: |
+                    IMPORTANT: Pass the last 4-6 messages from the conversation for context.
+                    Enables correct intent when user answers probing questions (e.g. "What date? Budget?" → "any day next week").
+                    Format: [{ "role": "user"|"assistant", "content": "..." }]
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role:
+                        type: string
+                        enum: [user, assistant]
+                      content:
+                        type: string
                 user_id:
                   type: string
                   nullable: true

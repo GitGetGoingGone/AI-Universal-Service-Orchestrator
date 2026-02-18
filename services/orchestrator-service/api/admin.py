@@ -18,9 +18,15 @@ DEFAULT_SAMPLE_MESSAGES: Dict[str, str] = {
     "intent": "Plan a date night",
     "hybrid_response": "Where is my order?",
     "planner": "User message: Plan a date night. Current state: { iteration: 0, last_tool_result: null }. What is your next action?",
-    "engagement_discover": "Allowed CTAs (suggest ONLY these): Add to bundle. Do NOT suggest same-day delivery, delivery options, or any feature not listed. User said: show me flowers. Found 3 products: Red Roses ($49), Tulips ($35), Sunflowers ($29). Write a brief friendly response.",
+    "engagement_discover": """User said: show me flowers
+
+What we did: Allowed CTAs (suggest ONLY these): Add to bundle. Do NOT suggest same-day delivery, delivery options, or any feature not listed. Found 3 products. Format as curated listing (top 5–6). ONLY mention products from Product data below—do NOT invent any. Per entry: use exact name and price from data, brief description, CTA from Allowed CTAs only. Product data (ONLY these): Red Roses — classic bouquet (USD 49); Tulips — bright spring flowers (USD 35); Sunflowers — cheerful summer (USD 29).
+
+Write a brief friendly response.""",
     "engagement_browse": "User is browsing with no specific query. Engage them conversationally.",
-    "engagement_discover_composite": "User asked for date night. Categories: flowers, dinner, movies. Found: Red Roses. No dinner or movies in catalog. Write a helpful response.",
+    "engagement_discover_composite": """User said: plan a date night
+
+What we did: Allowed CTAs (suggest ONLY these): Add to bundle. User asked for date night. Found products in: flowers, dinner, movies. Present as a curated bundle. ONLY mention products from Product data below—do NOT invent any. Product data (ONLY these): Red Roses (USD 49); Pasta Carbonara (USD 24); Movie tickets (USD 15). Be warm and helpful.""",
     "engagement_default": "User said: I want to checkout. What we did: Found their bundle with 2 items. Write a brief response.",
 }
 

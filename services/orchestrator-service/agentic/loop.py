@@ -223,19 +223,26 @@ async def run_agentic_loop(
             discover_products_fn=discover_products_fn,
         )
 
-    # Derive last_suggestion from conversation history (for refinement: "I don't want flowers, add a movie")
+    # Derive last_suggestion and probe_count from conversation history
     last_suggestion = None
-    if messages:
-        for m in reversed(messages):
-            if isinstance(m, dict) and m.get("role") == "assistant":
-                content = m.get("content") or ""
-                if content:
-                    last_suggestion = str(content)[:500]
-                break
+    probe_count = 0
+    probe_keywords = ("budget", "dietary", "preferences", "location", "what date", "occasion", "add flowers", "add something", "?")
+    for m in reversed(messages or []):
+        if isinstance(m, dict) and m.get("role") == "assistant":
+            content = m.get("content") or ""
+            if content:
+                last_suggestion = str(content)[:500]
+            break
+    for m in (messages or []):
+        if isinstance(m, dict) and m.get("role") == "assistant":
+            content = (m.get("content") or "").lower()
+            if any(k in content for k in probe_keywords):
+                probe_count += 1
 
     state = {
         "messages": messages or [],
         "last_suggestion": last_suggestion,
+        "probe_count": probe_count,
         "last_tool_result": None,
         "iteration": 0,
         "agent_reasoning": [],
@@ -258,11 +265,12 @@ async def run_agentic_loop(
 
         if plan.get("action") == "complete":
             msg = (plan.get("message") or "").strip()
+            msg_lower = msg.lower()
+            is_probing_msg = "?" in msg or any(k in msg_lower for k in probe_keywords)
             # Override: if planner said "Done."/empty with no products, and last_suggestion looks like probing,
             # user likely answered our questions—fetch instead of completing
             if (not msg or msg == "Done.") and not products_data and not intent_data:
                 ls = (state.get("last_suggestion") or "").lower()
-                probe_keywords = ("budget", "dietary", "preferences", "location", "what date", "occasion", "add flowers", "add something", "?")
                 if ls and any(k in ls for k in probe_keywords):
                     logger.info("Planner completed with no products but last_suggestion suggests probing—calling resolve_intent")
                     plan = {"action": "tool", "tool_name": "resolve_intent", "tool_args": {"text": user_message}, "reasoning": "User answered probing questions, fetching products."}
@@ -273,6 +281,29 @@ async def run_agentic_loop(
                     state["agent_reasoning"].append(plan.get("reasoning", ""))
                     state["planner_complete_message"] = msg or "Processed your request."
                     break
+            # Override: after 2+ probes, if planner wants to ask again but we have no products, proceed with assumptions
+            elif is_probing_msg and not products_data and state.get("probe_count", 0) >= 2:
+                logger.info("Probe count >= 2, proceeding with discover_composite using assumptions")
+                if not intent_data:
+                    plan = {"action": "tool", "tool_name": "resolve_intent", "tool_args": {"text": user_message}, "reasoning": "Proceeding after 2+ probes with assumptions."}
+                    if state.get("last_suggestion"):
+                        plan["tool_args"]["last_suggestion"] = state["last_suggestion"]
+                else:
+                    # We have intent; if discover_composite, call it. Else try discover_products.
+                    if intent_data.get("intent_type") == "discover_composite":
+                        plan = {
+                            "action": "tool",
+                            "tool_name": "discover_composite",
+                            "tool_args": {
+                                "search_queries": intent_data.get("search_queries") or ["flowers", "dinner", "movies"],
+                                "experience_name": intent_data.get("experience_name") or "date night",
+                            },
+                            "reasoning": "Proceeding after 2+ probes with assumptions.",
+                        }
+                    else:
+                        plan = {"action": "tool", "tool_name": "resolve_intent", "tool_args": {"text": user_message}, "reasoning": "Proceeding after 2+ probes."}
+                        if state.get("last_suggestion"):
+                            plan["tool_args"]["last_suggestion"] = state["last_suggestion"]
             else:
                 state["agent_reasoning"].append(plan.get("reasoning", ""))
                 state["planner_complete_message"] = msg or "Processed your request."

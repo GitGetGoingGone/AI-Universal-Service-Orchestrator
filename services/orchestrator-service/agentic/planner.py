@@ -16,7 +16,7 @@ Given the current state (user message, previous actions, results, last_suggestio
 Rules:
 - For a NEW user message: first call resolve_intent to understand what they want.
 - If intent is "discover" (single category like chocolates, flowers): PREFER probing first. When the user message is generic (e.g. "show me chocolates", "chocolates", "flowers" with no preferences, occasion, budget, or add-ons), call complete with 1-2 friendly questions (e.g. "Any preferences? Occasion? Budget? Would you like to add something like flowers with that?"). Only call discover_products when the user has provided details or explicitly asks for options.
-- If intent is "discover_composite" (e.g. date night, birthday party): PREFER probing first. When the user message is generic (e.g. "plan a date night", "date night" with no date, budget, or preferences), call complete with 1-2 friendly questions (e.g. "What date? Any dietary preferences? Budget?"). Only call discover_composite when the user has provided details or explicitly asks for options. When discover_composite returns products, prefer the best combination for the experience (e.g. date night: flowers + dinner + movie).
+- If intent is "discover_composite" (e.g. date night, birthday party): PREFER probing first. When the user message is generic (e.g. "plan a date night", "date night" with no date, budget, or preferences), call complete with 1-2 friendly questions (e.g. "What date? Any dietary preferences? Budget?"). Only call discover_composite when the user has provided details or explicitly asks for options. When discover_composite returns products, prefer the best combination for the experience (e.g. date night: flowers + dinner + movie). After 2+ probing rounds (probe_count >= 2), make assumptions (e.g. this weekend, $100 budget) and call discover_composite—do not ask again.
 - CRITICAL: When last_suggestion or recent_conversation shows we asked probing questions and the user NOW provides details, you MUST fetch products. For composite (date night, etc.): call resolve_intent then discover_composite. For single category (chocolates, flowers, etc.): call resolve_intent then discover_products. NEVER complete with "Done" or empty when the user has answered our questions—fetch products first.
 - When last_suggestion exists and user refines (e.g. "I don't want flowers, add a movie", "no flowers", "add chocolates instead"): resolve_intent will interpret the refinement. Use the new search_query from intent. For composite experiences, the intent may return updated search_queries.
 - If intent is checkout/track/support: you may complete with a message directing them.
@@ -108,6 +108,7 @@ async def plan_next_action(
             recent_conversation.append(f"{role}: {content}")
     state_summary = {
         "iteration": state.get("iteration", 0),
+        "probe_count": state.get("probe_count", 0),
         "last_tool_result": state.get("last_tool_result"),
         "last_suggestion": state.get("last_suggestion"),
         "recent_conversation": recent_conversation[-4:] if recent_conversation else None,

@@ -21,6 +21,7 @@ class ResolveRequest(BaseModel):
     user_id: Optional[str] = Field(None, description="Optional user ID for attribution")
     last_suggestion: Optional[str] = Field(None, description="Previous assistant suggestion for refinement (e.g. 'I don't want flowers, add a movie')")
     persist: bool = Field(True, description="Persist intent to database")
+    force_model: bool = Field(False, description="When true, use LLM only; do not fall back to heuristics on failure (for ChatGPT/Gemini)")
 
 
 class ResolveResponse(BaseModel):
@@ -40,7 +41,12 @@ async def resolve(
     Chat-First: Returns JSON-LD and machine-readable structure for AI agents.
     """
     # Resolve intent via LLM (async to avoid blocking)
-    resolved = await resolve_intent(body.text, user_id=body.user_id, last_suggestion=body.last_suggestion)
+    resolved = await resolve_intent(
+        body.text,
+        user_id=body.user_id,
+        last_suggestion=body.last_suggestion,
+        force_model=body.force_model,
+    )
 
     intent_id = None
     if body.persist and get_supabase():

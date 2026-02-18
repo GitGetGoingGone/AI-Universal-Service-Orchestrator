@@ -156,6 +156,7 @@ type Config = {
     product_mix?: Array<{ sort: string; limit: number; pct: number }>;
   };
   enable_composite_bundle_suggestion?: boolean;
+  force_model_based_intent?: boolean;
 };
 
 export function ConfigEditor() {
@@ -280,6 +281,7 @@ export function ConfigEditor() {
             ],
           },
           enable_composite_bundle_suggestion: data.enable_composite_bundle_suggestion ?? true,
+          force_model_based_intent: data.force_model_based_intent ?? false,
         });
       })
       .catch(() => {})
@@ -392,6 +394,7 @@ export function ConfigEditor() {
           sponsorship_pricing: config.sponsorship_pricing,
           composite_discovery_config: config.composite_discovery_config,
           enable_composite_bundle_suggestion: config.enable_composite_bundle_suggestion,
+          force_model_based_intent: config.force_model_based_intent,
         }),
       });
       if (!res.ok) throw new Error("Failed");
@@ -514,6 +517,21 @@ export function ConfigEditor() {
           <p className="text-sm text-[rgb(var(--color-text-secondary))]">
             LLM providers, image generation, model interactions, and creativity settings.
           </p>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id="force_model_intent"
+          checked={config.force_model_based_intent ?? false}
+          onChange={(e) =>
+            setConfig((c) => ({ ...c, force_model_based_intent: e.target.checked }))
+          }
+        />
+        <label htmlFor="force_model_intent" className="text-sm">
+          Force model-based intent (ChatGPT/Gemini) — Use LLM only for intent; no heuristic fallback. Ensures probing data (date, budget, preferences) are captured. Requires LLM configured and ChatGPT/Gemini to send <code className="text-xs">messages</code>.
+        </label>
+      </div>
+
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
@@ -945,6 +963,7 @@ export function ConfigEditor() {
             <p className="text-sm text-[rgb(var(--color-text-secondary))]">
               Edit system prompts per interaction type. Changes apply without redeployment. Empty prompt
               uses code default. Use <strong>Try</strong> to test each interaction with the active model—verifies connection and helps tweak prompts.
+              For discover types, the test sends sample product data (Product data, Allowed CTAs) in the same format as real chat.
             </p>
             {modelInteractions.map((m) => (
               <div
