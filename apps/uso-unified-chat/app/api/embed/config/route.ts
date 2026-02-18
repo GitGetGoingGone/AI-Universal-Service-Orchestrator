@@ -29,14 +29,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const platformConfig = platformResult.data ?? {};
-  const thinkingUi = platformConfig.thinking_ui ?? {
+  type PlatformThinking = { thinking_ui?: { font_size_px?: number; color?: string; animation_type?: string; animation_speed_ms?: number }; thinking_messages?: Record<string, string> };
+  const platformData = platformResult.data as PlatformThinking | null;
+  const thinkingUi = platformData?.thinking_ui ?? {
     font_size_px: 14,
     color: "#94a3b8",
     animation_type: "dots",
     animation_speed_ms: 1000,
   };
-  const thinkingMessages = platformConfig.thinking_messages ?? {};
+  const thinkingMessages = platformData?.thinking_messages ?? {};
 
   const config = data ?? {
     primary_color: "#1976d2",
