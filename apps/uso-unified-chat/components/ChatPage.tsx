@@ -362,48 +362,6 @@ export function ChatPage(props: ChatPageProps = {}) {
 
   const prevLoadedThreadIdRef = useRef<string | null>(null);
   const paymentSuccessHandledRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated || !threadId) return;
-    if (prevLoadedThreadIdRef.current === threadId) return;
-    prevLoadedThreadIdRef.current = threadId;
-    const authParam = userId
-      ? `user_id=${encodeURIComponent(userId)}`
-      : anonymousId
-        ? `anonymous_id=${encodeURIComponent(anonymousId)}`
-        : null;
-    if (!authParam) return;
-    fetch(`/api/threads/${threadId}?${authParam}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) return;
-        const msgs = (data.messages ?? []).map(
-          (m: { id: string; role: string; content?: string; adaptiveCard?: Record<string, unknown> }) => ({
-            id: m.id,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            adaptiveCard: m.adaptiveCard,
-            isFromHistory: true,
-          })
-        );
-        if (paymentSuccessOrderId && !paymentSuccessHandledRef.current) {
-          const confirmMsg = { role: "assistant" as const, content: "Payment confirmed! Thank you for your order." };
-          msgs.push({
-            ...confirmMsg,
-            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          });
-          paymentSuccessHandledRef.current = true;
-          persistMessage(confirmMsg);
-          if (!isSignedIn) setShowPostCheckoutSignInBanner(true);
-          onPaymentSuccessHandled?.();
-        }
-        setMessages(msgs);
-        if (data.thread?.bundle_id) setBundleId(data.thread.bundle_id);
-        setPendingApprovals(data.pending_approvals ?? []);
-        setLatestOrder(data.thread?.latest_order ?? null);
-      })
-      .catch(() => {});
-  }, [hydrated, threadId, anonymousId, userId, setBundleId, paymentSuccessOrderId, persistMessage, isSignedIn, onPaymentSuccessHandled]);
-
   const [threads, setThreads] = useState<Array<{ id: string; title: string; updated_at: string }>>([]);
   const fetchThreads = useCallback(() => {
     const aid = userId ? null : (anonymousId ?? (typeof window !== "undefined" ? getOrCreateAnonymousId() : null));
@@ -472,6 +430,48 @@ export function ChatPage(props: ChatPageProps = {}) {
     },
     [threadId, userId, anonymousId]
   );
+
+  useEffect(() => {
+    if (!hydrated || !threadId) return;
+    if (prevLoadedThreadIdRef.current === threadId) return;
+    prevLoadedThreadIdRef.current = threadId;
+    const authParam = userId
+      ? `user_id=${encodeURIComponent(userId)}`
+      : anonymousId
+        ? `anonymous_id=${encodeURIComponent(anonymousId)}`
+        : null;
+    if (!authParam) return;
+    fetch(`/api/threads/${threadId}?${authParam}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) return;
+        const msgs = (data.messages ?? []).map(
+          (m: { id: string; role: string; content?: string; adaptiveCard?: Record<string, unknown> }) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            adaptiveCard: m.adaptiveCard,
+            isFromHistory: true,
+          })
+        );
+        if (paymentSuccessOrderId && !paymentSuccessHandledRef.current) {
+          const confirmMsg = { role: "assistant" as const, content: "Payment confirmed! Thank you for your order." };
+          msgs.push({
+            ...confirmMsg,
+            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          });
+          paymentSuccessHandledRef.current = true;
+          persistMessage(confirmMsg);
+          if (!isSignedIn) setShowPostCheckoutSignInBanner(true);
+          onPaymentSuccessHandled?.();
+        }
+        setMessages(msgs);
+        if (data.thread?.bundle_id) setBundleId(data.thread.bundle_id);
+        setPendingApprovals(data.pending_approvals ?? []);
+        setLatestOrder(data.thread?.latest_order ?? null);
+      })
+      .catch(() => {});
+  }, [hydrated, threadId, anonymousId, userId, setBundleId, paymentSuccessOrderId, persistMessage, isSignedIn, onPaymentSuccessHandled]);
 
   // Save conversation when user signs in (link anonymous thread to user)
   useEffect(() => {
