@@ -23,6 +23,21 @@ from packages.shared.json_ld.error import error_ld
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
 
 
+class ChatRequest(BaseModel):
+    """Request body for chat (natural language)."""
+
+    text: str = Field(..., min_length=1, max_length=2000, description="User message")
+    messages: Optional[List[Dict[str, Any]]] = Field(None, description="Conversation history [{role, content}] for refinement")
+    user_id: Optional[str] = Field(None, description="Optional platform user UUID (or resolved from platform_user_id when linked)")
+    platform_user_id: Optional[str] = Field(None, description="Platform identity (e.g. ChatGPT/Gemini user id); resolved to user_id via account_links")
+    limit: int = Field(20, ge=1, le=100, description="Max products when discover")
+    thread_id: Optional[str] = Field(None, description="Chat thread ID for webhook push (ChatGPT/Gemini)")
+    platform: Optional[Literal["chatgpt", "gemini", "web"]] = Field(None, description="Platform for webhook push (web = unified chat app)")
+    partner_id: Optional[str] = Field(None, description="Filter products to this partner (for embed/white-label)")
+    bundle_id: Optional[str] = Field(None, description="Thread's bundle ID - use for order context, never ask user")
+    order_id: Optional[str] = Field(None, description="Thread's paid order ID - use for track/support, never ask user")
+
+
 async def _stream_chat_events(
     *,
     body: ChatRequest,
@@ -146,21 +161,6 @@ async def _stream_chat_events(
     )
     body_json = json.dumps(response_data, default=str)
     yield f"event: done\ndata: {body_json}\n\n"
-
-
-class ChatRequest(BaseModel):
-    """Request body for chat (natural language)."""
-
-    text: str = Field(..., min_length=1, max_length=2000, description="User message")
-    messages: Optional[List[Dict[str, Any]]] = Field(None, description="Conversation history [{role, content}] for refinement")
-    user_id: Optional[str] = Field(None, description="Optional platform user UUID (or resolved from platform_user_id when linked)")
-    platform_user_id: Optional[str] = Field(None, description="Platform identity (e.g. ChatGPT/Gemini user id); resolved to user_id via account_links")
-    limit: int = Field(20, ge=1, le=100, description="Max products when discover")
-    thread_id: Optional[str] = Field(None, description="Chat thread ID for webhook push (ChatGPT/Gemini)")
-    platform: Optional[Literal["chatgpt", "gemini", "web"]] = Field(None, description="Platform for webhook push (web = unified chat app)")
-    partner_id: Optional[str] = Field(None, description="Filter products to this partner (for embed/white-label)")
-    bundle_id: Optional[str] = Field(None, description="Thread's bundle ID - use for order context, never ask user")
-    order_id: Optional[str] = Field(None, description="Thread's paid order ID - use for track/support, never ask user")
 
 
 @router.post("/chat")
