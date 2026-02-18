@@ -1697,10 +1697,493 @@ export function ConfigEditor() {
               />
               <label htmlFor="upsell_surge_enabled">Enable upsell and surge rules</label>
             </div>
-            <p className="text-xs text-[rgb(var(--color-text-secondary))]">
-              Add rules via JSON editor or extend the config API. Default: disabled. Rules use intent_type, occasion,
-              purchase_intent, urgency_signals. Promo rules support trigger: before_checkout, min_bundle_items.
-            </p>
+            <div className="space-y-6">
+              <div>
+                <h5 className="text-sm font-medium mb-2">Upsell rules</h5>
+                <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-2">
+                  Suggest add-on categories when intent matches. Conditions: intent_types (discover_composite, discover_products), occasion_contains (keywords), purchase_intent_min (exploring|considering|ready_to_buy).
+                </p>
+                {(config.upsell_surge_rules?.upsell_rules ?? []).map((r, i) => (
+                  <div key={r.id ?? i} className="mb-4 p-3 rounded border border-[rgb(var(--color-border))] space-y-2">
+                    <div className="flex justify-between items-center">
+                      <input
+                        type="text"
+                        placeholder="Rule name"
+                        value={r.name ?? ""}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, name: e.target.value } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="flex-1 px-2 py-1 text-sm rounded border border-[rgb(var(--color-border))] mr-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).filter((_, j) => j !== i),
+                            },
+                          }))
+                        }
+                        className="text-red-600 text-sm hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <input
+                        type="text"
+                        placeholder="Intent types (comma)"
+                        value={(r.conditions?.intent_types ?? []).join(", ")}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
+                                j === i
+                                  ? { ...x, conditions: { ...x.conditions, intent_types: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
+                                  : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Occasion keywords (comma)"
+                        value={(r.conditions?.occasion_contains ?? []).join(", ")}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
+                                j === i
+                                  ? { ...x, conditions: { ...x.conditions, occasion_contains: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
+                                  : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      />
+                      <select
+                        value={r.conditions?.purchase_intent_min ?? ""}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, conditions: { ...x.conditions, purchase_intent_min: e.target.value || undefined } } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      >
+                        <option value="">Any intent</option>
+                        <option value="exploring">Exploring</option>
+                        <option value="considering">Considering</option>
+                        <option value="ready_to_buy">Ready to buy</option>
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Addon categories (comma)"
+                        value={(r.addon_categories ?? []).join(", ")}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, addon_categories: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
+                      />
+                      <label className="flex items-center gap-2 col-span-2">
+                        <input
+                          type="checkbox"
+                          checked={r.boost_in_results ?? false}
+                          onChange={(e) =>
+                            setConfig((c) => ({
+                              ...c,
+                              upsell_surge_rules: {
+                                ...c.upsell_surge_rules,
+                                upsell_rules: (c.upsell_surge_rules?.upsell_rules ?? []).map((x, j) =>
+                                  j === i ? { ...x, boost_in_results: e.target.checked } : x
+                                ),
+                              },
+                            }))
+                          }
+                        />
+                        Boost addons in results
+                      </label>
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfig((c) => ({
+                      ...c,
+                      upsell_surge_rules: {
+                        ...c.upsell_surge_rules,
+                        upsell_rules: [
+                          ...(c.upsell_surge_rules?.upsell_rules ?? []),
+                          { id: crypto.randomUUID(), name: "", conditions: {}, addon_categories: [], boost_in_results: false },
+                        ],
+                      },
+                    }))
+                  }
+                  className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                >
+                  + Add upsell rule
+                </button>
+              </div>
+
+              <div>
+                <h5 className="text-sm font-medium mb-2">Surge rules</h5>
+                <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-2">
+                  Apply surge pricing when intent matches. Conditions: intent_types, purchase_intent_min, urgency_signals (comma).
+                </p>
+                {(config.upsell_surge_rules?.surge_rules ?? []).map((r, i) => (
+                  <div key={r.id ?? i} className="mb-4 p-3 rounded border border-[rgb(var(--color-border))] space-y-2">
+                    <div className="flex justify-between items-center">
+                      <input
+                        type="text"
+                        placeholder="Rule name"
+                        value={r.name ?? ""}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, name: e.target.value } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="flex-1 px-2 py-1 text-sm rounded border border-[rgb(var(--color-border))] mr-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).filter((_, j) => j !== i),
+                            },
+                          }))
+                        }
+                        className="text-red-600 text-sm hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <input
+                        type="number"
+                        placeholder="Surge %"
+                        value={r.surge_pct ?? 0}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, surge_pct: Number(e.target.value) || 0 } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Max surge %"
+                        value={r.max_surge_pct ?? ""}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, max_surge_pct: e.target.value ? Number(e.target.value) : undefined } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      />
+                      <select
+                        value={r.conditions?.purchase_intent_min ?? ""}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, conditions: { ...x.conditions, purchase_intent_min: e.target.value || undefined } } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      >
+                        <option value="">Any intent</option>
+                        <option value="exploring">Exploring</option>
+                        <option value="considering">Considering</option>
+                        <option value="ready_to_buy">Ready to buy</option>
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Intent types (comma)"
+                        value={(r.conditions?.intent_types ?? []).join(", ")}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
+                                j === i
+                                  ? { ...x, conditions: { ...x.conditions, intent_types: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
+                                  : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Urgency signals (comma)"
+                        value={(r.conditions?.urgency_signals ?? []).join(", ")}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              surge_rules: (c.upsell_surge_rules?.surge_rules ?? []).map((x, j) =>
+                                j === i
+                                  ? { ...x, conditions: { ...x.conditions, urgency_signals: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
+                                  : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
+                      />
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfig((c) => ({
+                      ...c,
+                      upsell_surge_rules: {
+                        ...c.upsell_surge_rules,
+                        surge_rules: [
+                          ...(c.upsell_surge_rules?.surge_rules ?? []),
+                          { id: crypto.randomUUID(), name: "", conditions: {}, surge_pct: 0 },
+                        ],
+                      },
+                    }))
+                  }
+                  className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                >
+                  + Add surge rule
+                </button>
+              </div>
+
+              <div>
+                <h5 className="text-sm font-medium mb-2">Promo rules</h5>
+                <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-2">
+                  Suggest products at discount before checkout. trigger: before_checkout, min_bundle_items.
+                </p>
+                {(config.upsell_surge_rules?.promo_rules ?? []).map((r, i) => (
+                  <div key={r.id ?? i} className="mb-4 p-3 rounded border border-[rgb(var(--color-border))] space-y-2">
+                    <div className="flex justify-between items-center">
+                      <input
+                        type="text"
+                        placeholder="Rule name"
+                        value={r.name ?? ""}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, name: e.target.value } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="flex-1 px-2 py-1 text-sm rounded border border-[rgb(var(--color-border))] mr-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).filter((_, j) => j !== i),
+                            },
+                          }))
+                        }
+                        className="text-red-600 text-sm hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <input
+                        type="number"
+                        placeholder="Discount %"
+                        value={r.discount_pct ?? 0}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, discount_pct: Number(e.target.value) || 0 } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Min bundle items"
+                        value={r.conditions?.min_bundle_items ?? 0}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
+                                j === i
+                                  ? { ...x, conditions: { ...x.conditions, trigger: "before_checkout", min_bundle_items: Number(e.target.value) || 0 } }
+                                  : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Intent types (comma)"
+                        value={(r.conditions?.intent_types ?? []).join(", ")}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
+                                j === i
+                                  ? { ...x, conditions: { ...x.conditions, intent_types: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } }
+                                  : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))]"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Product IDs (comma)"
+                        value={(r.product_ids ?? []).join(", ")}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, product_ids: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Category queries (comma)"
+                        value={(r.category_queries ?? []).join(", ")}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, category_queries: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Promo message"
+                        value={r.promo_message ?? ""}
+                        onChange={(e) =>
+                          setConfig((c) => ({
+                            ...c,
+                            upsell_surge_rules: {
+                              ...c.upsell_surge_rules,
+                              promo_rules: (c.upsell_surge_rules?.promo_rules ?? []).map((x, j) =>
+                                j === i ? { ...x, promo_message: e.target.value } : x
+                              ),
+                            },
+                          }))
+                        }
+                        className="px-2 py-1 rounded border border-[rgb(var(--color-border))] col-span-2"
+                      />
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfig((c) => ({
+                      ...c,
+                      upsell_surge_rules: {
+                        ...c.upsell_surge_rules,
+                        promo_rules: [
+                          ...(c.upsell_surge_rules?.promo_rules ?? []),
+                          { id: crypto.randomUUID(), name: "", conditions: { trigger: "before_checkout", min_bundle_items: 0 }, discount_pct: 0 },
+                        ],
+                      },
+                    }))
+                  }
+                  className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                >
+                  + Add promo rule
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -1813,6 +2296,50 @@ export function ConfigEditor() {
                   />
                 </div>
               )}
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Thinking message overrides</label>
+              <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-2">
+                Override default messages per step. Keys: intent_resolved, before_complete_probing, before_handle_unrelated,
+                before_weather, after_weather, before_occasions, before_discover_products, before_discover_composite,
+                after_discover, before_bundle, before_response. Use {"{location}"}, {"{query}"}, {"{experience_name}"} for dynamic values.
+              </p>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {[
+                  "intent_resolved",
+                  "before_complete_probing",
+                  "before_handle_unrelated",
+                  "before_weather",
+                  "after_weather",
+                  "before_occasions",
+                  "before_discover_products",
+                  "before_discover_composite",
+                  "after_discover",
+                  "before_bundle",
+                  "before_response",
+                ].map((step) => (
+                  <div key={step} className="flex gap-2 items-center">
+                    <span className="text-xs w-44 shrink-0 text-[rgb(var(--color-text-secondary))] truncate" title={step}>
+                      {step}
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Leave empty for default"
+                      value={config.thinking_messages?.[step] ?? ""}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          thinking_messages: {
+                            ...c.thinking_messages,
+                            [step]: e.target.value || undefined,
+                          },
+                        }))
+                      }
+                      className="flex-1 px-3 py-1.5 text-sm rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}

@@ -123,25 +123,10 @@ async def _stream_chat_events(
             pass
 
     adaptive_card = result.get("adaptive_card") if use_adaptive_cards else None
-    agent_reasoning = result.get("agent_reasoning", [])
-    if adaptive_card and agent_reasoning:
-        reasoning_text = " • ".join(r for r in agent_reasoning if r)
-        if reasoning_text:
-            card_body = list(adaptive_card.get("body", []))
-            card_body.insert(
-                0,
-                {
-                    "type": "Container",
-                    "style": "default",
-                    "items": [
-                        {"type": "TextBlock", "text": reasoning_text[:200], "size": "Small", "wrap": True},
-                    ],
-                },
-            )
-            adaptive_card = {**adaptive_card, "body": card_body}
+    # Do NOT inject agent_reasoning into the card — it's internal and not user-facing
 
     planner_message = (result.get("planner_complete_message") or "").strip()
-    generic_messages = ("processed your request.", "done.", "done")
+    generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
     if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
     else:
@@ -322,30 +307,14 @@ async def chat(
         except Exception:
             pass
 
-    # Enrich adaptive card with agent reasoning when present (no header label)
     adaptive_card = result.get("adaptive_card") if use_adaptive_cards else None
-    agent_reasoning = result.get("agent_reasoning", [])
-    if adaptive_card and agent_reasoning:
-        reasoning_text = " • ".join(r for r in agent_reasoning if r)
-        if reasoning_text:
-            card_body = list(adaptive_card.get("body", []))
-            card_body.insert(
-                0,
-                {
-                    "type": "Container",
-                    "style": "default",
-                    "items": [
-                        {"type": "TextBlock", "text": reasoning_text[:200], "size": "Small", "wrap": True},
-                    ],
-                },
-            )
-            adaptive_card = {**adaptive_card, "body": card_body}
+    # Do NOT inject agent_reasoning into the card — it's internal and not user-facing
 
     # Prefer planner message only when it's specific (e.g. probing questions).
     # For generic fallbacks ("Processed your request.", "Done."), always use engagement response
     # so the LLM can generate natural, empathetic replies (e.g. "I know, it's a lot to take in!").
     planner_message = (result.get("planner_complete_message") or "").strip()
-    generic_messages = ("processed your request.", "done.", "done")
+    generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
     if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
     else:

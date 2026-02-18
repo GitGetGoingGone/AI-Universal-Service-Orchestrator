@@ -75,6 +75,15 @@ def get_upsell_surge_rules() -> Dict[str, Any]:
     return {"enabled": False, "upsell_rules": [], "surge_rules": [], "promo_rules": []}
 
 
+def get_thinking_messages() -> Dict[str, str]:
+    """Get thinking_messages from platform_config. Keys match step names; values support {location}, {query}, {experience_name}."""
+    cfg = _get_platform_config()
+    msgs = (cfg or {}).get("thinking_messages")
+    if isinstance(msgs, dict):
+        return {k: str(v) for k, v in msgs.items() if isinstance(v, str)}
+    return {}
+
+
 def _update_platform_config(updates: Dict[str, Any]) -> bool:
     client = get_supabase()
     if not client:

@@ -212,6 +212,7 @@ async def run_agentic_loop(
     bundle_id: Optional[str] = None,
     order_id: Optional[str] = None,
     on_thinking: Optional[Callable[[str, Optional[Dict]], Awaitable[None]]] = None,
+    thinking_messages: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Run the agentic decision loop until completion.
@@ -275,6 +276,12 @@ async def run_agentic_loop(
     engagement_data: Dict[str, Any] = {}
 
     llm_config = _get_llm_config()
+    if thinking_messages is None:
+        try:
+            from api.admin import get_thinking_messages
+            thinking_messages = get_thinking_messages()
+        except Exception:
+            thinking_messages = {}
 
     for iteration in range(max_iterations):
         state["iteration"] = iteration
@@ -291,7 +298,7 @@ async def run_agentic_loop(
             intent_data = intent_result.get("data", intent_result)
             state["last_tool_result"] = intent_result
             state["agent_reasoning"].append("Intent-first: resolved user message.")
-            await _emit_thinking(on_thinking, "intent_resolved", intent_data or {})
+            await _emit_thinking(on_thinking, "intent_resolved", intent_data or {}, thinking_messages or {})
 
             # Rules layer: upsell, surge, promo (after intent)
             try:
@@ -309,9 +316,13 @@ async def run_agentic_loop(
             except Exception as e:
                 logger.debug("Rules layer skipped: %s", e)
 
-        # Use recommended_next_action when present (iteration 0 only) to decide next step
+        # Use recommended_next_action when present (iteration 0 only) to decide next step.
+        # Skip bypass when discover_products is recommended but query is generic—engage first.
         rec = (intent_data or {}).get("recommended_next_action") if iteration == 0 else None
-        if rec and rec in ("discover_composite", "discover_products") and intent_data:
+        sq = (intent_data or {}).get("search_query") or ""
+        generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "")
+        skip_discover_bypass = rec == "discover_products" and sq.lower().strip() in generic_queries
+        if rec and rec in ("discover_composite", "discover_products") and intent_data and not skip_discover_bypass:
             if rec == "discover_composite" and intent_data.get("intent_type") == "discover_composite":
                 plan = {
                     "action": "tool",
@@ -347,9 +358,9 @@ async def run_agentic_loop(
         if plan is None:
             ctx = intent_data or {}
             if rec == "complete_with_probing":
-                await _emit_thinking(on_thinking, "before_complete_probing", ctx)
+                await _emit_thinking(on_thinking, "before_complete_probing", ctx, thinking_messages or {})
             elif rec == "handle_unrelated":
-                await _emit_thinking(on_thinking, "before_handle_unrelated", ctx)
+                await _emit_thinking(on_thinking, "before_handle_unrelated", ctx, thinking_messages or {})
             plan = await plan_next_action(
                 user_message, state, max_iterations=max_iterations, llm_config=llm_config
             )
@@ -452,13 +463,13 @@ async def run_agentic_loop(
             ctx["query"] = tool_args.get("query") or intent_data.get("search_query")
             ctx["experience_name"] = tool_args.get("experience_name") or (intent_data or {}).get("experience_name")
             if tool_name == "get_weather":
-                await _emit_thinking(on_thinking, "before_weather", {**ctx, "location": ctx.get("location") or tool_args.get("location", "your area")})
+                await _emit_thinking(on_thinking, "before_weather", {**ctx, "location": ctx.get("location") or tool_args.get("location", "your area")}, thinking_messages or {})
             elif tool_name == "get_upcoming_occasions":
-                await _emit_thinking(on_thinking, "before_occasions", {**ctx, "location": ctx.get("location") or tool_args.get("location", "your area")})
+                await _emit_thinking(on_thinking, "before_occasions", {**ctx, "location": ctx.get("location") or tool_args.get("location", "your area")}, thinking_messages or {})
             elif tool_name == "discover_products":
-                await _emit_thinking(on_thinking, "before_discover_products", {**ctx, "query": ctx.get("query") or "options"})
+                await _emit_thinking(on_thinking, "before_discover_products", {**ctx, "query": ctx.get("query") or "options"}, thinking_messages or {})
             elif tool_name == "discover_composite":
-                await _emit_thinking(on_thinking, "before_discover_composite", ctx)
+                await _emit_thinking(on_thinking, "before_discover_composite", ctx, thinking_messages or {})
 
             if tool_name == "discover_composite" and intent_data and intent_data.get("intent_type") == "discover_composite":
                 tool_args = dict(tool_args)
@@ -510,7 +521,7 @@ async def run_agentic_loop(
             elif tool_name == "get_weather":
                 engagement_data["weather"] = result.get("data", result)
                 wd = result.get("data", result) or {}
-                await _emit_thinking(on_thinking, "after_weather", {"weather_desc": wd.get("description", ""), "location": wd.get("location", "")})
+                await _emit_thinking(on_thinking, "after_weather", {"weather_desc": wd.get("description", ""), "location": wd.get("location", "")}, thinking_messages or {})
             elif tool_name == "get_upcoming_occasions":
                 engagement_data["occasions"] = result.get("data", result)
             elif tool_name == "discover_composite":
@@ -518,10 +529,10 @@ async def run_agentic_loop(
                 adaptive_card = result.get("adaptive_card")
                 machine_readable = result.get("machine_readable")
                 pc = (products_data or {}).get("products") or []
-                await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0})
+                await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0}, thinking_messages or {})
                 # LLM-suggested bundle options: 2-4 options, each one product per category (when enabled)
                 if products_data and (products_data.get("categories") or products_data.get("products")):
-                    await _emit_thinking(on_thinking, "before_bundle", intent_data or {})
+                    await _emit_thinking(on_thinking, "before_bundle", intent_data or {}, thinking_messages or {})
                     try:
                         from api.admin import _get_platform_config
                         cfg = _get_platform_config() or {}
@@ -569,7 +580,7 @@ async def run_agentic_loop(
                 machine_readable = result.get("machine_readable")
                 pd = products_data or {}
                 pc = pd.get("products") or []
-                await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0})
+                await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0}, thinking_messages or {})
             elif tool_name == "create_standing_intent":
                 intent_data = intent_data or {}
                 intent_data["standing_intent"] = result
@@ -581,7 +592,7 @@ async def run_agentic_loop(
                     state["planner_complete_message"] = summary
                 break
 
-    await _emit_thinking(on_thinking, "before_response", intent_data or {})
+    await _emit_thinking(on_thinking, "before_response", intent_data or {}, thinking_messages or {})
 
     # Build final response
     out = _build_response(
@@ -685,8 +696,8 @@ def _extract_budget(intent_data: Optional[Dict[str, Any]]) -> Optional[int]:
     return None
 
 
-def _thinking_message(step: str, context: Dict[str, Any]) -> str:
-    """Derive dynamic thinking message from step and current state."""
+def _thinking_message(step: str, context: Dict[str, Any], overrides: Optional[Dict[str, str]] = None) -> str:
+    """Derive dynamic thinking message from step and current state. Admin overrides from platform_config.thinking_messages take precedence."""
     templates = {
         "intent_resolved": "Understanding what you're looking for...",
         "before_complete_probing": "Let me ask a few questions to tailor this...",
@@ -700,7 +711,7 @@ def _thinking_message(step: str, context: Dict[str, Any]) -> str:
         "before_bundle": "Curating your perfect bundle...",
         "before_response": "Putting it all together...",
     }
-    msg = templates.get(step)
+    msg = (overrides or {}).get(step) or templates.get(step)
     if msg is None and step == "after_weather":
         desc = (context.get("weather_desc") or "").lower()
         if any(w in desc for w in ("rain", "storm", "snow", "chilly", "cold")):
@@ -711,17 +722,21 @@ def _thinking_message(step: str, context: Dict[str, Any]) -> str:
     loc = context.get("location") or "your area"
     query = context.get("query") or context.get("search_query") or "options"
     exp = context.get("experience_name") or "experience"
-    return msg.format(location=loc, query=query, experience_name=exp)
+    try:
+        return msg.format(location=loc, query=query, experience_name=exp)
+    except (KeyError, ValueError):
+        return msg
 
 
 async def _emit_thinking(
     on_thinking: Optional[Callable[[str, Optional[Dict]], Awaitable[None]]],
     step: str,
     context: Dict[str, Any],
+    thinking_messages: Optional[Dict[str, str]] = None,
 ) -> None:
-    """Emit thinking message if callback provided."""
+    """Emit thinking message if callback provided. Uses platform_config.thinking_messages overrides when set."""
     if on_thinking:
-        msg = _thinking_message(step, context)
+        msg = _thinking_message(step, context, thinking_messages)
         await on_thinking(msg, {"step": step, **context})
 
 

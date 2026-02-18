@@ -199,7 +199,7 @@ def _get_system_prompt_and_max_tokens(intent_type: str) -> Tuple[str, int]:
         return RESPONSE_SYSTEM_COMPOSITE, 800
     if intent_type == "browse":
         return RESPONSE_SYSTEM_BROWSE, 150
-    if intent_type == "discover":
+    if intent_type in ("discover", "discover_products"):
         return RESPONSE_SYSTEM_DISCOVER, 300
     return RESPONSE_SYSTEM, 150
 

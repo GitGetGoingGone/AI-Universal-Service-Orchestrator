@@ -239,7 +239,7 @@ def _heuristic_resolve(
             "search_query": "",
             "entities": [],
             "confidence_score": 0.5,
-            "recommended_next_action": "discover_products",
+            "recommended_next_action": "complete_with_probing",
         }
 
     # Checkout/track/support keywords
@@ -320,6 +320,15 @@ def _heuristic_resolve(
     if "gift" in text_lower:
         derived = "gifts" if not derived else "gifts"
 
+    # Generic queries: engage first before discover_products
+    generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have")
+    sq = (derived or "browse").lower().strip()
+    is_generic = not sq or sq in generic_queries or any(g in text_lower for g in ("show me", "what do you have", "what have you", "what's available", "what can you", "show me what"))
+    if is_generic:
+        rec = "complete_with_probing"
+    else:
+        rec = "discover_products"
+
     # Extract budget: "under $50", "under 50", "within $100", "max 25"
     entities: List[Dict[str, Any]] = []
     budget_match = re.search(r"(?:under|within|max|below|less than)\s*\$?\s*(\d+)", text_lower)
@@ -332,5 +341,5 @@ def _heuristic_resolve(
         "search_query": derived if derived else "browse",
         "entities": entities,
         "confidence_score": 0.6,
-        "recommended_next_action": "discover_products",
+        "recommended_next_action": rec,
     }
