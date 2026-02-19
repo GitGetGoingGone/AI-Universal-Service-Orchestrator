@@ -62,6 +62,11 @@ class AddBulkBody(BaseModel):
     product_ids: list[str]
     user_id: Optional[str] = None
     bundle_id: Optional[str] = None
+    pickup_time: Optional[str] = None
+    pickup_address: Optional[str] = None
+    delivery_address: Optional[str] = None
+    requires_fulfillment: Optional[bool] = None  # When true, fulfillment_fields (or default 3) are required
+    fulfillment_fields: Optional[list[str]] = None  # Dynamic required fields per bundle (e.g. ["delivery_address"])
 
 
 @router.post("/bundle/add")
@@ -84,11 +89,33 @@ async def add_to_bundle(body: AddToBundleBody):
 @router.post("/bundle/add-bulk")
 async def add_to_bundle_bulk(body: AddBulkBody):
     """Add multiple products to bundle. For Add curated bundle action."""
+    if body.requires_fulfillment:
+        required = body.fulfillment_fields or ["pickup_time", "pickup_address", "delivery_address"]
+        missing = []
+        for f in required:
+            val = getattr(body, f, None)
+            if not (val or "").strip():
+                missing.append(f)
+        if missing:
+            field_labels = {"pickup_time": "pickup time", "pickup_address": "pickup address", "delivery_address": "delivery address"}
+            labels = [field_labels.get(f, f) for f in missing]
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "fulfillment_details_required",
+                    "required_fields": missing,
+                    "message": f"Please provide {', '.join(labels)} before adding this bundle.",
+                },
+            )
     try:
         return await add_to_bundle_bulk_client(
             product_ids=body.product_ids,
             user_id=body.user_id,
             bundle_id=body.bundle_id,
+            pickup_time=body.pickup_time,
+            pickup_address=body.pickup_address,
+            delivery_address=body.delivery_address,
+            fulfillment_fields=body.fulfillment_fields,
         )
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:

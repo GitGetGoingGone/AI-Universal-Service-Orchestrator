@@ -44,6 +44,7 @@ import { TypewriterText } from "@/components/TypewriterText";
 import { PaymentModal } from "@/components/PaymentModal";
 import { PhoneModal } from "@/components/PhoneModal";
 import { PreCheckoutModal } from "@/components/PreCheckoutModal";
+import { BundleFulfillmentModal } from "@/components/BundleFulfillmentModal";
 import { SideNav } from "@/components/SideNav";
 import { useSideNavCollapsed } from "@/hooks/useSideNavCollapsed";
 
@@ -327,6 +328,12 @@ export function ChatPage(props: ChatPageProps = {}) {
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null);
   const [pendingPhoneOrderId, setPendingPhoneOrderId] = useState<string | null>(null);
   const [preCheckoutOrderId, setPreCheckoutOrderId] = useState<string | null>(null);
+  const [fulfillmentModalData, setFulfillmentModalData] = useState<{
+    product_ids: string[];
+    option_label?: string;
+    required_fields: string[];
+    initial_values: Record<string, string>;
+  } | null>(null);
   const [showPostCheckoutSignInBanner, setShowPostCheckoutSignInBanner] = useState(false);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, "like" | "dislike">>({});
   const [latestOrder, setLatestOrder] = useState<{
@@ -814,6 +821,65 @@ export function ChatPage(props: ChatPageProps = {}) {
         }
 
         if (action === "add_bundle_bulk" && data.product_ids && Array.isArray(data.product_ids)) {
+          const requiresFulfillment = data.requires_fulfillment === true;
+          const requiredFields: string[] = Array.isArray(data.fulfillment_fields)
+            ? data.fulfillment_fields
+            : ["pickup_time", "pickup_address", "delivery_address"];
+          const initialValues: Record<string, string> = {};
+          for (const f of requiredFields) {
+            const v = (data[f] as string)?.trim?.() || "";
+            initialValues[f] = v;
+          }
+          const hasAllFulfillment = requiredFields.every((f) => (initialValues[f] ?? "").trim().length > 0);
+
+          if (requiresFulfillment && hasAllFulfillment) {
+            // User already provided address/time in conversation — skip modal, add directly
+            const addPayload: Record<string, unknown> = {
+              product_ids: data.product_ids,
+              requires_fulfillment: true,
+              fulfillment_fields: requiredFields,
+              ...Object.fromEntries(requiredFields.map((f) => [f, initialValues[f]])),
+            };
+            if (bundleId) addPayload.bundle_id = bundleId;
+
+            const res = await fetch("/api/bundle/add-bulk", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(addPayload),
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || "Add to bundle failed");
+
+            const newBundleId = json.bundle_id ?? json.data?.bundle_id;
+            if (newBundleId && threadId) {
+              setBundleId(newBundleId);
+              const patchBody = userId
+                ? { bundle_id: newBundleId, user_id: userId }
+                : { bundle_id: newBundleId, anonymous_id: anonymousId };
+              fetch(`/api/threads/${threadId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(patchBody),
+              }).catch(() => {});
+            } else if (newBundleId) {
+              setBundleId(newBundleId);
+            }
+
+            const addMsg = { role: "assistant" as const, content: json.summary || "Added to bundle.", adaptiveCard: json.adaptive_card };
+            addMessage(addMsg);
+            persistMessage(addMsg);
+            if (json.adaptive_card) return;
+          } else if (requiresFulfillment) {
+            setFulfillmentModalData({
+              product_ids: data.product_ids,
+              option_label: data.option_label as string | undefined,
+              required_fields: requiredFields,
+              initial_values: initialValues,
+            });
+            setLoading(false);
+            return;
+          }
+
           const addPayload: Record<string, unknown> = {
             product_ids: data.product_ids,
           };
@@ -1040,7 +1106,65 @@ export function ChatPage(props: ChatPageProps = {}) {
         setLoading(false);
       }
     },
-    [addMessage, persistMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId, isSignedIn, setShowPostCheckoutSignInBanner, setPendingPhoneOrderId, setPreCheckoutOrderId]
+    [addMessage, persistMessage, e2eEnabled, sessionId, setPaymentOrderId, threadId, anonymousId, bundleId, setBundleId, setPendingApprovals, userId, isSignedIn, setShowPostCheckoutSignInBanner, setPendingPhoneOrderId, setPreCheckoutOrderId, setFulfillmentModalData]
+  );
+
+  const handleFulfillmentSubmit = useCallback(
+    async (details: Record<string, string>) => {
+      if (!fulfillmentModalData) return;
+      setLoading(true);
+      setFulfillmentModalData(null);
+      try {
+        const addPayload: Record<string, unknown> = {
+          product_ids: fulfillmentModalData.product_ids,
+          requires_fulfillment: true,
+          fulfillment_fields: fulfillmentModalData.required_fields,
+          ...details,
+        };
+        if (bundleId) addPayload.bundle_id = bundleId;
+
+        const res = await fetch("/api/bundle/add-bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(addPayload),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          const errMsg = typeof json.detail === "object" && json.detail?.message
+            ? json.detail.message
+            : typeof json.detail === "string"
+              ? json.detail
+              : json.error || "Add to bundle failed";
+          throw new Error(errMsg);
+        }
+
+        const newBundleId = json.bundle_id ?? json.data?.bundle_id;
+        if (newBundleId && threadId) {
+          setBundleId(newBundleId);
+          const patchBody = userId
+            ? { bundle_id: newBundleId, user_id: userId }
+            : { bundle_id: newBundleId, anonymous_id: anonymousId };
+          fetch(`/api/threads/${threadId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patchBody),
+          }).catch(() => {});
+        } else if (newBundleId) {
+          setBundleId(newBundleId);
+        }
+
+        const addMsg = { role: "assistant" as const, content: json.summary || "Added to bundle.", adaptiveCard: json.adaptive_card };
+        addMessage(addMsg);
+        persistMessage(addMsg);
+      } catch (err) {
+        const content = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        addMessage({ role: "assistant", content });
+        persistMessage({ role: "assistant", content });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [fulfillmentModalData, bundleId, threadId, userId, anonymousId, setBundleId, addMessage, persistMessage]
   );
 
   const submitFeedback = useCallback(
@@ -1507,6 +1631,16 @@ export function ChatPage(props: ChatPageProps = {}) {
             setPendingPhoneOrderId(preCheckoutOrderId);
             setPreCheckoutOrderId(null);
           }}
+        />
+      )}
+
+      {fulfillmentModalData && (
+        <BundleFulfillmentModal
+          optionLabel={fulfillmentModalData.option_label}
+          onClose={() => setFulfillmentModalData(null)}
+          onSubmit={handleFulfillmentSubmit}
+          requiredFields={fulfillmentModalData.required_fields}
+          initialValues={fulfillmentModalData.initial_values}
         />
       )}
 

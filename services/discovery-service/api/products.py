@@ -34,6 +34,10 @@ class AddBulkBody(BaseModel):
     product_ids: list[str]
     user_id: Optional[str] = None
     bundle_id: Optional[str] = None
+    pickup_time: Optional[str] = None
+    pickup_address: Optional[str] = None
+    delivery_address: Optional[str] = None
+    fulfillment_fields: Optional[list[str]] = None  # Dynamic required fields per bundle
 
 
 class RemoveFromBundleBody(BaseModel):
@@ -308,6 +312,11 @@ async def proceed_to_checkout(request: Request, body: CheckoutBody):
     order = await create_order_from_bundle(body.bundle_id)
     if not order:
         raise HTTPException(status_code=500, detail="Failed to create order")
+    if order.get("error") == "fulfillment_required":
+        raise HTTPException(
+            status_code=400,
+            detail=order.get("message", "Pickup time, pickup address, and delivery address are required before checkout."),
+        )
 
     # Order → Task Queue integration: create vendor tasks for the new order
     order_id = order.get("id", "")
@@ -350,10 +359,19 @@ async def proceed_to_checkout(request: Request, body: CheckoutBody):
 @router.post("/bundle/add-bulk")
 async def add_to_bundle_bulk(request: Request, body: AddBulkBody):
     """Add multiple products to a bundle. For Add curated bundle action."""
+    fulfillment = None
+    if body.pickup_time or body.pickup_address or body.delivery_address or body.fulfillment_fields:
+        fulfillment = {
+            "pickup_time": body.pickup_time or "",
+            "pickup_address": body.pickup_address or "",
+            "delivery_address": body.delivery_address or "",
+            "required_fields": body.fulfillment_fields or ["pickup_time", "pickup_address", "delivery_address"],
+        }
     result = await add_products_to_bundle_bulk(
         product_ids=body.product_ids,
         user_id=body.user_id,
         bundle_id=body.bundle_id,
+        fulfillment_details=fulfillment,
     )
     if not result:
         raise HTTPException(status_code=400, detail="Failed to add products to bundle (products not found or error)")

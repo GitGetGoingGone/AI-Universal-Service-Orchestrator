@@ -1,8 +1,54 @@
-"""Experience bundle Adaptive Card - grouped by category (e.g. date night: flowers, dinner, transport)."""
+"""Experience bundle Adaptive Card - grouped by category (e.g. date night: flowers, dinner, transport).
 
-from typing import Any, Dict, List, Optional
+Fulfillment requirements are derived dynamically from bundle categories:
+- limo/transport/chauffeur: pickup_time, pickup_address
+- flowers/delivery: delivery_address
+- dinner/restaurant: delivery_address
+"""
+
+from typing import Any, Dict, List, Optional, Tuple
 
 from .base import _filter_empty, container, create_card, strip_html, text_block
+
+# Category keywords -> fulfillment fields. Used to derive required fields per bundle.
+CATEGORY_FULFILLMENT_MAP: Dict[str, Tuple[str, ...]] = {
+    "limo": ("pickup_time", "pickup_address"),
+    "transport": ("pickup_time", "pickup_address"),
+    "chauffeur": ("pickup_time", "pickup_address"),
+    "ride": ("pickup_time", "pickup_address"),
+    "flowers": ("delivery_address",),
+    "flower": ("delivery_address",),
+    "dinner": ("delivery_address",),
+    "restaurant": ("delivery_address",),
+    "chocolates": ("delivery_address",),
+    "chocolate": ("delivery_address",),
+    "delivery": ("delivery_address",),
+    "gifts": ("delivery_address",),
+    "gift": ("delivery_address",),
+}
+
+# Default when no category matches (full experience)
+DEFAULT_FULFILLMENT_FIELDS = ("pickup_time", "pickup_address", "delivery_address")
+
+
+def derive_fulfillment_fields(categories: List[str]) -> Tuple[str, ...]:
+    """Derive required fulfillment fields from bundle categories. Returns sorted unique tuple."""
+    if not categories:
+        return DEFAULT_FULFILLMENT_FIELDS
+    seen: set = set()
+    for cat in categories:
+        c = (cat or "").strip().lower()
+        if not c:
+            continue
+        for key, fields in CATEGORY_FULFILLMENT_MAP.items():
+            if key in c or c in key:
+                seen.update(fields)
+                break
+    if not seen:
+        return DEFAULT_FULFILLMENT_FIELDS
+    # Preserve canonical order
+    order = ("pickup_time", "pickup_address", "delivery_address")
+    return tuple(f for f in order if f in seen)
 
 
 def generate_experience_card(
@@ -10,6 +56,7 @@ def generate_experience_card(
     categories: List[Dict[str, Any]],
     suggested_bundle_product_ids: Optional[List[str]] = None,
     suggested_bundle_options: Optional[List[Dict[str, Any]]] = None,
+    fulfillment_hints: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Generate Adaptive Card for experience bundle.
@@ -23,6 +70,26 @@ def generate_experience_card(
         text_block(f"Your {title} bundle", size="Large", weight="Bolder"),
     ]
 
+    hints = fulfillment_hints or {}
+
+    def _build_action_data(
+        product_ids: List[str],
+        option_label: str,
+        opt_categories: List[str],
+    ) -> Dict[str, Any]:
+        fields = derive_fulfillment_fields(opt_categories)
+        data: Dict[str, Any] = {
+            "action": "add_bundle_bulk",
+            "product_ids": product_ids,
+            "option_label": option_label,
+            "requires_fulfillment": bool(fields),
+            "fulfillment_fields": list(fields),
+        }
+        for f in fields:
+            if hints.get(f):
+                data[f] = hints[f]
+        return data
+
     if suggested_bundle_options:
         for opt in suggested_bundle_options:
             label = opt.get("label", "Option")
@@ -31,6 +98,7 @@ def generate_experience_card(
             total_price = opt.get("total_price")
             desc = opt.get("description", "")
             currency = opt.get("currency", "USD")
+            opt_cats = [str(c) for c in (opt.get("categories") or []) if c]
             # Fancy description + product list (no individual prices) + bundle price only
             items = [text_block(f"**{label}**", size="Medium", weight="Bolder")]
             if desc:
@@ -39,17 +107,14 @@ def generate_experience_card(
                 items.append(text_block("Includes: " + ", ".join(product_names), size="Small", is_subtle=True))
             if total_price is not None:
                 items.append(text_block(f"{currency} {float(total_price):.2f} total", size="Medium", weight="Bolder"))
+            action_data = _build_action_data(product_ids, label, opt_cats)
             items.append({
                 "type": "ActionSet",
                 "actions": [
                     {
                         "type": "Action.Submit",
                         "title": f"Add {label}",
-                        "data": {
-                            "action": "add_bundle_bulk",
-                            "product_ids": product_ids,
-                            "option_label": label,
-                        },
+                        "data": action_data,
                     },
                 ],
             })
@@ -59,16 +124,16 @@ def generate_experience_card(
                 "style": "emphasis",
             })
     elif suggested_bundle_product_ids:
+        # Curated bundle: derive fields from top-level categories
+        cat_queries = [str(c.get("query", "")) for c in categories if isinstance(c, dict) and c.get("query")]
+        action_data = _build_action_data(suggested_bundle_product_ids, "", cat_queries)
         body.append({
             "type": "ActionSet",
             "actions": [
                 {
                     "type": "Action.Submit",
                     "title": "Add curated bundle",
-                    "data": {
-                        "action": "add_bundle_bulk",
-                        "product_ids": suggested_bundle_product_ids,
-                    },
+                    "data": action_data,
                 },
             ],
         })

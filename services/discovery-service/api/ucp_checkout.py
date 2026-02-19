@@ -111,6 +111,8 @@ async def create_checkout(body: CreateCheckoutBody) -> Dict[str, Any]:
     order = await create_order_from_bundle(bundle_id)
     if not order:
         raise HTTPException(status_code=500, detail="Failed to create order")
+    if order.get("error") == "fulfillment_required":
+        raise HTTPException(status_code=400, detail=order.get("message", "Fulfillment details required."))
     base_url = settings.portal_public_url or ""
     return _order_to_ucp_checkout(order, base_url)
 

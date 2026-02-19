@@ -442,6 +442,7 @@ async def add_products_to_bundle_bulk(
     product_ids: List[str],
     user_id: Optional[str] = None,
     bundle_id: Optional[str] = None,
+    fulfillment_details: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Add multiple products to a bundle in one call.
@@ -473,6 +474,11 @@ async def add_products_to_bundle_bulk(
 
     if not products_added or not bundle_id:
         return None
+    if fulfillment_details:
+        try:
+            client.table("bundles").update({"fulfillment_details": fulfillment_details}).eq("id", bundle_id).execute()
+        except Exception:
+            pass
     return {
         "bundle_id": bundle_id,
         "products_added": products_added,
@@ -492,7 +498,7 @@ async def get_bundle_by_id(bundle_id: str) -> Optional[Dict[str, Any]]:
     try:
         bundle_result = (
             client.table("bundles")
-            .select("id, user_id, bundle_name, total_price, currency, status, created_at")
+            .select("id, user_id, bundle_name, total_price, currency, status, created_at, fulfillment_details")
             .eq("id", bundle_id)
             .single()
             .execute()
@@ -551,6 +557,7 @@ async def create_order_from_bundle(bundle_id: str) -> Optional[Dict[str, Any]]:
     """
     Create order from bundle. Inserts into orders, order_items, order_legs.
     Returns order dict with id, bundle_id, total_amount, currency, status, line_items.
+    For composite bundles (3+ items), requires fulfillment_details (pickup_time, pickup_address, delivery_address).
     """
     client = get_supabase()
     if not client:
@@ -562,6 +569,13 @@ async def create_order_from_bundle(bundle_id: str) -> Optional[Dict[str, Any]]:
         items = bundle.get("items", [])
         if not items:
             return None
+        # Composite bundles (3+ items) require fulfillment details before order acceptance
+        if len(items) >= 3:
+            fd = bundle.get("fulfillment_details") or {}
+            required = fd.get("required_fields") or ["pickup_time", "pickup_address", "delivery_address"]
+            missing = [f for f in required if not (fd.get(f) or "").strip()]
+            if missing:
+                return {"error": "fulfillment_required", "message": f"Missing required fulfillment: {', '.join(missing)}."}
         total = float(bundle.get("total_price", 0))
         currency = bundle.get("currency", "USD")
         user_id = bundle.get("user_id")

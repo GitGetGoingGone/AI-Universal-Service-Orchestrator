@@ -12,14 +12,19 @@ Be conversational and helpful. Mention key findings (e.g. product categories, co
 Do NOT use markdown, bullets, or formal structure. Keep it under 100 words.
 """
 
-RESPONSE_SYSTEM_COMPOSITE = """You are a luxury concierge. User asked for [categories]. Two response styles (choose based on fit):
+RESPONSE_SYSTEM_COMPOSITE = """You are a luxury concierge. User asked for a composed experience (e.g. date night).
 
-(1) **Detail-gathering flow** — numbered questions for date/time, pickup, trip details, flower type, chocolates, extras.
-(2) **Luxury Experience Design** — when categories support a full experience (e.g. limo + flowers + chocolates), present a complete curated plan: phased timing, curated options per category, pro tips, budget guidance, upgrade ideas, personalization hook ('If you tell me occasion, city, budget, style — I'll design a hyper-custom version').
+When we have a curated bundle ready: Describe it as a NARRATIVE EXPERIENCE PLAN, not a product list. Do NOT say "Found X product(s)" or list products with prices. Instead, write a flowing description of how the evening unfolds:
 
-Tone: smooth, elegant, memorable.
-**Be flexible**: if user asks for options/prices instead of answering, respond to that. The flow is a guide, not a form.
-Do NOT list products. Guide them through structured questions or a curated plan tailored to what they asked for.
+- Pickup/time: "Pick up at 6:00 PM — we'll need your address for that."
+- Flowers: "The [flower name] will be sent to the restaurant."
+- Limo: "Someone from the limo company will pick you up. The limo features [package name] decor."
+- Dinner: Mention the restaurant/meal naturally in the flow.
+- REQUIRED: Before the CTA, add one sentence: "To place this order I'll need pickup time, pickup address, and delivery address — you can share them in the chat now or when you tap Add this bundle."
+- End with total price and a warm CTA (e.g. "Add this bundle" or "Ready when you are").
+
+When we're still gathering details: Ask 1–2 friendly questions (date, budget, dietary, location). Do NOT list products.
+Tone: smooth, elegant, memorable. Be conversational, not formal.
 """
 
 RESPONSE_SYSTEM_BROWSE = """User is browsing or reacting to what you just showed them. Engage conversationally with warmth and empathy.
@@ -98,8 +103,23 @@ def _build_context(result: Dict[str, Any]) -> str:
         categories = products.get("categories") or []
         product_list = products.get("products") if isinstance(products, dict) else []
         cat_names = [c.get("query", "") for c in categories if isinstance(c, dict) and c.get("query")]
-        if product_list or categories:
-            # We have fetched products - present as curated bundle
+        suggested_bundles = engagement.get("suggested_bundle_options") or []
+        if suggested_bundles:
+            # We have a curated bundle — describe as narrative experience plan (pickup, flower delivery, limo, etc.)
+            opt = suggested_bundles[0]
+            product_names = opt.get("product_names") or []
+            total_price = opt.get("total_price")
+            currency = opt.get("currency", "USD")
+            total_str = f"{currency} {float(total_price):.2f}" if total_price is not None else ""
+            parts.append(
+                f"User asked for {exp_name}. We have a curated bundle ready. "
+                f"Bundle includes (use these exact names): {', '.join(product_names)}. Total: {total_str}. "
+                "Describe this as a NARRATIVE EXPERIENCE PLAN: how the evening unfolds (e.g. pickup at 6 PM—need address; flowers sent to restaurant; limo pickup with decor). "
+                "REQUIRED: Include this sentence before the CTA: 'To place this order I'll need pickup time, pickup address, and delivery address — you can share them in the chat now or when you tap Add this bundle.' "
+                "Do NOT say 'Found X product(s)' or list products with prices. Write a flowing 3–5 sentence description. End with total and 'Add this bundle' CTA."
+            )
+        elif product_list or categories:
+            # Fallback: no bundle yet, present as curated options
             all_items = []
             any_eligible_checkout = False
             for c in categories:

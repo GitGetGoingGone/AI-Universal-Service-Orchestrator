@@ -338,14 +338,35 @@ def _build_summary(result: dict) -> str:
     if result.get("error"):
         return f"Sorry, I couldn't complete your request: {result['error']}"
 
-    products = result.get("data", {}).get("products") or {}
+    data = result.get("data", {})
+    intent = data.get("intent") or {}
+    intent_type = intent.get("intent_type", "")
+    engagement = data.get("engagement") or {}
+    products = data.get("products") or {}
     product_list = products.get("products") or []
     count = products.get("count", len(product_list))
 
     if count == 0:
-        intent = result.get("data", {}).get("intent") or {}
         query = intent.get("search_query", "your search")
         return f"No products found for '{query}'."
+
+    # For discover_composite with bundle: narrative experience plan, not product list
+    suggested = engagement.get("suggested_bundle_options") or []
+    if intent_type == "discover_composite" and suggested:
+        opt = suggested[0]
+        names = opt.get("product_names") or []
+        total = opt.get("total_price")
+        curr = opt.get("currency", "USD")
+        exp = products.get("experience_name", "experience")
+        exp_title = str(exp).replace("_", " ").title()
+        total_str = f"{curr} {total:.2f}" if total is not None else ""
+        return (
+            f"Your perfect {exp_title}: Pick up at 6:00 PM—we'll need your address for that. "
+            f"The {names[0] if names else 'flowers'} will be sent to the restaurant. "
+            f"A driver from the limo company will pick you up; the limo features {names[-1] if len(names) > 1 else 'premium decor'}. "
+            f"To place this order I'll need pickup time, pickup address, and delivery address—you can share them in the chat now or when you tap Add this bundle. "
+            f"Total: {total_str}. Add this bundle when you're ready."
+        )
 
     parts = []
     for p in product_list[:5]:

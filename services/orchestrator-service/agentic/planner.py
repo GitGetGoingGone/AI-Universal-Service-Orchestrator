@@ -23,6 +23,7 @@ Rules:
 - CRITICAL: When intent has unrelated_to_probing (user said "show more options", "other options", etc. instead of answering our questions): call complete with a message that handles it gracefully. Either (a) rephrase the question in a different way, or (b) offer to proceed with default assumptions (this weekend, no dietary restrictions). Example: "I'd be happy to show you options! I can suggest a classic date night for this weekend—or if you have a specific date in mind, let me know. Should I show you some ideas?" Never return "Done." or empty when unrelated_to_probing.
 - CRITICAL: When last_suggestion or recent_conversation shows we asked probing questions and the user NOW provides details, you MUST fetch products. For composite (date night, etc.): call discover_composite. For single category (chocolates, flowers, etc.): call discover_products. NEVER complete with "Done" or empty when the user has answered our questions—fetch products first.
 - When last_suggestion exists and user refines (e.g. "I don't want flowers, add a movie", "no flowers", "add chocolates instead"): resolve_intent will interpret the refinement. Use the new search_query from intent. For composite experiences, the intent may return updated search_queries.
+- When user changes topic completely (e.g. "actually I want chocolates", "forget the date night, birthday gifts for my nephew"): resolve_intent will treat as fresh intent. Proceed with the NEW intent (discover_products, discover_composite, or probing) — do NOT assume the previous context.
 - If intent is checkout/track/support: use track_order when user asks about order status. CRITICAL: When thread_context has order_id, call track_order with that order_id—NEVER ask the user for order ID. The thread already has it.
 - For standing intents (condition-based, delayed, "notify me when"): use create_standing_intent.
 - For other long-running workflows: use start_orchestration.
@@ -268,13 +269,21 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                 tool_args["location"] = str(e.get("value", ""))
                 break
 
-        if intent_type == "discover" and search_query:
-            return {
-                "action": "tool",
-                "tool_name": "discover_products",
-                "tool_args": tool_args,
-                "reasoning": "Intent is discover, fetching products.",
-            }
+        if intent_type == "discover":
+            rec = intent_data.get("recommended_next_action", "")
+            if rec == "complete_with_probing" and ("gift" in (search_query or "").lower() or "birthday" in (user_message or "").lower() or "baby" in (user_message or "").lower()):
+                return {
+                    "action": "complete",
+                    "message": "I'd love to help you find the perfect gift! To tailor my suggestions, could you tell me: 1) Who is it for—age or relationship? 2) Boy, girl, or neutral? 3) Any interests—experiences, movies, books, games, or something tangible?",
+                    "reasoning": "Probing for gift details (age, recipient, interests) before fetching.",
+                }
+            if search_query:
+                return {
+                    "action": "tool",
+                    "tool_name": "discover_products",
+                    "tool_args": tool_args,
+                    "reasoning": "Intent is discover, fetching products.",
+                }
 
         if intent_type == "discover_composite":
             # Probe first: generic "plan a date night" with no details -> ask questions

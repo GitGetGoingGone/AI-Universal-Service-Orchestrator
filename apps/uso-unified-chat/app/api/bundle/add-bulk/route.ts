@@ -13,8 +13,13 @@ export async function POST(req: Request) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      const errMsg = typeof data.detail === "object" && data.detail?.message
+        ? data.detail.message
+        : typeof data.detail === "string"
+          ? data.detail
+          : data.error || `HTTP ${res.status}`;
       return NextResponse.json(
-        { error: data.detail || data.error || `HTTP ${res.status}` },
+        { error: errMsg, detail: data.detail },
         { status: res.status }
       );
     }

@@ -193,18 +193,28 @@ async def add_to_bundle_bulk(
     product_ids: list[str],
     user_id: Optional[str] = None,
     bundle_id: Optional[str] = None,
+    pickup_time: Optional[str] = None,
+    pickup_address: Optional[str] = None,
+    delivery_address: Optional[str] = None,
+    fulfillment_fields: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
     """Call Discovery service to add multiple products to bundle."""
     url = f"{settings.discovery_service_url}/api/v1/bundle/add-bulk"
+    payload: Dict[str, Any] = {
+        "product_ids": product_ids,
+        "user_id": user_id,
+        "bundle_id": bundle_id,
+    }
+    if pickup_time is not None:
+        payload["pickup_time"] = pickup_time
+    if pickup_address is not None:
+        payload["pickup_address"] = pickup_address
+    if delivery_address is not None:
+        payload["delivery_address"] = delivery_address
+    if fulfillment_fields is not None:
+        payload["fulfillment_fields"] = fulfillment_fields
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.post(
-            url,
-            json={
-                "product_ids": product_ids,
-                "user_id": user_id,
-                "bundle_id": bundle_id,
-            },
-        )
+        r = await client.post(url, json=payload)
         r.raise_for_status()
         return r.json()
 

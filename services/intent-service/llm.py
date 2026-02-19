@@ -301,24 +301,35 @@ def _experience_from_probing(
     last_suggestion_lower: str,
     recent_conversation: Optional[List[Dict[str, Any]]] = None,
 ) -> tuple:
-    """Derive bundle_options and experience_name from probing context. Use the ORIGINAL user request (e.g. 'plan a date night'), not the answer to probing ('anytime this week')."""
+    """Derive bundle_options and experience_name from probing context. Use the user message that IMMEDIATELY PRECEDED the probing (e.g. 'plan a date night'), not an earlier unrelated message (e.g. 'birthday gifts')."""
     exp = _extract_experience_name(last_suggestion_lower)
-    # Find the user message that triggered the probing (contains composite keywords), NOT the answer
-    composite_keywords = ("plan", "date", "night", "party", "picnic", "anniversary", "brunch", "celebration", "birthday", "outing")
+    # Find the user message that triggered the probing: the one right BEFORE the last assistant message
     user_text = ""
     categories: List[str] = []
     if recent_conversation:
-        for m in recent_conversation:
-            if isinstance(m, dict) and (m.get("role") or "").lower() == "user":
-                content = (m.get("content") or m.get("text") or "")[:500].lower()
-                if any(kw in content for kw in composite_keywords):
-                    user_text = (m.get("content") or m.get("text") or "")[:500]
-                    break
-            if isinstance(m, str) and "user:" in m.lower():
-                content = m.split(":", 1)[-1].strip()[:500].lower()
-                if any(kw in content for kw in composite_keywords):
-                    user_text = m.split(":", 1)[-1].strip()[:500]
-                    break
+        last_assistant_idx = -1
+        for i in range(len(recent_conversation) - 1, -1, -1):
+            m = recent_conversation[i]
+            if isinstance(m, dict) and (m.get("role") or "").lower() == "assistant":
+                last_assistant_idx = i
+                break
+            if isinstance(m, str) and "assistant:" in (m or "").lower():
+                last_assistant_idx = i
+                break
+        if last_assistant_idx >= 0:
+            composite_keywords = ("plan", "date", "night", "party", "picnic", "anniversary", "brunch", "celebration", "outing")
+            for i in range(last_assistant_idx - 1, -1, -1):
+                m = recent_conversation[i]
+                if isinstance(m, dict) and (m.get("role") or "").lower() == "user":
+                    content = (m.get("content") or m.get("text") or "")[:500]
+                    if content and any(kw in content.lower() for kw in composite_keywords):
+                        user_text = content
+                        break
+                if isinstance(m, str) and "user:" in m.lower():
+                    content = m.split(":", 1)[-1].strip()[:500]
+                    if content and any(kw in content.lower() for kw in composite_keywords):
+                        user_text = content
+                        break
     if user_text:
         categories = _derive_composite_categories(user_text)
         # If derived looks like experience phrase (e.g. "plan date night") not product terms, use defaults
@@ -372,8 +383,35 @@ def _heuristic_resolve(
     if any(w in text_lower for w in ("support", "help", "complaint", "refund")):
         return {"intent_type": "support", "search_query": "", "entities": [], "confidence_score": 0.7, "recommended_next_action": "complete"}
 
+    # Topic change: user wants something completely different — ignore last_suggestion, treat as fresh intent
+    def _is_topic_change(msg: str, last_sugg: str) -> bool:
+        m = (msg or "").strip().lower()
+        ls = (last_sugg or "").lower()
+        change_phrases = (
+            "actually", "instead", "forget that", "never mind", "scratch that", "on second thought",
+            "different topic", "something else", "change of plans", "no wait", "hold on", "forget it",
+            "nevermind", "cancel that", "skip that", "not that",
+        )
+        if any(p in m for p in change_phrases):
+            return True
+        # Last was date night/composite probing; user now asks for gifts/chocolates/flowers (different intent)
+        was_composite_probing = any(k in ls for k in ("date", "plan", "party", "budget", "dietary", "location", "occasion"))
+        new_category_request = any(c in m for c in (
+            "birthday gift", "baby gift", "gift ideas", "chocolates", "flowers", "cakes", "movies",
+            "show me ", "find me ", "looking for ", "i want ", "i need ", "get me ", "find ",
+        ))
+        same_context = any(k in m for k in ("date", "night", "plan", "anytime", "weekend", "budget", "dietary", "you suggest", "surprise me", "flexible"))
+        if was_composite_probing and new_category_request and not same_context:
+            return True
+        # Last was gift probing (age/boy/girl); user now asks for date night or different experience
+        was_gift_probing = any(k in ls for k in ("gift", "age", "boy", "girl", "recipient", "who is it for", "interests"))
+        new_composite_request = any(c in m for c in ("plan a ", "date night", "birthday party", "picnic", "anniversary", "plan an "))
+        if was_gift_probing and new_composite_request:
+            return True
+        return False
+
     # discover_composite: follow-up to probing (last_suggestion asked for date/budget/dietary/location)
-    if last_suggestion:
+    if last_suggestion and not _is_topic_change(text_lower, last_suggestion):
         ls_lower = (last_suggestion or "").lower()
         probe_keywords = ("plan a ", "plan an ", "party", "budget", "dietary", "preferences", "what date", "location", "occasion", "add flowers", "add something")
         if any(k in ls_lower for k in probe_keywords):
@@ -407,8 +445,12 @@ def _heuristic_resolve(
                     "confidence_score": 0.75,
                     "recommended_next_action": "discover_composite",
                 }
-            # User did not answer probing but wants to see options ("show more options", "more options", etc.)
-            fetch_more_phrases = ("show me more", "more options", "other options", "just show me", "show me something", "show options", "show me options")
+            # User defers to us or wants options ("you suggest", "show me options", "whatever you think", etc.)
+            fetch_more_phrases = (
+                "show me more", "more options", "other options", "just show me", "show me something",
+                "show options", "show me options", "you suggest", "your suggestion", "suggest something",
+                "whatever you think", "you pick", "you choose", "surprise me", "up to you",
+            )
             if any(p in text_lower for p in fetch_more_phrases):
                 opts, exp = _experience_from_probing(ls_lower, recent_conversation)
                 sq = _bundle_options_to_search_queries(opts)
@@ -466,6 +508,24 @@ def _heuristic_resolve(
     derived = derive_search_query(text)
     if "gift" in text_lower:
         derived = "gifts" if not derived else "gifts"
+
+    # Gift queries that need probing: birthday gifts, baby gifts, best gifts, etc. — ask age, boy/girl, experiences
+    gift_probe_phrases = ("birthday gift", "birthday gifts", "best gift", "best gifts", "gift ideas", "gift idea", "baby gift", "baby gifts", "baby shower gift", "anniversary gift")
+    has_gift_probe_query = any(p in text_lower for p in gift_probe_phrases)
+    detail_indicators = ("age", "year old", "boy", "girl", "male", "female", "experience", "movie", "ticket", "trip", "spa", "adventure", "book", "toy", "game")
+    has_gift_details = any(d in text_lower for d in detail_indicators)
+    if has_gift_probe_query and not has_gift_details:
+        entities_gift: List[Dict[str, Any]] = []
+        budget_match = re.search(r"(?:under|within|max|below|less than)\s*\$?\s*(\d+)", text_lower)
+        if budget_match:
+            entities_gift.append({"type": "budget", "value": int(budget_match.group(1)) * 100})
+        return {
+            "intent_type": "discover",
+            "search_query": (derived or "gifts").strip(),
+            "entities": entities_gift,
+            "confidence_score": 0.7,
+            "recommended_next_action": "complete_with_probing",
+        }
 
     # Generic queries: engage first before discover_products
     generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "products", "all")

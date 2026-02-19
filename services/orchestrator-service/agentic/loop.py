@@ -1,6 +1,7 @@
 """Agentic decision loop: Observe → Reason → Plan → Execute → Reflect."""
 
 import logging
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import httpx
@@ -132,6 +133,7 @@ async def _discover_composite(
     partner_id: Optional[str] = None,
     budget_max: Optional[int] = None,
     bundle_options: Optional[List[Dict[str, Any]]] = None,
+    fulfillment_hints: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Call discover_products per query, compose experience bundle. When bundle_options provided, build multiple bundles with prices."""
     from packages.shared.adaptive_cards.experience_card import generate_experience_card
@@ -238,6 +240,7 @@ async def _discover_composite(
                     "product_names": product_names,
                     "total_price": round(total_price, 2),
                     "currency": currency,
+                    "categories": opt_cats,
                 })
 
     # Fallback: when no bundle_options or none matched, build one curated bundle (one product per category)
@@ -263,12 +266,14 @@ async def _discover_composite(
                 "product_names": product_names_fb,
                 "total_price": round(total_price_fb, 2),
                 "currency": currency_fb,
+                "categories": list(category_products.keys()),
             })
 
     adaptive_card = generate_experience_card(
         experience_name or "experience",
         categories,
         suggested_bundle_options=suggested_bundle_options if suggested_bundle_options else None,
+        fulfillment_hints=fulfillment_hints,
     )
     machine_readable = {
         "@context": "https://schema.org",
@@ -697,6 +702,7 @@ async def run_agentic_loop(
                     tool_args["budget_max"] = _extract_budget(intent_data)
 
             async def _discover_composite_fn(search_queries, experience_name, location=None, budget_max=None, bundle_options=None):
+                fulfillment_hints = _extract_fulfillment_hints(intent_data, user_message)
                 return await _discover_composite(
                     search_queries=search_queries,
                     experience_name=experience_name,
@@ -705,6 +711,7 @@ async def run_agentic_loop(
                     location=location,
                     budget_max=budget_max,
                     bundle_options=bundle_options,
+                    fulfillment_hints=fulfillment_hints,
                 )
 
             async def _refine_bundle_category_fn(bundle_id: str, category: str):
@@ -782,10 +789,12 @@ async def run_agentic_loop(
                             if options:
                                 engagement_data["suggested_bundle_options"] = options
                                 from packages.shared.adaptive_cards.experience_card import generate_experience_card
+                                fulfillment_hints = _extract_fulfillment_hints(intent_data, user_message)
                                 adaptive_card = generate_experience_card(
                                     products_data.get("experience_name", "experience"),
                                     categories,
                                     suggested_bundle_options=options,
+                                    fulfillment_hints=fulfillment_hints,
                                 )
                             else:
                                 from agentic.response import suggest_composite_bundle
@@ -798,10 +807,12 @@ async def run_agentic_loop(
                                 if suggested:
                                     engagement_data["suggested_bundle_product_ids"] = suggested
                                     from packages.shared.adaptive_cards.experience_card import generate_experience_card
+                                    fulfillment_hints = _extract_fulfillment_hints(intent_data, user_message)
                                     adaptive_card = generate_experience_card(
                                         products_data.get("experience_name", "experience"),
                                         categories,
                                         suggested_bundle_product_ids=suggested,
+                                        fulfillment_hints=fulfillment_hints,
                                     )
                     except Exception as e:
                         logger.warning("suggest_composite_bundle_options failed: %s", e)
@@ -871,12 +882,14 @@ async def _direct_flow(
         if sq:
             exp_name = intent_data.get("experience_name") or "experience"
             location = _extract_location(intent_data)
+            fulfillment_hints = _extract_fulfillment_hints(intent_data, user_message)
             composed = await _discover_composite(
                 search_queries=sq,
                 experience_name=exp_name,
                 discover_products_fn=discover_products_fn,
                 limit=limit,
                 location=location,
+                fulfillment_hints=fulfillment_hints,
             )
             products_data = composed.get("data")
             adaptive_card = composed.get("adaptive_card")
@@ -925,6 +938,57 @@ def _extract_budget(intent_data: Optional[Dict[str, Any]]) -> Optional[int]:
                 except (TypeError, ValueError):
                     pass
     return None
+
+
+def _extract_fulfillment_hints(
+    intent_data: Optional[Dict[str, Any]],
+    user_message: Optional[str] = None,
+) -> Optional[Dict[str, str]]:
+    """Extract pickup_time, pickup_address, delivery_address from intent entities or user message."""
+    hints: Dict[str, str] = {}
+    if intent_data:
+        for e in intent_data.get("entities", []):
+            if isinstance(e, dict):
+                t = (e.get("type") or "").lower()
+                v = e.get("value")
+                if t and v is not None:
+                    vstr = str(v).strip()
+                    if t == "pickup_time" and vstr:
+                        hints["pickup_time"] = vstr
+                    elif t == "pickup_address" and vstr:
+                        hints["pickup_address"] = vstr
+                    elif t == "delivery_address" and vstr:
+                        hints["delivery_address"] = vstr
+    if user_message and len(hints) < 3:
+        msg = (user_message or "").strip()
+        if not hints.get("pickup_time"):
+            # e.g. "6 PM", "6:00", "6pm", "tonight", "at 7"
+            m = re.search(
+                r"(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)?|tonight|this evening)",
+                msg,
+                re.I,
+            )
+            if m:
+                hints["pickup_time"] = m.group(1).strip()
+        if not hints.get("pickup_address"):
+            # "pick me up at X", "pickup at X", "from X"
+            m = re.search(
+                r"(?:pick\s*(?:me\s*)?up\s*(?:at|from)\s*|pickup\s*(?:at|from)\s*|from\s+)([^,]+?)(?:\s*,|\s+deliver|\s+to\s|$)",
+                msg,
+                re.I,
+            )
+            if m:
+                hints["pickup_address"] = m.group(1).strip()
+        if not hints.get("delivery_address"):
+            # "deliver to X", "delivery to X", "at the X"
+            m = re.search(
+                r"(?:deliver\s*(?:to|at)\s*|delivery\s*(?:to|at)\s*|to\s+)([^,]+?)(?:\s*,|$)",
+                msg,
+                re.I,
+            )
+            if m:
+                hints["delivery_address"] = m.group(1).strip()
+    return hints if hints else None
 
 
 def _format_step_key(step: str) -> str:
