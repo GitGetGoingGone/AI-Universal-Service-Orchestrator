@@ -1,13 +1,21 @@
 "use client";
 
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { AuthButtons } from "@/components/AuthWrapper";
+import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
 
 export type ThreadItem = {
   id: string;
   title: string;
   updated_at: string;
   has_completed_order?: boolean;
+};
+
+export type MyStuff = {
+  favorites: Array<{ id: string; item_type: string; item_id: string; item_name: string | null; created_at: string }>;
+  standing_intents: Array<{ id: string; intent_description: string; status: string; created_at: string }>;
 };
 
 type SideNavProps = {
@@ -32,8 +40,34 @@ export function SideNav({
   onSelectThread,
   onDeleteThread,
   hasUserOrAnonymous,
+  anonymousId,
 }: SideNavProps) {
   const showThreadList = threadId !== undefined && onNewChat && onSelectThread;
+  const pathname = usePathname();
+  const isSettings = pathname === "/settings";
+
+  const [myStuff, setMyStuff] = useState<MyStuff | null>(null);
+  const [myStuffOpen, setMyStuffOpen] = useState(false);
+
+  const fetchMyStuff = useCallback(() => {
+    const params = anonymousId ? `?anonymous_id=${encodeURIComponent(anonymousId)}` : "";
+    fetch(`/api/my-stuff${params}`)
+      .then((r) => r.json())
+      .then((d) => setMyStuff({ favorites: d.favorites ?? [], standing_intents: d.standing_intents ?? [] }))
+      .catch(() => setMyStuff({ favorites: [], standing_intents: [] }));
+  }, [anonymousId]);
+
+  useEffect(() => {
+    fetchMyStuff();
+  }, [fetchMyStuff]);
+
+  useEffect(() => {
+    const onRefresh = () => fetchMyStuff();
+    window.addEventListener("my-stuff-refresh", onRefresh);
+    return () => window.removeEventListener("my-stuff-refresh", onRefresh);
+  }, [fetchMyStuff]);
+
+  const hasMyStuff = myStuff && (myStuff.favorites.length > 0 || myStuff.standing_intents.length > 0);
 
   return (
     <aside
@@ -163,10 +197,88 @@ export function SideNav({
         </nav>
       )}
 
-      {/* Sign in / Sign out in side panel */}
+      {/* My Stuff (favorites + standing intents) - matches d002d5c^ SideNav */}
       {!collapsed && (
-        <div className="border-t border-[var(--border)] p-2">
-          <AuthButtons />
+        <div className="px-2">
+          <button
+            type="button"
+            onClick={() => setMyStuffOpen((o) => !o)}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--card-foreground)] transition-colors hover:bg-[var(--border)]/50"
+          >
+            <span className="text-base" aria-hidden>⭐</span>
+            My Stuff
+            {hasMyStuff && (
+              <span className="ml-auto rounded-full bg-[var(--primary-color)]/20 px-1.5 py-0.5 text-xs text-[var(--primary-color)]">
+                {myStuff!.favorites.length + myStuff!.standing_intents.length}
+              </span>
+            )}
+          </button>
+          {myStuffOpen && (
+            <div className="mt-1 space-y-1 pl-2">
+              {myStuff?.standing_intents && myStuff.standing_intents.length > 0 && (
+                <div className="py-1">
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wider text-[var(--muted)]">
+                    Standing Instructions
+                  </p>
+                  {myStuff.standing_intents.map((si) => (
+                    <div
+                      key={si.id}
+                      className="rounded-lg px-2 py-1.5 text-xs text-[var(--card-foreground)]"
+                      title={si.intent_description}
+                    >
+                      {si.intent_description.length > 28
+                        ? si.intent_description.slice(0, 25) + "…"
+                        : si.intent_description}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {myStuff?.favorites && myStuff.favorites.length > 0 && (
+                <div className="py-1">
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wider text-[var(--muted)]">
+                    Favorites
+                  </p>
+                  {myStuff.favorites.map((f) => (
+                    <div
+                      key={f.id}
+                      className="rounded-lg px-2 py-1.5 text-xs text-[var(--card-foreground)]"
+                      title={f.item_name || f.item_id}
+                    >
+                      {f.item_name && f.item_name.length > 28
+                        ? f.item_name.slice(0, 25) + "…"
+                        : f.item_name || f.item_id}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {myStuff && myStuff.favorites.length === 0 && myStuff.standing_intents.length === 0 && (
+                <p className="py-2 text-xs text-[var(--muted)]">No favorites or standing instructions yet.</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Bottom: Connect WhatsApp, Sign in/out, Settings - matches d002d5c^ SideNav */}
+      {!collapsed && (
+        <div className="mt-auto flex-shrink-0 flex flex-col gap-1 border-t border-[var(--border)] p-2">
+          <div className="px-1">
+            <ConnectWhatsApp />
+          </div>
+          <div className="px-1">
+            <AuthButtons />
+          </div>
+          <Link
+            href="/settings"
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-[var(--border)]/50 ${
+              isSettings
+                ? "bg-[var(--primary-color)]/20 text-[var(--primary-color)]"
+                : "text-[var(--card-foreground)]"
+            }`}
+          >
+            <span className="text-base" aria-hidden>⚙️</span>
+            Settings
+          </Link>
         </div>
       )}
     </aside>
