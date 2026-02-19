@@ -30,6 +30,8 @@ Additional rules:
 - Extract location from "around me" or "near X" for discover_products when relevant.
 - When user gives flexible date (e.g. "anytime next week"), use web_search for weather outlook and suggest optimal dates.
 - Metadata: The intent's proposed_plan is passed to the frontend as the Draft Itinerary; ensure your complete message references it (e.g. "your Flowers and Dinner") so the user sees we're building that plan.
+- Refinement leak: When intent is refine_composite with removed_categories, use the intent's already-purged search_queries and proposed_plan for discover_composite; do not re-add removed categories.
+- Variety leak: When the user asks for "other options" or "show me something else", the intent sets request_variety; the loop will set rotate_tier so the Partner Balancer shows a different tier first. Proceed with discover_composite (or complete with options) as normal.
 """
 
 
@@ -295,7 +297,14 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                     "reasoning": "Intent is discover, fetching products.",
                 }
 
-        if intent_type == "discover_composite":
+        if intent_type in ("discover_composite", "refine_composite"):
+            # Refinement leak: use purged search_queries and proposed_plan from intent (removed_categories already applied)
+            if intent_type == "refine_composite" and intent_data.get("removed_categories"):
+                sq = intent_data.get("search_queries") or ["flowers", "dinner", "limo"]
+                proposed_plan = intent_data.get("proposed_plan") or ["Flowers", "Dinner", "Limo"]
+            else:
+                sq = intent_data.get("search_queries") or ["flowers", "dinner", "movies"]
+                proposed_plan = intent_data.get("proposed_plan") or ["Flowers", "Dinner", "Limo"]
             # Halt & Preview: if location or time missing, complete with ONE short concierge message (not 4-question list)
             entities = intent_data.get("entities") or []
             has_location = any(
@@ -310,7 +319,6 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                 isinstance(e, dict) and (e.get("type") or "").lower() == "budget" and e.get("value")
                 for e in entities
             )
-            proposed_plan = intent_data.get("proposed_plan") or ["Flowers", "Dinner", "Limo"]
             plan_str = " and ".join(proposed_plan) if proposed_plan else "your experience"
             exp_name = intent_data.get("experience_name") or "date night"
             loc_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() == "location"), None)
@@ -335,7 +343,6 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                         "message": msg,
                         "reasoning": "Halt & Preview: location or time missing; concierge probe with proposed_plan.",
                     }
-            sq = intent_data.get("search_queries") or ["flowers", "dinner", "movies"]
             exp_name = intent_data.get("experience_name") or "experience"
             loc = None
             for e in intent_data.get("entities", []):
@@ -350,7 +357,7 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                     "experience_name": exp_name,
                     "location": loc,
                 },
-                "reasoning": "Intent is discover_composite, fetching products.",
+                "reasoning": "Intent is discover_composite or refine_composite (purged categories), fetching products.",
             }
 
     # When we have products from a prior tool (iteration >= 2), return empty message

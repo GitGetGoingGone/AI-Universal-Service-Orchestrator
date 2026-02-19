@@ -32,6 +32,23 @@ _LOCATION_LIKE_WORDS = (
 # Budget extraction: "under $50", "$50", "50 dollars"
 _BUDGET_RE = re.compile(r"(?:under|under\s+)?\$?\s*(\d+)\s*(?:dollars?|dollars?|bucks?)?", re.I)
 
+# Refinement: "no X" / "remove X" -> category key (lowercase)
+_REMOVE_PATTERNS = [
+    (r"\bno\s+limo\b|remove\s+(?:the\s+)?limo|without\s+(?:the\s+)?limo|skip\s+limo", "limo"),
+    (r"\bno\s+flowers\b|remove\s+(?:the\s+)?flowers|without\s+flowers|skip\s+flowers|don'?t\s+want\s+flowers", "flowers"),
+    (r"\bno\s+dinner\b|remove\s+(?:the\s+)?dinner|without\s+dinner|skip\s+dinner", "dinner"),
+    (r"\bno\s+chocolates\b|remove\s+(?:the\s+)?chocolates|without\s+chocolates|skip\s+chocolates", "chocolates"),
+    (r"\bno\s+cake\b|remove\s+(?:the\s+)?cake|without\s+cake|skip\s+cake", "cake"),
+    (r"\bno\s+movies\b|remove\s+(?:the\s+)?movies|without\s+movies|skip\s+movies", "movies"),
+    (r"\bno\s+gifts\b|remove\s+(?:the\s+)?gifts|without\s+gifts", "gifts"),
+    (r"\bno\s+decorations\b|remove\s+(?:the\s+)?decorations|without\s+decorations", "decorations"),
+]
+# Human-readable label for proposed_plan by category key
+_CAT_TO_LABEL = {"limo": "Limo", "flowers": "Flowers", "dinner": "Dinner", "chocolates": "Chocolates", "cake": "Cake", "movies": "Movies", "gifts": "Gifts", "decorations": "Decorations", "basket": "Basket", "blanket": "Blanket", "food": "Food"}
+
+# Address-like string (Identity Leak patch): digits + street-type word
+_ADDRESS_RE = re.compile(r"\d+\s+\w+.*\b(st|ave|blvd|road|rd|way|ln|dr|trl|street|avenue|boulevard)\b", re.I)
+
 
 def _heuristic_resolve(
     text: str,
@@ -81,6 +98,10 @@ def _heuristic_resolve(
                             sq, exp, proposed = queries, exp_name, plan
                             break
                     break
+            # Variety leak patch: "other options" / "something else" -> request_variety for tier rotation
+            request_variety = any(
+                p in t for p in ("other options", "something else", "different bundle", "another option", "show me something else")
+            )
             return {
                 "intent_type": "discover_composite",
                 "search_query": " ".join(sq),
@@ -90,8 +111,35 @@ def _heuristic_resolve(
                 "entities": [],
                 "proposed_plan": proposed,
                 "unrelated_to_probing": True,
+                "request_variety": request_variety,
                 "recommended_next_action": "discover_composite",
                 "confidence_score": 0.85,
+            }
+
+        # Identity leak patch: address-like string in composite context -> pickup_address/delivery_address entity, NOT search_query
+        if _ADDRESS_RE.search(text or ""):
+            sq = ["flowers", "dinner", "limo"]
+            exp = "date night"
+            proposed = ["Flowers", "Dinner", "Limo"]
+            for c in reversed(conv):
+                if isinstance(c, dict) and c.get("role") == "user":
+                    msg = (c.get("content") or "").lower()
+                    for pat, queries, exp_name, plan in _COMPOSITE_PATTERNS:
+                        if re.search(pat, msg):
+                            sq, exp, proposed = queries, exp_name, plan
+                            break
+                    break
+            addr = (text or "").strip()[:200]
+            return {
+                "intent_type": "discover_composite",
+                "search_query": " ".join(sq),
+                "search_queries": sq,
+                "experience_name": exp,
+                "bundle_options": [{"label": exp, "categories": sq}],
+                "entities": [{"type": "pickup_address", "value": addr}],
+                "proposed_plan": proposed,
+                "recommended_next_action": "discover_composite",
+                "confidence_score": 0.9,
             }
 
         # Answer to composite probing: date/time, budget, or short answer (e.g. "tomorrow", "downtown")
@@ -230,6 +278,42 @@ def _heuristic_resolve(
                             "confidence_score": 0.85,
                         }
                 break
+
+    # Refinement leak patch: "no limo", "remove the flowers", "skip chocolates" -> refine_composite + removed_categories
+    removed: List[str] = []
+    for pat, cat in _REMOVE_PATTERNS:
+        if re.search(pat, t):
+            removed.append(cat)
+    if removed:
+        sq = ["flowers", "dinner", "limo"]
+        exp = "date night"
+        proposed = ["Flowers", "Dinner", "Limo"]
+        for c in reversed(conv):
+            if isinstance(c, dict) and c.get("role") == "user":
+                msg = (c.get("content") or "").lower()
+                for pattern, queries, exp_name, plan in _COMPOSITE_PATTERNS:
+                    if re.search(pattern, msg):
+                        sq, exp, proposed = list(queries), exp_name, list(plan)
+                        break
+                break
+        removed_set = set(removed)
+        sq_purged = [q for q in sq if q.lower() not in removed_set]
+        label_to_key = {v.lower(): k for k, v in _CAT_TO_LABEL.items()}
+        proposed_purged = [lbl for lbl in proposed if label_to_key.get(lbl.lower(), lbl.lower()) not in removed_set]
+        if not proposed_purged and sq_purged:
+            proposed_purged = [_CAT_TO_LABEL.get(q, q.capitalize()) for q in sq_purged]
+        return {
+            "intent_type": "refine_composite",
+            "search_query": " ".join(sq_purged),
+            "search_queries": sq_purged,
+            "experience_name": exp,
+            "bundle_options": [{"label": exp, "categories": sq_purged}],
+            "removed_categories": list(removed),
+            "entities": [],
+            "proposed_plan": proposed_purged,
+            "recommended_next_action": "discover_composite",
+            "confidence_score": 0.9,
+        }
 
     # Location-only short answer in composite context: do NOT create product search for "downtown"
     words = t.split()

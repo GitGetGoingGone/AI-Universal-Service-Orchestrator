@@ -548,7 +548,9 @@ async def run_agentic_loop(
                     rec = None
                 else:
                     plan = None
-            elif rec == "discover_composite" and intent_data.get("intent_type") == "discover_composite":
+            elif rec == "discover_composite" and intent_data.get("intent_type") in ("discover_composite", "refine_composite"):
+                # Refinement leak: use purged search_queries/proposed_plan from state if present
+                sq = state.get("purged_search_queries") or intent_data.get("search_queries") or ["flowers", "restaurant", "movies"]
                 # AWAITING_PROBE: Do not execute discovery if location or time is missing
                 if not _has_location_or_time(intent_data, user_message) and state.get("probe_count", 0) < 2:
                     state["orchestrator_state"] = ORCHESTRATOR_STATE_AWAITING_PROBE
@@ -559,12 +561,12 @@ async def run_agentic_loop(
                         "tool_name": "discover_composite",
                         "tool_args": {
                             "bundle_options": intent_data.get("bundle_options") or [],
-                            "search_queries": intent_data.get("search_queries") or ["flowers", "restaurant", "movies"],
+                            "search_queries": sq,
                             "experience_name": intent_data.get("experience_name") or "experience",
                             "location": _extract_location(intent_data),
                             "budget_max": _extract_budget(intent_data),
                         },
-                        "reasoning": "Intent recommended discover_composite.",
+                        "reasoning": "Intent recommended discover_composite (or refine_composite with purged categories).",
                     }
             elif rec == "discover_products" and intent_data.get("intent_type") in ("discover", "browse"):
                 sq = (intent_data.get("search_query") or "").strip()
@@ -712,12 +714,13 @@ async def run_agentic_loop(
             elif tool_name == "fetch_ucp_manifest":
                 await _emit_thinking(on_thinking, "before_fetch_ucp_manifest", {"ucp_prioritized": True}, thinking_messages or {})
 
-            if tool_name == "discover_composite" and intent_data and intent_data.get("intent_type") == "discover_composite":
+            if tool_name == "discover_composite" and intent_data and intent_data.get("intent_type") in ("discover_composite", "refine_composite"):
                 tool_args = dict(tool_args)
                 if not tool_args.get("bundle_options") and intent_data.get("bundle_options"):
                     tool_args["bundle_options"] = intent_data.get("bundle_options")
                 if not tool_args.get("search_queries"):
-                    tool_args["search_queries"] = intent_data.get("search_queries") or []
+                    # Refinement leak: prefer purged list from state so removed categories stay purged
+                    tool_args["search_queries"] = state.get("purged_search_queries") or intent_data.get("search_queries") or []
                 if not tool_args.get("experience_name"):
                     tool_args["experience_name"] = intent_data.get("experience_name") or "experience"
                 if not tool_args.get("location") and intent_data:
@@ -794,6 +797,17 @@ async def run_agentic_loop(
 
             if tool_name == "resolve_intent":
                 intent_data = result.get("data", result)
+                # Refinement leak patch: persist purged search_queries and proposed_plan so subsequent turns use them
+                if intent_data and intent_data.get("intent_type") == "refine_composite" and intent_data.get("removed_categories"):
+                    state["purged_search_queries"] = intent_data.get("search_queries") or []
+                    state["purged_proposed_plan"] = intent_data.get("proposed_plan") or []
+                elif intent_data and (intent_data.get("search_queries") or intent_data.get("proposed_plan")):
+                    # Clear purged state when starting a fresh composite (no removal)
+                    state.pop("purged_search_queries", None)
+                    state.pop("purged_proposed_plan", None)
+                # Variety leak patch: user asked for "other options" / "something else" -> rotate tier next
+                if intent_data and intent_data.get("request_variety"):
+                    state["rotate_tier"] = True
                 # Don't auto-fetch for discover_composite; let planner decide (probe first or fetch)
             elif tool_name == "fetch_ucp_manifest":
                 engagement_data["ucp_manifests_fetched"] = True
@@ -843,6 +857,7 @@ async def run_agentic_loop(
                 intent_bundles = (products_data or {}).get("suggested_bundle_options") or []
                 if len(intent_bundles) >= 1:
                     engagement_data["suggested_bundle_options"] = intent_bundles
+                    state["last_shown_bundle_label"] = intent_bundles[0].get("label") if intent_bundles else None
                     # OrchestrationTrace: bundle created (from intent/discover_composite inline)
                     try:
                         from db import log_orchestration_trace
@@ -874,14 +889,19 @@ async def run_agentic_loop(
                             from agentic.response import suggest_composite_bundle_options
                             categories = products_data.get("categories") or []
                             budget = _extract_budget(intent_data) if intent_data else None
+                            # Variety leak: pass rotate_tier and last_shown_bundle_label for tier rotation
                             options = await suggest_composite_bundle_options(
                                 categories=categories,
                                 user_message=user_message,
                                 experience_name=products_data.get("experience_name", "experience"),
                                 budget_max=budget,
+                                rotate_tier=state.get("rotate_tier", False),
+                                last_shown_bundle_label=state.get("last_shown_bundle_label"),
                             )
                             if options:
                                 engagement_data["suggested_bundle_options"] = options
+                                state["last_shown_bundle_label"] = options[0].get("label") if options else None
+                                state.pop("rotate_tier", None)
                                 # OrchestrationTrace: bundle created (from PartnerBalancer/LLM)
                                 try:
                                     from db import log_orchestration_trace
@@ -999,8 +1019,10 @@ async def run_agentic_loop(
         engagement_data=engagement_data,
     )
     # Intent Preview State: pass proposed_plan (Draft Itinerary) and orchestrator_state to frontend
-    if intent_data and intent_data.get("proposed_plan"):
-        out["data"]["proposed_plan"] = intent_data["proposed_plan"]
+    # Refinement leak: show purged checklist immediately after "no [X]"
+    proposed_plan = (state.get("purged_proposed_plan") if state else None) or (intent_data or {}).get("proposed_plan")
+    if proposed_plan:
+        out["data"]["proposed_plan"] = proposed_plan
     if state.get("orchestrator_state"):
         out["data"]["orchestrator_state"] = state["orchestrator_state"]
     planner_msg = state.get("planner_complete_message", "").strip()

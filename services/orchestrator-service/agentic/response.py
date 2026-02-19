@@ -367,14 +367,34 @@ Return JSON: { "options": [ { "label": string, "description": string, "product_i
 ONLY use product IDs from the provided list. Each option: one product per category. 2-4 options. Output ONLY valid JSON."""
 
 
+def _apply_tier_rotation(
+    options: List[Dict[str, Any]],
+    last_shown_bundle_label: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Variety leak patch: rotate so a different tier is first (avoid showing same bundle again)."""
+    if not options or not last_shown_bundle_label or len(options) < 2:
+        return options
+    label_lower = (last_shown_bundle_label or "").strip().lower()
+    idx = next((i for i, o in enumerate(options) if (o.get("label") or "").strip().lower() == label_lower), -1)
+    if idx <= 0:
+        return options
+    # Put a different tier first: (idx + 1) % n or (idx + 2) % n so user sees variety
+    n = len(options)
+    start = (idx + 1) % n
+    return list(options[start:]) + list(options[:start])
+
+
 def _build_partner_balanced_options(
     categories: List[Dict[str, Any]],
     experience_name: str = "experience",
+    rotate_tier: bool = False,
+    last_shown_bundle_label: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     PartnerBalancer: Build 3 tiers with equal representation (no partner twice per tier).
     Tier 1: The Essential (DB heavy), Tier 2: The Premium (UCP heavy), Tier 3: The Express (MCP heavy).
     Multiply relevance by admin_weight from partner_representation_rules.
+    When rotate_tier and last_shown_bundle_label are set, reorder so a different tier is first (variety leak patch).
     """
     try:
         from db import get_partner_representation_rules
@@ -471,6 +491,8 @@ def _build_partner_balanced_options(
             if trace_products:
                 opt["_trace_products"] = trace_products
             options.append(opt)
+    if rotate_tier and last_shown_bundle_label:
+        options = _apply_tier_rotation(options, last_shown_bundle_label)
     return options
 
 
@@ -595,17 +617,24 @@ async def suggest_composite_bundle_options(
     experience_name: str = "experience",
     budget_max: Optional[int] = None,
     llm_config: Optional[Dict[str, Any]] = None,
+    rotate_tier: bool = False,
+    last_shown_bundle_label: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Suggest 2-4 bundle options via PartnerBalancer (equal representation, 3 tiers: DB/UCP/MCP).
     Falls back to LLM when PartnerBalancer yields no options.
+    When rotate_tier and last_shown_bundle_label are set, reorder tiers so user sees a different option first (variety leak patch).
     Returns list of { label, description, product_ids, total_price }.
     """
     if not categories:
         return []
 
-    # PartnerBalancer first: 3 tiers, no duplicate partner per tier, admin_weight applied
-    balanced = _build_partner_balanced_options(categories, experience_name)
+    # PartnerBalancer first: 3 tiers, no duplicate partner per tier, admin_weight applied; optional tier rotation
+    balanced = _build_partner_balanced_options(
+        categories, experience_name,
+        rotate_tier=rotate_tier,
+        last_shown_bundle_label=last_shown_bundle_label,
+    )
     if balanced:
         return balanced
 
