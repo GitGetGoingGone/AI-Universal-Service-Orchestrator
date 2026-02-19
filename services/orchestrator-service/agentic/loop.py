@@ -417,6 +417,7 @@ async def run_agentic_loop(
         return await _direct_flow(
             user_message,
             user_id=user_id,
+            thread_id=thread_id,
             limit=limit,
             resolve_intent_fn=resolve_intent_fn,
             discover_products_fn=discover_products_fn,
@@ -452,6 +453,14 @@ async def run_agentic_loop(
     if order_id:
         thread_context["order_id"] = order_id
 
+    # Admin config for planner (ucp_prioritized → call fetch_ucp_manifest first)
+    admin_settings = None
+    try:
+        from db import get_admin_orchestration_settings
+        admin_settings = get_admin_orchestration_settings()
+    except Exception:
+        pass
+
     state = {
         "messages": messages or [],
         "last_suggestion": last_suggestion,
@@ -461,6 +470,7 @@ async def run_agentic_loop(
         "agent_reasoning": [],
         "bundle_id": bundle_id,
         "order_id": order_id,
+        "ucp_prioritized": bool(admin_settings and admin_settings.get("ucp_prioritized")),
     }
 
     intent_data = None
@@ -539,18 +549,23 @@ async def run_agentic_loop(
                 else:
                     plan = None
             elif rec == "discover_composite" and intent_data.get("intent_type") == "discover_composite":
-                plan = {
-                    "action": "tool",
-                    "tool_name": "discover_composite",
-                    "tool_args": {
-                        "bundle_options": intent_data.get("bundle_options") or [],
-                        "search_queries": intent_data.get("search_queries") or ["flowers", "restaurant", "movies"],
-                        "experience_name": intent_data.get("experience_name") or "experience",
-                        "location": _extract_location(intent_data),
-                        "budget_max": _extract_budget(intent_data),
-                    },
-                    "reasoning": "Intent recommended discover_composite.",
-                }
+                # AWAITING_PROBE: Do not execute discovery if location or time is missing
+                if not _has_location_or_time(intent_data, user_message) and state.get("probe_count", 0) < 2:
+                    state["orchestrator_state"] = ORCHESTRATOR_STATE_AWAITING_PROBE
+                    plan = None  # Let planner run → complete with probing for location/time
+                else:
+                    plan = {
+                        "action": "tool",
+                        "tool_name": "discover_composite",
+                        "tool_args": {
+                            "bundle_options": intent_data.get("bundle_options") or [],
+                            "search_queries": intent_data.get("search_queries") or ["flowers", "restaurant", "movies"],
+                            "experience_name": intent_data.get("experience_name") or "experience",
+                            "location": _extract_location(intent_data),
+                            "budget_max": _extract_budget(intent_data),
+                        },
+                        "reasoning": "Intent recommended discover_composite.",
+                    }
             elif rec == "discover_products" and intent_data.get("intent_type") in ("discover", "browse"):
                 sq = intent_data.get("search_query") or "browse"
                 plan = {
@@ -687,6 +702,8 @@ async def run_agentic_loop(
                 await _emit_thinking(on_thinking, "before_discover_products", {**ctx, "query": ctx.get("query") or "options"}, thinking_messages or {})
             elif tool_name == "discover_composite":
                 await _emit_thinking(on_thinking, "before_discover_composite", ctx, thinking_messages or {})
+            elif tool_name == "fetch_ucp_manifest":
+                await _emit_thinking(on_thinking, "before_fetch_ucp_manifest", {"ucp_prioritized": True}, thinking_messages or {})
 
             if tool_name == "discover_composite" and intent_data and intent_data.get("intent_type") == "discover_composite":
                 tool_args = dict(tool_args)
@@ -700,6 +717,31 @@ async def run_agentic_loop(
                     tool_args["location"] = _extract_location(intent_data)
                 if not tool_args.get("budget_max") and intent_data:
                     tool_args["budget_max"] = _extract_budget(intent_data)
+
+                # External factors: MUST call get_weather and get_upcoming_occasions BEFORE discovery when location known
+                loc = tool_args.get("location")
+                if loc and str(loc).strip():
+                    if not engagement_data.get("weather"):
+                        await _emit_thinking(on_thinking, "before_weather", {"location": loc}, thinking_messages or {})
+                        weather_result = await _get_weather(loc)
+                        engagement_data["weather"] = weather_result.get("data", weather_result)
+                    if not (engagement_data.get("occasions") or {}).get("events"):
+                        await _emit_thinking(on_thinking, "before_occasions", {"location": loc}, thinking_messages or {})
+                        occasions_result = await _get_upcoming_occasions(loc)
+                        engagement_data["occasions"] = occasions_result.get("data", occasions_result)
+
+                    # Contextual pivot: rain → swap outdoor for indoor
+                    weather_desc = (engagement_data.get("weather") or {}).get("description", "")
+                    if weather_desc and "rain" in weather_desc.lower():
+                        exp_name = tool_args.get("experience_name", "")
+                        sq = tool_args.get("search_queries") or []
+                        if _is_outdoor_experience(exp_name, sq):
+                            new_sq, new_opts = _pivot_outdoor_to_indoor(sq, tool_args.get("bundle_options"))
+                            tool_args["search_queries"] = new_sq
+                            tool_args["bundle_options"] = new_opts
+                            engagement_data["weather_warning"] = (
+                                f"Weather in {loc}: {weather_desc}. We've adjusted your plan for indoor options."
+                            )
 
             async def _discover_composite_fn(search_queries, experience_name, location=None, budget_max=None, bundle_options=None):
                 fulfillment_hints = _extract_fulfillment_hints(intent_data, user_message)
@@ -746,6 +788,8 @@ async def run_agentic_loop(
             if tool_name == "resolve_intent":
                 intent_data = result.get("data", result)
                 # Don't auto-fetch for discover_composite; let planner decide (probe first or fetch)
+            elif tool_name == "fetch_ucp_manifest":
+                engagement_data["ucp_manifests_fetched"] = True
             elif tool_name == "web_search":
                 engagement_data["web_search"] = result.get("data", result)
             elif tool_name == "get_weather":
@@ -765,10 +809,53 @@ async def run_agentic_loop(
                 machine_readable = result.get("machine_readable")
                 pc = (products_data or {}).get("products") or []
                 await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0}, thinking_messages or {})
+                # OrchestrationTrace: product discovery (composite)
+                try:
+                    from db import log_orchestration_trace
+                    products_meta = [
+                        {
+                            "product_id": str(p.get("id", "")),
+                            "partner_id": str(p.get("partner_id", "") or ""),
+                            "protocol": (p.get("source") or "DB").upper(),
+                            "relevance_score": 1.0,
+                            "admin_weight": 1.0,
+                        }
+                        for p in pc if isinstance(p, dict) and p.get("id")
+                    ]
+                    if products_meta:
+                        log_orchestration_trace(
+                            "product_discovery",
+                            thread_id=thread_id,
+                            user_id=user_id,
+                            experience_name=(products_data or {}).get("experience_name"),
+                            metadata={"products": products_meta},
+                        )
+                except Exception as e:
+                    logger.debug("OrchestrationTrace product_discovery (composite) failed: %s", e)
                 # Use intent's bundle options when we have 1+; call LLM only when 0 to generate 2-4
                 intent_bundles = (products_data or {}).get("suggested_bundle_options") or []
                 if len(intent_bundles) >= 1:
                     engagement_data["suggested_bundle_options"] = intent_bundles
+                    # OrchestrationTrace: bundle created (from intent/discover_composite inline)
+                    try:
+                        from db import log_orchestration_trace
+                        trace_options = []
+                        for b in intent_bundles:
+                            pids = b.get("product_ids") or []
+                            trace_options.append({
+                                "label": b.get("label"),
+                                "products": [{"product_id": pid, "protocol": "DB", "relevance_score": 1.0, "admin_weight": 1.0} for pid in pids],
+                            })
+                        if trace_options:
+                            log_orchestration_trace(
+                                "bundle_created",
+                                thread_id=thread_id,
+                                user_id=user_id,
+                                experience_name=(products_data or {}).get("experience_name"),
+                                metadata={"options": trace_options},
+                            )
+                    except Exception as e:
+                        logger.debug("OrchestrationTrace bundle_created (intent) failed: %s", e)
                 elif products_data and (products_data.get("categories") or products_data.get("products")):
                     await _emit_thinking(on_thinking, "before_bundle", intent_data or {}, thinking_messages or {})
                     try:
@@ -788,6 +875,24 @@ async def run_agentic_loop(
                             )
                             if options:
                                 engagement_data["suggested_bundle_options"] = options
+                                # OrchestrationTrace: bundle created (from PartnerBalancer/LLM)
+                                try:
+                                    from db import log_orchestration_trace
+                                    trace_options = []
+                                    for opt in options:
+                                        tps = opt.pop("_trace_products", None)
+                                        if tps:
+                                            trace_options.append({"label": opt.get("label"), "products": tps})
+                                    if trace_options:
+                                        log_orchestration_trace(
+                                            "bundle_created",
+                                            thread_id=thread_id,
+                                            user_id=user_id,
+                                            experience_name=products_data.get("experience_name"),
+                                            metadata={"options": trace_options},
+                                        )
+                                except Exception as e:
+                                    logger.debug("OrchestrationTrace bundle_created failed: %s", e)
                                 from packages.shared.adaptive_cards.experience_card import generate_experience_card
                                 fulfillment_hints = _extract_fulfillment_hints(intent_data, user_message)
                                 adaptive_card = generate_experience_card(
@@ -806,6 +911,22 @@ async def run_agentic_loop(
                                 )
                                 if suggested:
                                     engagement_data["suggested_bundle_product_ids"] = suggested
+                                    # OrchestrationTrace: bundle created (from suggest_composite_bundle LLM)
+                                    try:
+                                        from db import log_orchestration_trace
+                                        trace_options = [{
+                                            "label": "Curated",
+                                            "products": [{"product_id": pid, "protocol": "DB", "relevance_score": 1.0, "admin_weight": 1.0} for pid in suggested],
+                                        }]
+                                        log_orchestration_trace(
+                                            "bundle_created",
+                                            thread_id=thread_id,
+                                            user_id=user_id,
+                                            experience_name=products_data.get("experience_name"),
+                                            metadata={"options": trace_options},
+                                        )
+                                    except Exception as e:
+                                        logger.debug("OrchestrationTrace bundle_created (LLM) failed: %s", e)
                                     from packages.shared.adaptive_cards.experience_card import generate_experience_card
                                     fulfillment_hints = _extract_fulfillment_hints(intent_data, user_message)
                                     adaptive_card = generate_experience_card(
@@ -823,6 +944,29 @@ async def run_agentic_loop(
                 pd = products_data or {}
                 pc = pd.get("products") or []
                 await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0}, thinking_messages or {})
+                # OrchestrationTrace: product discovery
+                try:
+                    from db import log_orchestration_trace
+                    products_meta = [
+                        {
+                            "product_id": str(p.get("id", "")),
+                            "partner_id": str(p.get("partner_id", "") or ""),
+                            "protocol": (p.get("source") or "DB").upper(),
+                            "relevance_score": 1.0,
+                            "admin_weight": 1.0,
+                        }
+                        for p in pc if isinstance(p, dict) and p.get("id")
+                    ]
+                    if products_meta:
+                        log_orchestration_trace(
+                            "product_discovery",
+                            thread_id=thread_id,
+                            user_id=user_id,
+                            query=tool_args.get("query"),
+                            metadata={"products": products_meta},
+                        )
+                except Exception as e:
+                    logger.debug("OrchestrationTrace product_discovery failed: %s", e)
             elif tool_name == "create_standing_intent":
                 intent_data = intent_data or {}
                 intent_data["standing_intent"] = result
@@ -859,6 +1003,7 @@ async def _direct_flow(
     user_message: str,
     *,
     user_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
     limit: int = 20,
     resolve_intent_fn=None,
     discover_products_fn=None,
@@ -894,6 +1039,31 @@ async def _direct_flow(
             products_data = composed.get("data")
             adaptive_card = composed.get("adaptive_card")
             machine_readable = composed.get("machine_readable")
+            # OrchestrationTrace: product discovery (direct flow, composite)
+            pc = (products_data or {}).get("products") or []
+            try:
+                from db import log_orchestration_trace
+                products_meta = [
+                    {"product_id": str(p.get("id", "")), "partner_id": str(p.get("partner_id", "") or ""),
+                     "protocol": (p.get("source") or "DB").upper(), "relevance_score": 1.0, "admin_weight": 1.0}
+                    for p in pc if isinstance(p, dict) and p.get("id")
+                ]
+                if products_meta:
+                    log_orchestration_trace("product_discovery", thread_id=thread_id, user_id=user_id,
+                        experience_name=exp_name, metadata={"products": products_meta})
+            except Exception:
+                pass
+            # OrchestrationTrace: bundle created (direct flow, composite)
+            bundles = (products_data or {}).get("suggested_bundle_options") or []
+            if bundles:
+                try:
+                    from db import log_orchestration_trace
+                    trace_options = [{"label": b.get("label"), "products": [{"product_id": pid, "protocol": "DB", "relevance_score": 1.0, "admin_weight": 1.0} for pid in (b.get("product_ids") or [])]} for b in bundles]
+                    if trace_options:
+                        log_orchestration_trace("bundle_created", thread_id=thread_id, user_id=user_id,
+                            experience_name=exp_name, metadata={"options": trace_options})
+                except Exception:
+                    pass
     elif intent_type == "discover":
         location = _extract_location(intent_data)
         discovery_response = await discover_products_fn(
@@ -904,6 +1074,20 @@ async def _direct_flow(
         products_data = discovery_response.get("data", discovery_response)
         adaptive_card = discovery_response.get("adaptive_card")
         machine_readable = discovery_response.get("machine_readable")
+        # OrchestrationTrace: product discovery (direct flow)
+        pc = (products_data or {}).get("products") or []
+        try:
+            from db import log_orchestration_trace
+            products_meta = [
+                {"product_id": str(p.get("id", "")), "partner_id": str(p.get("partner_id", "") or ""),
+                 "protocol": (p.get("source") or "DB").upper(), "relevance_score": 1.0, "admin_weight": 1.0}
+                for p in pc if isinstance(p, dict) and p.get("id")
+            ]
+            if products_meta:
+                log_orchestration_trace("product_discovery", thread_id=thread_id, user_id=user_id,
+                    query=search_query, metadata={"products": products_meta})
+        except Exception:
+            pass
 
     return _build_response(
         intent_data=intent_data,
@@ -913,6 +1097,87 @@ async def _direct_flow(
         agent_reasoning=[],
         user_message=user_message,
     )
+
+
+# Orchestrator states for context-aware planning
+ORCHESTRATOR_STATE_AWAITING_PROBE = "AWAITING_PROBE"
+
+
+def _has_location_or_time(
+    intent_data: Optional[Dict[str, Any]],
+    user_message: Optional[str] = None,
+) -> bool:
+    """Return True if we have location or time for composite experiences (required before discovery)."""
+    if not intent_data:
+        return False
+    loc = _extract_location(intent_data)
+    if loc and str(loc).strip():
+        return True
+    hints = _extract_fulfillment_hints(intent_data, user_message)
+    if hints and (hints.get("pickup_time") or hints.get("pickup_address")):
+        return True
+    for e in intent_data.get("entities", []):
+        if isinstance(e, dict):
+            t = (e.get("type") or "").lower()
+            if t in ("location", "pickup_time", "time", "date") and e.get("value"):
+                return True
+    return False
+
+
+def _is_outdoor_experience(experience_name: str, search_queries: Optional[List[str]]) -> bool:
+    """Return True if experience is outdoor/location-based (picnic, date night, etc.)."""
+    name = (experience_name or "").lower()
+    outdoor_keywords = ("picnic", "outdoor", "garden", "park", "beach", "rooftop")
+    if any(k in name for k in outdoor_keywords):
+        return True
+    qs = " ".join(str(s).lower() for s in (search_queries or []))
+    if any(k in qs for k in outdoor_keywords):
+        return True
+    return False
+
+
+def _pivot_outdoor_to_indoor(
+    search_queries: List[str],
+    bundle_options: Optional[List[Dict[str, Any]]],
+) -> tuple:
+    """Swap outdoor categories (e.g. picnic) for indoor when weather is rain. Returns (queries, options)."""
+    pivot_map = {
+        "picnic": "indoor dining",
+        "outdoor": "indoor",
+        "garden": "indoor dining",
+        "park": "indoor",
+        "beach": "indoor",
+    }
+    new_queries = []
+    for q in search_queries or []:
+        ql = str(q).lower()
+        replaced = False
+        for outdoor, indoor in pivot_map.items():
+            if outdoor in ql:
+                new_queries.append(indoor)
+                replaced = True
+                break
+        if not replaced:
+            new_queries.append(q)
+    new_opts = []
+    for opt in bundle_options or []:
+        if not isinstance(opt, dict):
+            new_opts.append(opt)
+            continue
+        cats = opt.get("categories") or []
+        new_cats = []
+        for c in cats:
+            cl = str(c).lower()
+            replaced = False
+            for outdoor, indoor in pivot_map.items():
+                if outdoor in cl:
+                    new_cats.append(indoor)
+                    replaced = True
+                    break
+            if not replaced:
+                new_cats.append(c)
+        new_opts.append({**opt, "categories": new_cats})
+    return (new_queries or search_queries, new_opts or bundle_options)
 
 
 def _extract_location(intent_data: Optional[Dict[str, Any]]) -> Optional[str]:

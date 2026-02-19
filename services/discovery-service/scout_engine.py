@@ -3,10 +3,17 @@
 from typing import Any, Dict, List, Optional
 
 from packages.shared.discovery import derive_search_query, is_browse_query
+from packages.shared.discovery_aggregator import (
+    DiscoveryAggregator,
+    LocalDBDriver,
+    MCPDriver,
+    UCPManifestDriver,
+)
 from packages.shared.ranking import sort_products_by_rank
 
 from db import (
     get_active_sponsorships,
+    get_admin_orchestration_settings,
     get_composite_discovery_config,
     get_partner_ratings_map,
     get_partners_by_ids,
@@ -125,6 +132,33 @@ async def _apply_product_mix(
     return out[:limit]
 
 
+async def _fetch_via_aggregator(
+    query: str,
+    fetch_limit: int,
+    partner_id: Optional[str],
+    exclude_partner_id: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Fetch via DiscoveryAggregator (LocalDB + UCP + MCP) with timeout."""
+    admin = await get_admin_orchestration_settings()
+    timeout_ms = 5000
+    if admin and isinstance(admin.get("discovery_timeout_ms"), (int, float)):
+        timeout_ms = int(admin["discovery_timeout_ms"])
+    local_driver = LocalDBDriver(search_products)
+    aggregator = DiscoveryAggregator(
+        local_db_driver=local_driver,
+        ucp_driver=None,
+        mcp_driver=None,
+        timeout_ms=timeout_ms,
+    )
+    ucp_products = await aggregator.search(
+        query=query,
+        limit=fetch_limit,
+        partner_id=partner_id,
+        exclude_partner_id=exclude_partner_id,
+    )
+    return [p.to_dict() for p in ucp_products]
+
+
 async def _fetch_and_rank(
     query: str,
     limit: int,
@@ -142,21 +176,35 @@ async def _fetch_and_rank(
             product_mix = mix
             fetch_limit = max(limit, 50)
 
+    admin = await get_admin_orchestration_settings()
+    use_aggregator = True  # DiscoveryAggregator is default; timeout from admin or 5000ms
+
     if not query or not query.strip():
-        products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+        if use_aggregator:
+            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id)
+        else:
+            products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
     elif is_browse_query(query):
-        products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+        if use_aggregator:
+            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id)
+        else:
+            products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
     else:
-        if use_semantic:
+        if use_semantic and not use_aggregator:
             products = await semantic_search(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
             if not products:
                 products = await search_products(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+        elif use_aggregator:
+            products = await _fetch_via_aggregator(query, fetch_limit, partner_id, exclude_partner_id)
         else:
             products = await search_products(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
         if not products and query.lower() in ("gifts", "gift"):
             for fallback in ("gift", "birthday", "present"):
                 if fallback != query.lower():
-                    products = await search_products(query=fallback, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+                    if use_aggregator:
+                        products = await _fetch_via_aggregator(fallback, fetch_limit, partner_id, exclude_partner_id)
+                    else:
+                        products = await search_products(query=fallback, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
                     if products:
                         break
 

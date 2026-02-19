@@ -224,6 +224,26 @@ export function ConfigEditor() {
   const [upsellSurgeExpanded, setUpsellSurgeExpanded] = useState(false);
   const [thinkingProgressExpanded, setThinkingProgressExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<"general" | "llm" | "discovery" | "integrations">("general");
+  const [orchestrationExpanded, setOrchestrationExpanded] = useState(true);
+  const [partnerRulesExpanded, setPartnerRulesExpanded] = useState(false);
+  const [adminOrchestration, setAdminOrchestration] = useState<{
+    global_tone?: string;
+    model_temperature?: number;
+    autonomy_level?: string;
+    discovery_timeout_ms?: number;
+    ucp_prioritized?: boolean;
+  }>({});
+  const [savingOrchestration, setSavingOrchestration] = useState(false);
+  const [partnerRepresentationRules, setPartnerRepresentationRules] = useState<
+    Array<{ id: string; partner_id: string; partner_name?: string; admin_weight: number; preferred_protocol: string }>
+  >([]);
+  const [partners, setPartners] = useState<Array<{ id: string; business_name: string }>>([]);
+  const [addingPartnerRule, setAddingPartnerRule] = useState(false);
+  const [partnerRuleForm, setPartnerRuleForm] = useState({
+    partner_id: "",
+    admin_weight: 1,
+    preferred_protocol: "DB" as "UCP" | "MCP" | "DB",
+  });
   const [externalApiProviders, setExternalApiProviders] = useState<ExternalApiProvider[]>([]);
   const [addingExternalApi, setAddingExternalApi] = useState(false);
   const [editingExternalApiId, setEditingExternalApiId] = useState<string | null>(null);
@@ -277,6 +297,37 @@ export function ConfigEditor() {
       if (!data.detail) setExternalApiProviders(Array.isArray(data) ? data : []);
     } catch {
       setExternalApiProviders([]);
+    }
+  }, []);
+
+  const fetchAdminOrchestration = useCallback(async () => {
+    try {
+      const res = await fetch("/api/platform/admin-orchestration");
+      const data = await res.json();
+      if (!data.detail) setAdminOrchestration(data);
+    } catch {
+      setAdminOrchestration({});
+    }
+  }, []);
+
+  const fetchPartnerRepresentationRules = useCallback(async () => {
+    try {
+      const res = await fetch("/api/platform/partner-representation-rules");
+      const data = await res.json();
+      if (!data.detail) setPartnerRepresentationRules(Array.isArray(data) ? data : []);
+    } catch {
+      setPartnerRepresentationRules([]);
+    }
+  }, []);
+
+  const fetchPartners = useCallback(async () => {
+    try {
+      const res = await fetch("/api/platform/partners?status=approved");
+      const data = await res.json();
+      if (!data.detail && data.partners)
+        setPartners(data.partners.map((p: { id: string; business_name?: string }) => ({ id: p.id, business_name: p.business_name ?? p.id })));
+    } catch {
+      setPartners([]);
     }
   }, []);
 
@@ -355,6 +406,18 @@ export function ConfigEditor() {
   useEffect(() => {
     if (!loading) fetchExternalApis();
   }, [loading, fetchExternalApis]);
+
+  useEffect(() => {
+    if (!loading) fetchAdminOrchestration();
+  }, [loading, fetchAdminOrchestration]);
+
+  useEffect(() => {
+    if (!loading && activeTab === "discovery") fetchPartnerRepresentationRules();
+  }, [loading, activeTab, fetchPartnerRepresentationRules]);
+
+  useEffect(() => {
+    if (activeTab === "discovery" && addingPartnerRule) fetchPartners();
+  }, [activeTab, addingPartnerRule, fetchPartners]);
 
   useEffect(() => {
     if (providerForm.provider_type === "openrouter" && openRouterModels.length === 0) {
@@ -568,6 +631,131 @@ export function ConfigEditor() {
         <label htmlFor="chatgpt" className="text-sm">
           Enable ChatGPT integration — Enable ChatGPT/OpenAI for chat experiences.
         </label>
+      </div>
+
+      <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
+        <button
+          type="button"
+          onClick={() => setOrchestrationExpanded((e) => !e)}
+          className="flex items-center justify-between w-full text-left font-medium"
+        >
+          Agentic Orchestration
+          <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+            {orchestrationExpanded ? "−" : "+"}
+          </span>
+        </button>
+        {orchestrationExpanded && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Control tone, creativity, and discovery behavior for the agentic orchestrator.
+            </p>
+            <div>
+              <label className="block text-sm font-medium mb-1">Global Tone</label>
+              <input
+                type="text"
+                placeholder="e.g. warm, elegant, memorable"
+                value={adminOrchestration.global_tone ?? ""}
+                onChange={(e) =>
+                  setAdminOrchestration((o) => ({ ...o, global_tone: e.target.value }))
+                }
+                className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+              />
+              <p className="text-xs text-[rgb(var(--color-text-secondary))] mt-1">
+                Injected into engagement prompts (e.g. concierge style).
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Model Temperature (0–2)</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="2"
+                value={adminOrchestration.model_temperature ?? 0.7}
+                onChange={(e) =>
+                  setAdminOrchestration((o) => ({
+                    ...o,
+                    model_temperature: Math.max(0, Math.min(2, Number(e.target.value) || 0.7)),
+                  }))
+                }
+                className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+              />
+              <p className="text-xs text-[rgb(var(--color-text-secondary))] mt-1">
+                LLM creativity for engagement responses. Higher = more creative.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Autonomy Level</label>
+              <select
+                value={adminOrchestration.autonomy_level ?? "balanced"}
+                onChange={(e) =>
+                  setAdminOrchestration((o) => ({
+                    ...o,
+                    autonomy_level: e.target.value,
+                  }))
+                }
+                className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+              >
+                <option value="conservative">Conservative (more probing)</option>
+                <option value="balanced">Balanced</option>
+                <option value="aggressive">Aggressive (assume defaults)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Discovery Timeout (ms)</label>
+              <input
+                type="number"
+                min="500"
+                max="60000"
+                step="500"
+                value={adminOrchestration.discovery_timeout_ms ?? 5000}
+                onChange={(e) =>
+                  setAdminOrchestration((o) => ({
+                    ...o,
+                    discovery_timeout_ms: Math.max(500, Math.min(60000, Number(e.target.value) || 5000)),
+                  }))
+                }
+                className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+              />
+              <p className="text-xs text-[rgb(var(--color-text-secondary))] mt-1">
+                Timeout for discovery aggregator fan-out (500–60000 ms).
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="ucp_prioritized"
+                checked={adminOrchestration.ucp_prioritized ?? false}
+                onChange={(e) =>
+                  setAdminOrchestration((o) => ({ ...o, ucp_prioritized: e.target.checked }))
+                }
+              />
+              <label htmlFor="ucp_prioritized" className="text-sm">
+                UCP Prioritized — Call fetch_ucp_manifest first before discovery when enabled.
+              </label>
+            </div>
+            <Button
+              onClick={async () => {
+                setSavingOrchestration(true);
+                try {
+                  const res = await fetch("/api/platform/admin-orchestration", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(adminOrchestration),
+                  });
+                  if (!res.ok) throw new Error("Failed");
+                } catch {
+                  alert("Failed to save orchestration settings");
+                } finally {
+                  setSavingOrchestration(false);
+                }
+              }}
+              disabled={savingOrchestration}
+            >
+              {savingOrchestration ? "Saving..." : "Save Orchestration"}
+            </Button>
+          </div>
+        )}
       </div>
         </div>
       )}
@@ -2300,6 +2488,204 @@ export function ConfigEditor() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+      </div>
+
+      <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
+        <button
+          type="button"
+          onClick={() => setPartnerRulesExpanded((e) => !e)}
+          className="flex items-center justify-between w-full text-left font-medium"
+        >
+          Partner Representation Rules (Partner Balancer)
+          <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+            {partnerRulesExpanded ? "−" : "+"}
+          </span>
+        </button>
+        {partnerRulesExpanded && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+              Set admin weight and preferred protocol (DB, UCP, MCP) per partner. Used by the Partner Balancer when curating bundle tiers.
+            </p>
+            {addingPartnerRule && (
+              <div className="rounded border border-[rgb(var(--color-border))] p-4 space-y-3">
+                <h4 className="font-medium">Add Partner Rule</h4>
+                <div>
+                  <label className="block text-sm mb-1">Partner</label>
+                  <select
+                    value={partnerRuleForm.partner_id}
+                    onChange={(e) =>
+                      setPartnerRuleForm((f) => ({ ...f, partner_id: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  >
+                    <option value="">Select partner...</option>
+                    {partners
+                      .filter((p) => !partnerRepresentationRules.some((r) => r.partner_id === p.id))
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.business_name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">Admin Weight (0–10)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="10"
+                    value={partnerRuleForm.admin_weight}
+                    onChange={(e) =>
+                      setPartnerRuleForm((f) => ({
+                        ...f,
+                        admin_weight: Math.max(0, Math.min(10, Number(e.target.value) || 1)),
+                      }))
+                    }
+                    className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">Preferred Protocol</label>
+                  <select
+                    value={partnerRuleForm.preferred_protocol}
+                    onChange={(e) =>
+                      setPartnerRuleForm((f) => ({
+                        ...f,
+                        preferred_protocol: e.target.value as "UCP" | "MCP" | "DB",
+                      }))
+                    }
+                    className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  >
+                    <option value="DB">DB (Local database)</option>
+                    <option value="UCP">UCP (Manifest)</option>
+                    <option value="MCP">MCP (Model context)</option>
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={async () => {
+                      if (!partnerRuleForm.partner_id) return;
+                      try {
+                        const res = await fetch("/api/platform/partner-representation-rules", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(partnerRuleForm),
+                        });
+                        if (!res.ok) throw new Error("Failed");
+                        setAddingPartnerRule(false);
+                        setPartnerRuleForm({ partner_id: "", admin_weight: 1, preferred_protocol: "DB" });
+                        fetchPartnerRepresentationRules();
+                      } catch {
+                        alert("Failed to add partner rule");
+                      }
+                    }}
+                    disabled={!partnerRuleForm.partner_id}
+                  >
+                    Add
+                  </Button>
+                  <Button variant="outline" onClick={() => setAddingPartnerRule(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+            {partnerRepresentationRules.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between gap-4 rounded border border-[rgb(var(--color-border))] p-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">{r.partner_name ?? r.partner_id}</span>
+                  <span className="ml-2 text-sm text-[rgb(var(--color-text-secondary))]">
+                    weight {r.admin_weight} · {r.preferred_protocol}
+                  </span>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="10"
+                    value={r.admin_weight}
+                    className="w-16 px-2 py-1 text-sm rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                    onChange={(e) => {
+                      const v = Math.max(0, Math.min(10, Number(e.target.value) || 1));
+                      setPartnerRepresentationRules((prev) =>
+                        prev.map((x) => (x.id === r.id ? { ...x, admin_weight: v } : x))
+                      );
+                    }}
+                    onBlur={async (e) => {
+                      const v = Math.max(0, Math.min(10, Number((e.target as HTMLInputElement).value) || 1));
+                      try {
+                        await fetch(`/api/platform/partner-representation-rules/${r.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ admin_weight: v }),
+                        });
+                      } catch {
+                        alert("Failed to update");
+                      }
+                    }}
+                  />
+                  <select
+                    value={r.preferred_protocol}
+                    onChange={async (e) => {
+                      const v = e.target.value as "UCP" | "MCP" | "DB";
+                      setPartnerRepresentationRules((prev) =>
+                        prev.map((x) => (x.id === r.id ? { ...x, preferred_protocol: v } : x))
+                      );
+                      try {
+                        await fetch(`/api/platform/partner-representation-rules/${r.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ preferred_protocol: v }),
+                        });
+                      } catch {
+                        alert("Failed to update");
+                      }
+                    }}
+                    className="px-2 py-1 text-sm rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                  >
+                    <option value="DB">DB</option>
+                    <option value="UCP">UCP</option>
+                    <option value="MCP">MCP</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!confirm("Remove this partner rule?")) return;
+                      try {
+                        const res = await fetch(`/api/platform/partner-representation-rules/${r.id}`, {
+                          method: "DELETE",
+                        });
+                        if (!res.ok) throw new Error("Failed");
+                        fetchPartnerRepresentationRules();
+                      } catch {
+                        alert("Failed to delete");
+                      }
+                    }}
+                    className="text-sm text-red-600 hover:underline"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+            {!addingPartnerRule && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAddingPartnerRule(true);
+                  fetchPartners();
+                }}
+                className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+              >
+                + Add partner rule
+              </button>
+            )}
           </div>
         )}
       </div>

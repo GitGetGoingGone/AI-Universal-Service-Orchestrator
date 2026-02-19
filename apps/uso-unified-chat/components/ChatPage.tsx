@@ -383,7 +383,7 @@ export function ChatPage(props: ChatPageProps = {}) {
 
   const prevLoadedThreadIdRef = useRef<string | null>(null);
   const paymentSuccessHandledRef = useRef(false);
-  const [threads, setThreads] = useState<Array<{ id: string; title: string; updated_at: string }>>([]);
+  const [threads, setThreads] = useState<Array<{ id: string; title: string; updated_at: string; has_completed_order?: boolean }>>([]);
   const fetchThreads = useCallback(() => {
     const aid = userId ? null : (anonymousId ?? (typeof window !== "undefined" ? getOrCreateAnonymousId() : null));
     const url = userId ? "/api/threads" : aid ? `/api/threads?anonymous_id=${encodeURIComponent(aid)}` : null;
@@ -413,6 +413,25 @@ export function ChatPage(props: ChatPageProps = {}) {
       fetchThreads(); // Refresh list so previous conversation appears when switching to new chat
     },
     [setThreadId, setBundleId, fetchThreads]
+  );
+
+  const handleDeleteThread = useCallback(
+    async (id: string) => {
+      const params = userId
+        ? ""
+        : anonymousId
+          ? `?anonymous_id=${encodeURIComponent(anonymousId)}`
+          : "";
+      const res = await fetch(`/api/threads/${id}${params}`, { method: "DELETE" });
+      const d = await res.json();
+      if (!res.ok) {
+        alert(d.message || d.error || "Failed to delete");
+        return;
+      }
+      if (threadId === id) handleSelectThread(null);
+      fetchThreads();
+    },
+    [userId, anonymousId, threadId, handleSelectThread, fetchThreads]
   );
 
   const addMessage = useCallback(
@@ -1781,6 +1800,7 @@ export function ChatPage(props: ChatPageProps = {}) {
           threads={threads}
           onNewChat={() => handleSelectThread(null)}
           onSelectThread={handleSelectThread}
+          onDeleteThread={handleDeleteThread}
           hasUserOrAnonymous={!!(userId || anonymousId)}
           anonymousId={anonymousId ?? undefined}
           collapsed={sideNavCollapsed}

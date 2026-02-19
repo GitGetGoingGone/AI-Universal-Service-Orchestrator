@@ -12,19 +12,21 @@ Be conversational and helpful. Mention key findings (e.g. product categories, co
 Do NOT use markdown, bullets, or formal structure. Keep it under 100 words.
 """
 
-RESPONSE_SYSTEM_COMPOSITE = """You are a luxury concierge. User asked for a composed experience (e.g. date night).
+RESPONSE_SYSTEM_COMPOSITE = """You are a luxury Universal Services Orchestrator Concierge.
 
-When we have a curated bundle ready: Describe it as a NARRATIVE EXPERIENCE PLAN, not a product list. Do NOT say "Found X product(s)" or list products with prices. Instead, write a flowing description of how the evening unfolds:
+Tone & Style: [INJECT ADMIN_CONFIG.GLOBAL_TONE AND LANGUAGE].
 
-- Pickup/time: "Pick up at 6:00 PM — we'll need your address for that."
-- Flowers: "The [flower name] will be sent to the restaurant."
-- Limo: "Someone from the limo company will pick you up. The limo features [package name] decor."
-- Dinner: Mention the restaurant/meal naturally in the flow.
-- REQUIRED: Before the CTA, add one sentence: "To place this order I'll need pickup time, pickup address, and delivery address — you can share them in the chat now or when you tap Add this bundle."
-- End with total price and a warm CTA (e.g. "Add this bundle" or "Ready when you are").
+**The Goal:** Write a flowing, evocative 'Narrative Experience Plan' (e.g., "Your evening begins as the sun sets, with a sleek ride arriving at 6 PM..."). Do not list products like a receipt. Focus on the feeling, the atmosphere, and the flow of the event.
+
+**ANTI-HALLUCINATION STRICT RULES:**
+1. You MUST paint a vivid picture, but you may ONLY use the exact product names, features, and capabilities provided in the context data.
+2. DO NOT invent amenities. If a Limo is provided, describe a "luxurious, smooth ride," but DO NOT say "enjoy complimentary champagne" unless "champagne" is explicitly listed in the product's features.
+3. Weave weather/event data naturally into the narrative (e.g., "Since it will be a crisp 65 degrees, the indoor seating is secured...").
+
+Calculate and display the Total Cost of Ownership (TCO) clearly at the bottom.
+Explicitly mention if a partner is 'Verified' via Local/UCP/MCP.
 
 When we're still gathering details: Ask 1–2 friendly questions (date, budget, dietary, location). Do NOT list products.
-Tone: smooth, elegant, memorable. Be conversational, not formal.
 """
 
 RESPONSE_SYSTEM_BROWSE = """User is browsing or reacting to what you just showed them. Engage conversationally with warmth and empathy.
@@ -249,7 +251,16 @@ async def generate_engagement_response(
         return None
 
     model = llm_config.get("model") or "gpt-4o"
-    temperature = min(0.7, float(llm_config.get("temperature", 0.1)) + 0.3)  # Slightly more creative for engagement
+    # Use admin model_temperature for creative engagement when available
+    try:
+        from db import get_admin_orchestration_settings
+        admin = get_admin_orchestration_settings()
+        if admin and admin.get("model_temperature") is not None:
+            temperature = max(0.0, min(2.0, float(admin["model_temperature"])))
+        else:
+            temperature = min(0.7, float(llm_config.get("temperature", 0.1)) + 0.3)
+    except Exception:
+        temperature = min(0.7, float(llm_config.get("temperature", 0.1)) + 0.3)
 
     data = result.get("data") or {}
     intent = data.get("intent") or {}
@@ -258,7 +269,7 @@ async def generate_engagement_response(
 
     # Use admin-configured prompt from DB when available and enabled
     try:
-        from db import get_supabase
+        from db import get_supabase, get_admin_orchestration_settings
         from packages.shared.platform_llm import get_model_interaction_prompt
         client = get_supabase()
         interaction_type = _intent_to_interaction_type(intent_type)
@@ -271,6 +282,14 @@ async def generate_engagement_response(
         else:
             system_prompt = default_prompt
             max_tokens = default_max_tokens
+        # Inject admin_config (global_tone) for engagement_discover_composite
+        if intent_type == "discover_composite":
+            admin = get_admin_orchestration_settings()
+            tone = (admin or {}).get("global_tone", "warm, elegant, memorable")
+            system_prompt = system_prompt.replace(
+                "[INJECT ADMIN_CONFIG.GLOBAL_TONE AND LANGUAGE]",
+                tone,
+            )
     except Exception:
         system_prompt = default_prompt
         max_tokens = default_max_tokens
@@ -319,16 +338,120 @@ Rules:
 - Prefer products that balance quality and value for the occasion.
 - Output ONLY valid JSON, no other text."""
 
-SUGGEST_BUNDLE_OPTIONS_SYSTEM = """You are a bundle curator. Given categories with products for a composite experience (e.g. date night: flowers, dinner, movies), suggest 2-4 different bundle options. Each option picks ONE product per category.
+SUGGEST_BUNDLE_OPTIONS_SYSTEM = """You are the Bundle Architect. Curate 3 tiers based on the provided categories.
 
-Rules:
-- Return a JSON object with key "options" = array of option objects. Each option: { "label": string, "description": string, "product_ids": string[], "total_price": number }.
-- ONLY use product IDs from the provided list. Do NOT invent IDs.
-- Each option must have one product per category (in category order).
-- label: Creative name (e.g. Romantic Classic, Budget-Friendly, Fresh & Fun). NOT "Option 1" or "Tier 1".
-- description: A fancy, evocative 1-2 sentence description of the experience (e.g. "A timeless evening of blooms, fine dining, and cinema under the stars.").
-- Vary options by price range, theme, diversity.
-- Output ONLY valid JSON, no other text."""
+Constraint: Apply the Partner Balancer rules. Never repeat a partner across categories in the same tier.
+Provide creative, evocative tier names (e.g. 'The Twilight Classic', 'The Essential', 'The Premium', 'The Express').
+
+Return JSON: { "options": [ { "label": string, "description": string, "product_ids": string[], "total_price": number }, ... ] }.
+ONLY use product IDs from the provided list. Each option: one product per category. 2-4 options. Output ONLY valid JSON."""
+
+
+def _build_partner_balanced_options(
+    categories: List[Dict[str, Any]],
+    experience_name: str = "experience",
+) -> List[Dict[str, Any]]:
+    """
+    PartnerBalancer: Build 3 tiers with equal representation (no partner twice per tier).
+    Tier 1: The Essential (DB heavy), Tier 2: The Premium (UCP heavy), Tier 3: The Express (MCP heavy).
+    Multiply relevance by admin_weight from partner_representation_rules.
+    """
+    try:
+        from db import get_partner_representation_rules
+        partner_rules = get_partner_representation_rules()
+    except Exception:
+        partner_rules = {}
+
+    def _weight(pid: str) -> float:
+        r = partner_rules.get(str(pid), {})
+        return float(r.get("admin_weight", 1.0))
+
+    def _source_score(source: str, tier: int) -> float:
+        # tier 1=DB, 2=UCP, 3=MCP
+        s = (source or "DB").upper()
+        if tier == 1:
+            return 1.5 if s == "DB" else (0.7 if s == "UCP" else 0.5)
+        if tier == 2:
+            return 1.5 if s == "UCP" else (0.7 if s == "DB" else 0.5)
+        if tier == 3:
+            return 1.5 if s == "MCP" else (0.7 if s == "DB" else 0.5)
+        return 1.0
+
+    tier_labels = ["The Essential", "The Premium", "The Express"]
+    tier_descriptions = [
+        "A curated selection from our trusted local partners.",
+        "Premium picks from our verified UCP catalog.",
+        "Express options for a quick, seamless experience.",
+    ]
+    cat_order = [c.get("query", "products") for c in categories if isinstance(c, dict)]
+    products_by_cat: Dict[str, List[Dict[str, Any]]] = {}
+    for c in categories:
+        if not isinstance(c, dict):
+            continue
+        q = c.get("query", "products")
+        prods = []
+        for p in (c.get("products") or [])[:10]:
+            if isinstance(p, dict) and p.get("id"):
+                prods.append({
+                    "id": str(p["id"]),
+                    "name": p.get("name", "Item"),
+                    "price": float(p.get("price", 0)),
+                    "currency": p.get("currency", "USD"),
+                    "partner_id": str(p.get("partner_id", "") or ""),
+                    "source": (p.get("source") or "DB").upper(),
+                })
+        products_by_cat[q] = prods
+
+    options: List[Dict[str, Any]] = []
+    for tier_idx in range(3):
+        used_partners: set = set()
+        product_ids: List[str] = []
+        trace_products: List[Dict[str, Any]] = []
+        total_price = 0.0
+        currency = "USD"
+        for cat in cat_order:
+            prods = products_by_cat.get(cat, [])
+            best = None
+            best_score = -1.0
+            best_relevance = 0.0
+            best_weight = 1.0
+            for p in prods:
+                pid = p.get("partner_id", "")
+                if pid and pid in used_partners:
+                    continue  # Equal representation: no partner twice per tier
+                rel = _source_score(p.get("source", "DB"), tier_idx + 1)
+                w = _weight(pid or "default")
+                score = rel * w
+                if score > best_score:
+                    best_score = score
+                    best = p
+                    best_relevance = rel
+                    best_weight = w
+            if best:
+                product_ids.append(str(best["id"]))
+                total_price += best.get("price", 0)
+                currency = best.get("currency", "USD")
+                trace_products.append({
+                    "product_id": str(best["id"]),
+                    "partner_id": str(best.get("partner_id", "") or ""),
+                    "protocol": (best.get("source") or "DB").upper(),
+                    "relevance_score": round(best_relevance, 4),
+                    "admin_weight": round(best_weight, 4),
+                })
+                if best.get("partner_id"):
+                    used_partners.add(str(best["partner_id"]))
+        if product_ids:
+            opt = {
+                "label": tier_labels[tier_idx] if tier_idx < len(tier_labels) else f"Option {tier_idx + 1}",
+                "description": tier_descriptions[tier_idx] if tier_idx < len(tier_descriptions) else "",
+                "product_ids": product_ids,
+                "total_price": round(total_price, 2),
+                "currency": currency,
+            }
+            if trace_products:
+                opt["_trace_products"] = trace_products
+            options.append(opt)
+    return options
 
 
 async def suggest_composite_bundle(
@@ -454,11 +577,17 @@ async def suggest_composite_bundle_options(
     llm_config: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Use LLM to suggest 2-4 bundle options. Each option: one product per category.
+    Suggest 2-4 bundle options via PartnerBalancer (equal representation, 3 tiers: DB/UCP/MCP).
+    Falls back to LLM when PartnerBalancer yields no options.
     Returns list of { label, description, product_ids, total_price }.
     """
     if not categories:
         return []
+
+    # PartnerBalancer first: 3 tiers, no duplicate partner per tier, admin_weight applied
+    balanced = _build_partner_balanced_options(categories, experience_name)
+    if balanced:
+        return balanced
 
     product_rows: List[Dict[str, Any]] = []
     for c in categories:

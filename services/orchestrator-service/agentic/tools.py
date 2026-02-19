@@ -101,6 +101,14 @@ TOOL_DEFS = [
         },
     },
     {
+        "name": "fetch_ucp_manifest",
+        "description": "Prefetch UCP manifests from partner endpoints when Admin Config has UCP prioritized. Call this FIRST before discover_products or discover_composite when UCP is prioritized. Returns status when manifests are ready.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
         "name": "web_search",
         "description": "Search the web for local events, trends, ideas, or general information. Use when planning experiences (e.g. date night) to find ideas, local happenings, or special occasions. Requires web_search external API configured.",
         "parameters": {
@@ -247,6 +255,9 @@ def apply_guardrails(name: str, params: Dict[str, Any]) -> Tuple[Dict[str, Any],
         summary = (p.get("summary") or "").strip()
         p["summary"] = summary[:MAX_SUMMARY_LEN] if summary else "Done."
 
+    elif name == "fetch_ucp_manifest":
+        pass  # No params required
+
     elif name == "web_search":
         query = (p.get("query") or "").strip()
         if not query:
@@ -310,6 +321,7 @@ async def execute_tool(
     get_weather_fn: Optional[Callable] = None,
     get_upcoming_occasions_fn: Optional[Callable] = None,
     track_order_fn: Optional[Callable] = None,
+    fetch_ucp_manifest_fn: Optional[Callable] = None,
 ) -> Dict[str, Any]:
     """
     Execute a tool by name with given parameters.
@@ -387,6 +399,11 @@ async def execute_tool(
             platform=params.get("platform"),
             thread_id=params.get("thread_id"),
         )
+
+    if name == "fetch_ucp_manifest":
+        if fetch_ucp_manifest_fn:
+            return await fetch_ucp_manifest_fn()
+        return {"data": {"status": "ok", "message": "UCP manifests ready for discovery"}}
 
     if name == "web_search":
         if not web_search_fn:

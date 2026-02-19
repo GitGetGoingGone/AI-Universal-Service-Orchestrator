@@ -178,6 +178,24 @@ async def get_platform_config_ranking() -> Optional[Dict[str, Any]]:
         return {"ranking_enabled": True}
 
 
+async def get_admin_orchestration_settings() -> Optional[Dict[str, Any]]:
+    """Get admin orchestration settings (global_tone, model_temperature, autonomy_level, discovery_timeout_ms)."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("admin_orchestration_settings")
+            .select("global_tone, model_temperature, autonomy_level, discovery_timeout_ms")
+            .limit(1)
+            .execute()
+        )
+        row = result.data[0] if result.data else None
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
 async def get_composite_discovery_config() -> Optional[Dict[str, Any]]:
     """Get composite_discovery_config from platform_config (products_per_category, product_mix, sponsorship_enabled)."""
     client = get_supabase()

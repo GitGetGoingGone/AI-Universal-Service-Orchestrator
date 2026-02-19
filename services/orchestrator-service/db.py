@@ -259,3 +259,81 @@ def get_user_id_by_platform_user(platform: str, platform_user_id: str) -> Option
         return None
     except Exception:
         return None
+
+
+def get_admin_orchestration_settings() -> Optional[Dict[str, Any]]:
+    """Get admin orchestration settings (global_tone, model_temperature, autonomy_level, discovery_timeout_ms)."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        r = (
+            client.table("admin_orchestration_settings")
+            .select("global_tone, model_temperature, autonomy_level, discovery_timeout_ms, ucp_prioritized")
+            .limit(1)
+            .execute()
+        )
+        row = r.data[0] if r.data else None
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+def log_orchestration_trace(
+    trace_type: str,
+    *,
+    thread_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    query: Optional[str] = None,
+    experience_name: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Log OrchestrationTrace for product discovery or bundle creation. Returns trace id or None."""
+    if trace_type not in ("product_discovery", "bundle_created"):
+        return None
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        row = {
+            "trace_type": trace_type,
+            "metadata": metadata or {},
+        }
+        if thread_id:
+            row["thread_id"] = thread_id
+        if user_id:
+            row["user_id"] = user_id
+        if query:
+            row["query"] = query
+        if experience_name:
+            row["experience_name"] = experience_name
+        r = client.table("orchestration_traces").insert(row).execute()
+        if r.data and len(r.data) > 0:
+            return str(r.data[0].get("id", ""))
+        return None
+    except Exception:
+        return None
+
+
+def get_partner_representation_rules() -> Dict[str, Dict[str, Any]]:
+    """Get partner_id -> {admin_weight, preferred_protocol} for PartnerBalancer."""
+    client = get_supabase()
+    if not client:
+        return {}
+    try:
+        r = (
+            client.table("partner_representation_rules")
+            .select("partner_id, admin_weight, preferred_protocol")
+            .execute()
+        )
+        out = {}
+        for row in (r.data or []):
+            pid = str(row.get("partner_id", ""))
+            if pid:
+                out[pid] = {
+                    "admin_weight": float(row.get("admin_weight", 1.0)),
+                    "preferred_protocol": str(row.get("preferred_protocol", "DB")).upper(),
+                }
+        return out
+    except Exception:
+        return {}
