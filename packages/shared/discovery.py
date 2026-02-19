@@ -30,7 +30,7 @@ _ACTION_FILLER_WORDS: Set[str] = {
     "like", "would", "could", "can", "some", "about", "around", "near", "nearby",
     "close", "cheap", "affordable", "good", "best", "top", "recommend", "suggest",
     "offer", "offers", "provide", "sell", "buy", "order", "reserve", "rent", "hire",
-    "delivery", "deliver", "what", "you", "got", "items",
+    "delivery", "deliver", "what", "you", "got", "items", "products", "options",
 }
 
 

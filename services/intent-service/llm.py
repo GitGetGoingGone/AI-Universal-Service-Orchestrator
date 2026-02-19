@@ -14,13 +14,20 @@ _PROBE_KEYWORDS = ("budget", "dietary", "preferences", "location", "what date", 
 # Unrelated responses when we asked probing questions
 _UNRELATED_PHRASES = ("show more options", "more options", "other options", "different options", "you suggest", "suggest", "whatever", "anything")
 
-# Composite experience patterns -> (search_queries, experience_name)
+# Composite experience patterns -> (search_queries, experience_name); proposed_plan = human-readable labels
 _COMPOSITE_PATTERNS = [
-    (r"date\s*night|plan\s*a\s*date|romantic\s*evening", ["flowers", "dinner", "limo"], "date night"),
-    (r"birthday\s*party|birthday\s*celebration", ["cake", "flowers", "gifts"], "birthday party"),
-    (r"picnic", ["basket", "blanket", "food"], "picnic"),
-    (r"baby\s*shower", ["cake", "decorations", "gifts"], "baby shower"),
+    (r"date\s*night|plan\s*a\s*date|romantic\s*evening", ["flowers", "dinner", "limo"], "date night", ["Flowers", "Dinner", "Limo"]),
+    (r"birthday\s*party|birthday\s*celebration", ["cake", "flowers", "gifts"], "birthday party", ["Cake", "Flowers", "Gifts"]),
+    (r"picnic", ["basket", "blanket", "food"], "picnic", ["Basket", "Blanket", "Food"]),
+    (r"baby\s*shower", ["cake", "decorations", "gifts"], "baby shower", ["Cake", "Decorations", "Gifts"]),
 ]
+
+# Location-like short answers: do NOT use as product search_query; map to location entity only
+_LOCATION_LIKE_WORDS = (
+    "downtown", "midtown", "uptown", "dallas", "nyc", "brooklyn", "manhattan",
+    "houston", "austin", "chicago", "la", "sf", "seattle", "boston", "miami",
+    "near me", "around me", "here", "local",
+)
 
 # Budget extraction: "under $50", "$50", "50 dollars"
 _BUDGET_RE = re.compile(r"(?:under|under\s+)?\$?\s*(\d+)\s*(?:dollars?|dollars?|bucks?)?", re.I)
@@ -65,12 +72,13 @@ def _heuristic_resolve(
         if any(p in t for p in _UNRELATED_PHRASES):
             sq = ["flowers", "dinner", "limo"]
             exp = "date night"
+            proposed = ["Flowers", "Dinner", "Limo"]
             for c in reversed(conv):
                 if isinstance(c, dict) and c.get("role") == "user":
                     msg = (c.get("content") or "").lower()
-                    for pat, queries, exp_name in _COMPOSITE_PATTERNS:
+                    for pat, queries, exp_name, plan in _COMPOSITE_PATTERNS:
                         if re.search(pat, msg):
-                            sq, exp = queries, exp_name
+                            sq, exp, proposed = queries, exp_name, plan
                             break
                     break
             return {
@@ -80,6 +88,7 @@ def _heuristic_resolve(
                 "experience_name": exp,
                 "bundle_options": [{"label": exp, "categories": sq}],
                 "entities": [],
+                "proposed_plan": proposed,
                 "unrelated_to_probing": True,
                 "recommended_next_action": "discover_composite",
                 "confidence_score": 0.85,
@@ -99,12 +108,13 @@ def _heuristic_resolve(
         if is_date_answer or is_budget_answer or is_short_answer:
             sq = ["flowers", "dinner", "limo"]
             exp = "date night"
+            proposed = ["Flowers", "Dinner", "Limo"]
             for c in reversed(conv):
                 if isinstance(c, dict) and c.get("role") == "user":
                     msg = (c.get("content") or "").lower()
-                    for pat, queries, exp_name in _COMPOSITE_PATTERNS:
+                    for pat, queries, exp_name, plan in _COMPOSITE_PATTERNS:
                         if re.search(pat, msg):
-                            sq, exp = queries, exp_name
+                            sq, exp, proposed = queries, exp_name, plan
                             break
                     break
             entities: List[Dict[str, Any]] = []
@@ -123,9 +133,124 @@ def _heuristic_resolve(
                 "experience_name": exp,
                 "bundle_options": [{"label": exp, "categories": sq}],
                 "entities": entities,
+                "proposed_plan": proposed,
                 "recommended_next_action": "discover_composite",
                 "confidence_score": 0.9,
             }
+
+    # Fallback: date/time (e.g. "today") without last_suggestion — if conversation has composite request, treat as answer
+    _DATE_TIME_WORDS = (
+        "tomorrow", "today", "tonight", "this weekend", "this week", "next week", "next weekend",
+        "friday", "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday",
+        "anytime", "whenever", "flexible",
+    )
+    if any(w in t for w in _DATE_TIME_WORDS) or re.search(r"\b\d{1,2}/\d{1,2}\b", t):
+        for c in reversed(conv):
+            if isinstance(c, dict) and c.get("role") == "user":
+                msg = (c.get("content") or "").lower()
+                if msg == t:
+                    continue
+                for pat, queries, exp_name, plan in _COMPOSITE_PATTERNS:
+                    if re.search(pat, msg):
+                        return {
+                            "intent_type": "discover_composite",
+                            "search_query": " ".join(queries),
+                            "search_queries": list(queries),
+                            "experience_name": exp_name,
+                            "bundle_options": [{"label": exp_name, "categories": list(queries)}],
+                            "entities": [{"type": "time", "value": text.strip()[:100]}],
+                            "proposed_plan": list(plan),
+                            "recommended_next_action": "discover_composite",
+                            "confidence_score": 0.85,
+                        }
+                break
+
+    # "More options" / "other options" after we showed a composite bundle — re-fetch bundle, don't product-search
+    _MORE_OPTIONS_PHRASES = (
+        "more options", "other options", "different options", "any other", "do you have more",
+        "show more", "got anything else", "anything else", "other choices", "alternatives",
+    )
+    if any(p in t for p in _MORE_OPTIONS_PHRASES):
+        # Composite context: last suggestion or any message mentions bundle/date night/total
+        in_composite_context = False
+        if ls and ("bundle" in ls or "date night" in ls or "total:" in ls or "add this" in ls or "curated" in ls):
+            in_composite_context = True
+        for c in conv:
+            if isinstance(c, dict) and c.get("role") == "assistant" and (c.get("content") or ""):
+                msg = (c.get("content") or "").lower()
+                if "bundle" in msg or "date night" in msg or "total:" in msg or "add this" in msg:
+                    in_composite_context = True
+                    break
+        if not in_composite_context:
+            for c in conv:
+                if isinstance(c, dict) and c.get("role") == "user" and (c.get("content") or ""):
+                    for pat, _, _ in _COMPOSITE_PATTERNS:
+                        if re.search(pat, (c.get("content") or "").lower()):
+                            in_composite_context = True
+                            break
+                    break
+        if in_composite_context:
+            sq = ["flowers", "dinner", "limo"]
+            exp = "date night"
+            proposed = ["Flowers", "Dinner", "Limo"]
+            for c in reversed(conv):
+                if isinstance(c, dict) and c.get("role") == "user":
+                    msg = (c.get("content") or "").lower()
+                    for pat, queries, exp_name, plan in _COMPOSITE_PATTERNS:
+                        if re.search(pat, msg):
+                            sq, exp, proposed = queries, exp_name, plan
+                            break
+                    break
+            return {
+                "intent_type": "discover_composite",
+                "search_query": " ".join(sq),
+                "search_queries": sq,
+                "experience_name": exp,
+                "bundle_options": [{"label": exp, "categories": sq}],
+                "entities": [],
+                "proposed_plan": proposed,
+                "unrelated_to_probing": True,
+                "recommended_next_action": "discover_composite",
+                "confidence_score": 0.85,
+            }
+
+        # "More options" after a product list (discover context): reuse previous category so we don't search "more options"
+        from packages.shared.discovery import derive_search_query
+        for c in reversed(conv):
+            if isinstance(c, dict) and c.get("role") == "user":
+                prev_msg = (c.get("content") or "").strip()
+                if prev_msg and prev_msg.lower() != t:
+                    prev_query = derive_search_query(prev_msg)
+                    if prev_query and prev_query not in ("more", "options", "browse"):
+                        return {
+                            "intent_type": "discover",
+                            "search_query": prev_query,
+                            "entities": [],
+                            "recommended_next_action": "discover_products",
+                            "confidence_score": 0.85,
+                        }
+                break
+
+    # Location-only short answer in composite context: do NOT create product search for "downtown"
+    words = t.split()
+    if len(words) <= 3 and any(w in t for w in _LOCATION_LIKE_WORDS):
+        for c in reversed(conv):
+            if isinstance(c, dict) and c.get("role") == "user":
+                msg = (c.get("content") or "").lower()
+                for pat, queries, exp_name, plan in _COMPOSITE_PATTERNS:
+                    if re.search(pat, msg):
+                        return {
+                            "intent_type": "discover_composite",
+                            "search_query": " ".join(queries),
+                            "search_queries": list(queries),
+                            "experience_name": exp_name,
+                            "bundle_options": [{"label": exp_name, "categories": list(queries)}],
+                            "entities": [{"type": "location", "value": text.strip()[:100]}],
+                            "proposed_plan": list(plan),
+                            "recommended_next_action": "discover_composite",
+                            "confidence_score": 0.88,
+                        }
+                break
 
     # Topic change: "actually I want X", "forget that, X"
     if re.search(r"actually\s+i\s+want|forget\s+that|never\s+mind", t):
@@ -140,7 +265,7 @@ def _heuristic_resolve(
         }
 
     # Composite: date night, picnic, birthday party, etc.
-    for pat, queries, exp_name in _COMPOSITE_PATTERNS:
+    for pat, queries, exp_name, plan in _COMPOSITE_PATTERNS:
         if re.search(pat, t):
             return {
                 "intent_type": "discover_composite",
@@ -149,6 +274,7 @@ def _heuristic_resolve(
                 "experience_name": exp_name,
                 "bundle_options": [{"label": exp_name, "categories": queries}],
                 "entities": [],
+                "proposed_plan": list(plan),
                 "recommended_next_action": "complete_with_probing",
                 "confidence_score": 0.9,
             }

@@ -998,6 +998,11 @@ async def run_agentic_loop(
         error=state.get("last_error"),
         engagement_data=engagement_data,
     )
+    # Intent Preview State: pass proposed_plan (Draft Itinerary) and orchestrator_state to frontend
+    if intent_data and intent_data.get("proposed_plan"):
+        out["data"]["proposed_plan"] = intent_data["proposed_plan"]
+    if state.get("orchestrator_state"):
+        out["data"]["orchestrator_state"] = state["orchestrator_state"]
     planner_msg = state.get("planner_complete_message", "").strip()
     if planner_msg:
         out["planner_complete_message"] = planner_msg
@@ -1114,21 +1119,27 @@ def _has_location_or_time(
     intent_data: Optional[Dict[str, Any]],
     user_message: Optional[str] = None,
 ) -> bool:
-    """Return True if we have location or time for composite experiences (required before discovery)."""
+    """Return True only if we have BOTH location AND time for composite (Halt & Preview until both are present)."""
     if not intent_data:
         return False
     loc = _extract_location(intent_data)
-    if loc and str(loc).strip():
-        return True
+    has_location = bool(loc and str(loc).strip())
+    if not has_location:
+        for e in intent_data.get("entities", []):
+            if isinstance(e, dict) and (e.get("type") or "").lower() == "location" and e.get("value"):
+                has_location = True
+                break
+    has_time = False
     hints = _extract_fulfillment_hints(intent_data, user_message)
     if hints and (hints.get("pickup_time") or hints.get("pickup_address")):
-        return True
+        has_time = True
     for e in intent_data.get("entities", []):
         if isinstance(e, dict):
             t = (e.get("type") or "").lower()
-            if t in ("location", "pickup_time", "time", "date") and e.get("value"):
-                return True
-    return False
+            if t in ("time", "date") and e.get("value"):
+                has_time = True
+                break
+    return has_location and has_time
 
 
 def _is_outdoor_experience(experience_name: str, search_queries: Optional[List[str]]) -> bool:

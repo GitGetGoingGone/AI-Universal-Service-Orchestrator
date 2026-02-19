@@ -12,21 +12,17 @@ Be conversational and helpful. Mention key findings (e.g. product categories, co
 Do NOT use markdown, bullets, or formal structure. Keep it under 100 words.
 """
 
-RESPONSE_SYSTEM_COMPOSITE = """You are a luxury Universal Services Orchestrator Concierge.
+RESPONSE_SYSTEM_COMPOSITE = """You are a luxury Universal Services Orchestrator Concierge (Proactive Concierge, not a form-filler).
 
 Tone & Style: [INJECT ADMIN_CONFIG.GLOBAL_TONE AND LANGUAGE].
 
-**The Goal:** Write a flowing, evocative 'Narrative Experience Plan' (e.g., "Your evening begins as the sun sets, with a sleek ride arriving at 6 PM..."). Do not list products like a receipt. Focus on the feeling, the atmosphere, and the flow of the event.
+**Concierge Narrative Assembly:**
+1. STORYTELLING: Write ONE flowing journey (e.g. "Your evening in Dallas begins at 6 PM..."). Do not list products like a receipt or bullet points. One continuous narrative that walks the user through the experience in order.
+2. GROUNDEDNESS: Use ONLY the product names and the "features" list from the Product data below. Do NOT invent amenities (e.g. do not mention "champagne" unless it appears in that product's features). If no features are listed for a product, describe only its name and role in the flow.
+3. TRANSPARENCY: Calculate and display a single Total Cost of Ownership (TCO) that sums all vendors in the bundle. Show it once at the end (e.g. "Total for your evening: USD 247.00"). No per-product price list in the narrative.
 
-**ANTI-HALLUCINATION STRICT RULES:**
-1. You MUST paint a vivid picture, but you may ONLY use the exact product names, features, and capabilities provided in the context data.
-2. DO NOT invent amenities. If a Limo is provided, describe a "luxurious, smooth ride," but DO NOT say "enjoy complimentary champagne" unless "champagne" is explicitly listed in the product's features.
-3. Weave weather/event data naturally into the narrative (e.g., "Since it will be a crisp 65 degrees, the indoor seating is secured...").
-
-Calculate and display the Total Cost of Ownership (TCO) clearly at the bottom.
-Explicitly mention if a partner is 'Verified' via Local/UCP/MCP.
-
-When we're still gathering details: Ask 1–2 friendly questions (date, budget, dietary, location). Do NOT list products.
+Weave weather/event data naturally when provided (e.g. "With a crisp 65° evening, your indoor table is secured...").
+When we're still gathering details: Ask 1–2 friendly questions (date, budget, location). Do NOT list products.
 """
 
 RESPONSE_SYSTEM_BROWSE = """User is browsing or reacting to what you just showed them. Engage conversationally with warmth and empathy.
@@ -107,18 +103,42 @@ def _build_context(result: Dict[str, Any]) -> str:
         cat_names = [c.get("query", "") for c in categories if isinstance(c, dict) and c.get("query")]
         suggested_bundles = engagement.get("suggested_bundle_options") or []
         if suggested_bundles:
-            # We have a curated bundle — describe as narrative experience plan (pickup, flower delivery, limo, etc.)
+            # Concierge Narrative: bundle with product features from UCPProduct schema (groundedness)
             opt = suggested_bundles[0]
             product_names = opt.get("product_names") or []
+            product_ids = opt.get("product_ids") or []
             total_price = opt.get("total_price")
             currency = opt.get("currency", "USD")
             total_str = f"{currency} {float(total_price):.2f}" if total_price is not None else ""
+            # Build product data with features (from categories) so LLM only uses listed features
+            id_to_product: Dict[str, Dict[str, Any]] = {}
+            for c in categories:
+                if isinstance(c, dict):
+                    for p in c.get("products", []):
+                        if isinstance(p, dict) and p.get("id"):
+                            id_to_product[str(p.get("id"))] = p
+            product_entries: List[str] = []
+            for pid in product_ids:
+                p = id_to_product.get(str(pid))
+                if not p:
+                    continue
+                name = p.get("name", "Item")
+                pr = p.get("price")
+                curr = p.get("currency", "USD")
+                price_str = f"{curr} {pr}" if pr is not None else ""
+                feats = p.get("features") or []
+                if isinstance(feats, str):
+                    feats = [f.strip() for f in feats.split(",") if f.strip()]
+                feats_str = ", ".join(str(f) for f in feats[:15]) if feats else "(no features listed)"
+                product_entries.append(f"{name} ({price_str}) — features: {feats_str}")
+            product_data_str = "; ".join(product_entries) if product_entries else ", ".join(product_names)
             parts.append(
-                f"User asked for {exp_name}. We have a curated bundle ready. "
-                f"Bundle includes (use these exact names): {', '.join(product_names)}. Total: {total_str}. "
-                "Describe this as a NARRATIVE EXPERIENCE PLAN: how the evening unfolds (e.g. pickup at 6 PM—need address; flowers sent to restaurant; limo pickup with decor). "
-                "REQUIRED: Include this sentence before the CTA: 'To place this order I'll need pickup time, pickup address, and delivery address — you can share them in the chat now or when you tap Add this bundle.' "
-                "Do NOT say 'Found X product(s)' or list products with prices. Write a flowing 3–5 sentence description. End with total and 'Add this bundle' CTA."
+                f"User asked for {exp_name}. Curated bundle ready. "
+                f"Product data (use ONLY these names and features; do NOT invent amenities): {product_data_str}. "
+                f"Total Cost of Ownership (TCO) for the entire bundle: {total_str}. "
+                "Write ONE flowing narrative (e.g. 'Your evening in Dallas begins at 6 PM...'). Do NOT list products with prices in the body. "
+                "REQUIRED before CTA: 'To place this order I'll need pickup time, pickup address, and delivery address — you can share them in the chat now or when you tap Add this bundle.' "
+                "End with the single TCO and 'Add this bundle' CTA."
             )
         elif product_list or categories:
             # Fallback: no bundle yet, present as curated options

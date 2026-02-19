@@ -1398,7 +1398,8 @@ export function ChatPage(props: ChatPageProps = {}) {
                         )}
                       </div>
                     )}
-                    {m.adaptiveCard && (() => {
+                    {/* Card display disabled for now — text-only experience; cards to be revisited later */}
+                    {false && m.adaptiveCard && (() => {
                       const rawCard = filterE2EActions(m.adaptiveCard, e2eEnabled) as Record<string, unknown>;
                       const productContainers = extractProductContainersFromCard(rawCard);
                       const products = productContainers
