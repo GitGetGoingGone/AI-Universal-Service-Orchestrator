@@ -27,30 +27,35 @@ def generate_experience_card(
         for opt in suggested_bundle_options:
             label = opt.get("label", "Option")
             product_ids = opt.get("product_ids") or []
+            product_names = opt.get("product_names") or []
             total_price = opt.get("total_price")
             desc = opt.get("description", "")
-            btn_title = f"Add {label}"
+            currency = opt.get("currency", "USD")
+            # Fancy description + product list (no individual prices) + bundle price only
+            items = [text_block(f"**{label}**", size="Medium", weight="Bolder")]
+            if desc:
+                items.append(text_block(desc, size="Small"))
+            if product_names:
+                items.append(text_block("Includes: " + ", ".join(product_names), size="Small", is_subtle=True))
             if total_price is not None:
-                btn_title = f"Add {label} (${float(total_price):.2f})"
-            body.append({
-                "type": "Container",
-                "items": [
-                    text_block(f"**{label}**" + (f" – {desc}" if desc else ""), size="Small"),
+                items.append(text_block(f"{currency} {float(total_price):.2f} total", size="Medium", weight="Bolder"))
+            items.append({
+                "type": "ActionSet",
+                "actions": [
                     {
-                        "type": "ActionSet",
-                        "actions": [
-                            {
-                                "type": "Action.Submit",
-                                "title": btn_title,
-                                "data": {
-                                    "action": "add_bundle_bulk",
-                                    "product_ids": product_ids,
-                                    "option_label": label,
-                                },
-                            },
-                        ],
+                        "type": "Action.Submit",
+                        "title": f"Add {label}",
+                        "data": {
+                            "action": "add_bundle_bulk",
+                            "product_ids": product_ids,
+                            "option_label": label,
+                        },
                     },
                 ],
+            })
+            body.append({
+                "type": "Container",
+                "items": items,
                 "style": "emphasis",
             })
     elif suggested_bundle_product_ids:
@@ -67,6 +72,10 @@ def generate_experience_card(
                 },
             ],
         })
+
+    # When we have bundle options, skip category sections (products already listed in each option; no individual prices)
+    if suggested_bundle_options:
+        return create_card(body=body)
 
     for cat in categories:
         query = cat.get("query", "products")

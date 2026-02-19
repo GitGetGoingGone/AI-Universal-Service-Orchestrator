@@ -50,16 +50,28 @@ TOOL_DEFS = [
     },
     {
         "name": "discover_composite",
-        "description": "Fetch products for a composed experience (e.g. date night: flowers, dinner, movies). Use ONLY when the user has provided enough detail (date, budget, preferences). For generic requests like 'plan a date night' with no details, prefer complete with probing questions first.",
+        "description": "Fetch products for a composed experience (e.g. date night, baby shower). Use when user has provided enough detail. bundle_options: multiple bundle tiers from intent with model-generated labels (e.g. Romantic Classic, Sweet & Savory). Each tier has its own categories and price.",
         "parameters": {
             "type": "object",
             "properties": {
-                "search_queries": {"type": "array", "items": {"type": "string"}, "description": "Product categories to search (e.g. [flowers, dinner, movies])"},
-                "experience_name": {"type": "string", "description": "Experience name (e.g. date night)", "default": "experience"},
+                "bundle_options": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "description": {"type": "string"}, "categories": {"type": "array", "items": {"type": "string"}}}}, "description": "Bundle tiers from intent with model-generated labels (e.g. [{label: 'Romantic Classic', categories: [flowers, restaurant, movies]}, ...])"},
+                "search_queries": {"type": "array", "items": {"type": "string"}, "description": "All unique categories across bundles (fallback when bundle_options absent)"},
+                "experience_name": {"type": "string", "description": "Experience name (e.g. date night, baby shower)", "default": "experience"},
                 "location": {"type": "string", "description": "Optional location filter"},
                 "budget_max": {"type": "integer", "description": "Max price in cents (e.g. 5000 for $50)"},
             },
-            "required": ["search_queries"],
+        },
+    },
+    {
+        "name": "refine_bundle_category",
+        "description": "Show alternatives for a category in the user's bundle. Use when intent is refine_composite (e.g. 'change the flowers', 'different chocolates') and thread has bundle_id. Fetches bundle, finds item in category, discovers alternatives.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "bundle_id": {"type": "string", "description": "Bundle ID from thread_context"},
+                "category": {"type": "string", "description": "Category to replace (e.g. flowers, chocolates, restaurant)"},
+            },
+            "required": ["bundle_id", "category"],
         },
     },
     {
@@ -182,10 +194,29 @@ def apply_guardrails(name: str, params: Dict[str, Any]) -> Tuple[Dict[str, Any],
             p["location"] = loc.strip()[:MAX_LOCATION_LEN] or None
 
     elif name == "discover_composite":
-        sq = p.get("search_queries") or []
-        if not isinstance(sq, list):
+        bundle_opts = p.get("bundle_options")
+        if isinstance(bundle_opts, list) and bundle_opts:
+            p["bundle_options"] = [
+                {"label": str(o.get("label", "Option")), "description": str(o.get("description", "")), "categories": [str(c) for c in (o.get("categories") or []) if c]}
+                for o in bundle_opts[:10] if isinstance(o, dict)
+            ]
+            # Derive search_queries from bundle_options
+            seen = set()
             sq = []
-        p["search_queries"] = [str(q).strip()[:MAX_QUERY_LEN] for q in sq if q][:10]
+            for o in p["bundle_options"]:
+                for c in (o.get("categories") or []):
+                    if c and c not in seen:
+                        seen.add(c)
+                        sq.append(c)
+            p["search_queries"] = sq[:15]
+        else:
+            sq = p.get("search_queries") or []
+            if not isinstance(sq, list):
+                sq = []
+            p["search_queries"] = [str(q).strip()[:MAX_QUERY_LEN] for q in sq if q][:10]
+            p["bundle_options"] = []
+        if not p["search_queries"] and not p.get("bundle_options"):
+            return {}, "discover_composite requires bundle_options or search_queries"
         p["experience_name"] = (p.get("experience_name") or "experience")[:200]
         loc = p.get("location")
         if loc is not None and isinstance(loc, str):
@@ -252,6 +283,16 @@ def apply_guardrails(name: str, params: Dict[str, Any]) -> Tuple[Dict[str, Any],
             return {}, "track_order requires order_id (use thread_context.order_id)"
         p["order_id"] = oid[:100]
 
+    elif name == "refine_bundle_category":
+        bid = (p.get("bundle_id") or "").strip()
+        cat = (p.get("category") or "").strip()
+        if not bid:
+            return {}, "refine_bundle_category requires bundle_id"
+        if not cat:
+            return {}, "refine_bundle_category requires category"
+        p["bundle_id"] = bid[:100]
+        p["category"] = cat[:MAX_QUERY_LEN]
+
     return p, None
 
 
@@ -262,6 +303,7 @@ async def execute_tool(
     resolve_intent_fn: Optional[Callable] = None,
     discover_products_fn: Optional[Callable] = None,
     discover_composite_fn: Optional[Callable] = None,
+    refine_bundle_category_fn: Optional[Callable] = None,
     start_orchestration_fn: Optional[Callable] = None,
     create_standing_intent_fn: Optional[Callable] = None,
     web_search_fn: Optional[Callable] = None,
@@ -309,13 +351,23 @@ async def execute_tool(
         if not discover_composite_fn:
             return {"error": "discover_composite not configured"}
         sq = params.get("search_queries") or []
-        if not sq:
-            return {"error": "discover_composite requires non-empty search_queries"}
+        bundle_opts = params.get("bundle_options") or []
+        if not sq and not bundle_opts:
+            return {"error": "discover_composite requires bundle_options or search_queries"}
         return await discover_composite_fn(
             search_queries=sq,
             experience_name=params.get("experience_name", "experience"),
+            bundle_options=bundle_opts,
             location=params.get("location"),
             budget_max=params.get("budget_max"),
+        )
+
+    if name == "refine_bundle_category":
+        if not refine_bundle_category_fn:
+            return {"error": "refine_bundle_category not configured"}
+        return await refine_bundle_category_fn(
+            bundle_id=params.get("bundle_id", ""),
+            category=params.get("category", ""),
         )
 
     if name == "start_orchestration":

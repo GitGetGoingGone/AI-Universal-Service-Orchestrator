@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from config import settings
-from db import get_product_by_id, get_products_for_acp_export, add_product_to_bundle, add_products_to_bundle_bulk, get_bundle_by_id, remove_from_bundle, create_order_from_bundle
+from db import get_product_by_id, get_products_for_acp_export, add_product_to_bundle, add_products_to_bundle_bulk, get_bundle_by_id, remove_from_bundle, replace_product_in_bundle, create_order_from_bundle
 from scout_engine import search
 from protocols.acp_compliance import validate_product_acp
 from protocols.ucp_compliance import validate_product_ucp
@@ -46,6 +46,14 @@ class CheckoutBody(BaseModel):
     """Request body for proceeding to checkout."""
 
     bundle_id: str
+
+
+class ReplaceInBundleBody(BaseModel):
+    """Request body for replacing a product in a bundle (category refinement)."""
+
+    bundle_id: str
+    leg_id: str  # bundle_leg id to replace
+    new_product_id: str
 
 
 @router.get("/discover")
@@ -365,6 +373,35 @@ async def add_to_bundle_bulk(request: Request, body: AddBulkBody):
         "data": result,
         "summary": summary,
         "adaptive_card": adaptive_card,
+        "metadata": {
+            "api_version": "v1",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "request_id": request_id,
+        },
+    }
+
+
+@router.post("/bundle/replace")
+async def replace_in_bundle(request: Request, body: ReplaceInBundleBody):
+    """Replace a product in bundle (category refinement). Removes leg, adds new product."""
+    result = await replace_product_in_bundle(
+        bundle_id=body.bundle_id,
+        leg_id_to_replace=body.leg_id,
+        new_product_id=body.new_product_id,
+    )
+    if not result:
+        raise HTTPException(status_code=400, detail="Failed to replace product in bundle")
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    summary = f"Replaced with {result.get('product_added', 'product')}. Total: {result.get('currency', 'USD')} {float(result.get('total_price', 0)):.2f}"
+    return {
+        "data": result,
+        "summary": summary,
+        "adaptive_card": create_card(
+            body=[text_block(summary)],
+            actions=[
+                {"type": "Action.Submit", "title": "View Bundle", "data": {"action": "view_bundle", "bundle_id": str(body.bundle_id)}},
+            ],
+        ),
         "metadata": {
             "api_version": "v1",
             "timestamp": datetime.utcnow().isoformat() + "Z",

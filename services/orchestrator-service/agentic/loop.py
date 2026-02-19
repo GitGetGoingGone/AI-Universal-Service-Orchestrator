@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import httpx
 
-from clients import get_order_status
+from clients import get_bundle_details, get_order_status
 from .planner import plan_next_action
 from .tools import execute_tool
 
@@ -131,15 +131,17 @@ async def _discover_composite(
     location: Optional[str] = None,
     partner_id: Optional[str] = None,
     budget_max: Optional[int] = None,
+    bundle_options: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Call discover_products per query, compose experience bundle."""
+    """Call discover_products per query, compose experience bundle. When bundle_options provided, build multiple bundles with prices."""
     from packages.shared.adaptive_cards.experience_card import generate_experience_card
 
     categories: List[Dict[str, Any]] = []
     all_products: List[Dict[str, Any]] = []
     item_list_elements: List[Dict[str, Any]] = []
+    suggested_bundle_options: List[Dict[str, Any]] = []
 
-    # Use composite_discovery_config.products_per_category when available
+    # Use composite_discovery_config.products_per_category when available (default 3 for curated bundle)
     try:
         from api.admin import get_composite_discovery_config
         cdc = get_composite_discovery_config()
@@ -147,18 +149,24 @@ async def _discover_composite(
         if per_cat is not None and isinstance(per_cat, (int, float)):
             per_limit = max(1, min(20, int(per_cat)))
         else:
-            per_limit = max(5, limit // len(search_queries)) if search_queries else limit
+            per_limit = min(5, max(3, limit // max(1, len(search_queries)))) if search_queries else limit
     except Exception:
-        per_limit = max(5, limit // len(search_queries)) if search_queries else limit
+        per_limit = min(5, max(3, limit // max(1, len(search_queries)))) if search_queries else limit
+
+    excluded_partners: List[str] = []
+    category_products: Dict[str, List[Dict[str, Any]]] = {}  # query -> products
+
     for q in search_queries:
         if not q or not str(q).strip():
             continue
+        exclude_partner_id: Optional[str] = excluded_partners[-1] if excluded_partners else None
         try:
             resp = await discover_products_fn(
                 query=str(q).strip(),
                 limit=per_limit,
                 location=location,
                 partner_id=partner_id,
+                exclude_partner_id=exclude_partner_id,
                 budget_max=budget_max,
             )
         except Exception as e:
@@ -166,7 +174,16 @@ async def _discover_composite(
             resp = {"data": {"products": [], "count": 0}}
         products = resp.get("data", resp).get("products", [])
         categories.append({"query": q, "products": products})
+        category_products[q] = products
         all_products.extend(products)
+        # Exclude dominant partner from next category to ensure bundle diversity
+        if products:
+            from collections import Counter
+            partner_counts = Counter(str(p.get("partner_id", "")) for p in products if p.get("partner_id"))
+            if partner_counts:
+                top_partner = partner_counts.most_common(1)[0][0]
+                if top_partner and top_partner not in excluded_partners:
+                    excluded_partners.append(top_partner)
         for p in products:
             item_list_elements.append({
                 "@type": "Product",
@@ -176,22 +193,158 @@ async def _discover_composite(
                 "identifier": str(p.get("id", "")),
             })
 
-    adaptive_card = generate_experience_card(experience_name or "experience", categories)
+    # Build suggested_bundle_options from intent's bundle_options (each tier = one product per category, own price)
+    if bundle_options and category_products:
+        id_to_product: Dict[str, Dict[str, Any]] = {}
+        for prods in category_products.values():
+            for p in prods:
+                pid = str(p.get("id", ""))
+                if pid:
+                    id_to_product[pid] = p
+        for opt in bundle_options[:10]:
+            if not isinstance(opt, dict):
+                continue
+            opt_cats = [str(c) for c in (opt.get("categories") or []) if c]
+            product_ids: List[str] = []
+            total_price = 0.0
+            for cat in opt_cats:
+                prods = category_products.get(cat, [])
+                if prods:
+                    p = prods[0]  # Pick first (e.g. best-ranked)
+                    pid = str(p.get("id", ""))
+                    if pid:
+                        product_ids.append(pid)
+                        total_price += float(p.get("price") or 0)
+            if product_ids:
+                product_names = [id_to_product.get(pid, {}).get("name", "Item") for pid in product_ids]
+                currency = "USD"
+                if product_ids and id_to_product.get(product_ids[0]):
+                    currency = id_to_product[product_ids[0]].get("currency", "USD") or "USD"
+                suggested_bundle_options.append({
+                    "label": str(opt.get("label", "Option")),
+                    "description": str(opt.get("description", "")),
+                    "product_ids": product_ids,
+                    "product_names": product_names,
+                    "total_price": round(total_price, 2),
+                    "currency": currency,
+                })
+
+    adaptive_card = generate_experience_card(
+        experience_name or "experience",
+        categories,
+        suggested_bundle_options=suggested_bundle_options if suggested_bundle_options else None,
+    )
     machine_readable = {
         "@context": "https://schema.org",
         "@type": "ItemList",
         "numberOfItems": len(all_products),
         "itemListElement": item_list_elements,
     }
+    data: Dict[str, Any] = {
+        "experience_name": experience_name or "experience",
+        "categories": categories,
+        "products": all_products,
+        "count": len(all_products),
+    }
+    if suggested_bundle_options:
+        data["suggested_bundle_options"] = suggested_bundle_options
     return {
-        "data": {
-            "experience_name": experience_name or "experience",
-            "categories": categories,
-            "products": all_products,
-            "count": len(all_products),
-        },
+        "data": data,
         "adaptive_card": adaptive_card,
         "machine_readable": machine_readable,
+    }
+
+
+def _generate_refinement_card(
+    category: str,
+    leg_to_replace: Dict[str, Any],
+    alternatives: List[Dict[str, Any]],
+    bundle_id: str,
+) -> Dict[str, Any]:
+    """Build Adaptive Card with 'Replace with this' for each alternative."""
+    from packages.shared.adaptive_cards.base import create_card, text_block, container, _filter_empty, strip_html
+
+    leg_id = str(leg_to_replace.get("id", ""))
+    body = [
+        text_block(f"Choose a different {category.replace('_', ' ')}", size="Medium", weight="Bolder"),
+        text_block(f"Replacing: {leg_to_replace.get('name', 'item')}", size="Small", is_subtle=True),
+    ]
+    for p in alternatives[:5]:
+        name = p.get("name", "Unknown")
+        price = p.get("price", 0)
+        currency = p.get("currency", "USD")
+        pid = str(p.get("id", ""))
+        desc = strip_html(p.get("description") or "")[:80]
+        items = [
+            text_block(name, weight="Bolder"),
+            text_block(f"{currency} {price:.2f}", size="Small"),
+        ]
+        if desc:
+            items.append(text_block(desc, size="Small"))
+        body.append({
+            "type": "Container",
+            "items": items,
+            "actions": [{
+                "type": "Action.Submit",
+                "title": "Replace with this",
+                "data": {
+                    "action": "replace_in_bundle",
+                    "bundle_id": bundle_id,
+                    "leg_id": leg_id,
+                    "product_id": pid,
+                },
+            }],
+            "style": "emphasis",
+        })
+    return create_card(body=body)
+
+
+async def _refine_bundle_category(
+    bundle_id: str,
+    category: str,
+    discover_products_fn,
+) -> Dict[str, Any]:
+    """Get bundle, find leg in category, discover alternatives, return card with Replace options."""
+    try:
+        resp = await get_bundle_details(bundle_id)
+    except Exception as e:
+        logger.warning("get_bundle_details failed: %s", e)
+        return {"error": f"Bundle not found: {e}"}
+    data = resp.get("data", resp) if isinstance(resp, dict) else resp
+    if not data:
+        return {"error": "Bundle not found"}
+    items = data.get("items") or []
+    cat_lower = (category or "").strip().lower()
+    leg_to_replace = None
+    for item in items:
+        caps = item.get("capabilities") or []
+        if isinstance(caps, str):
+            caps = [caps]
+        if any(cat_lower in str(c).lower() for c in caps):
+            leg_to_replace = item
+            break
+    if not leg_to_replace:
+        return {"error": f"No {category} item in bundle to replace"}
+    try:
+        disc = await discover_products_fn(query=category, limit=10)
+    except Exception as e:
+        logger.warning("discover_products failed: %s", e)
+        return {"error": f"Could not fetch alternatives: {e}"}
+    products = (disc.get("data", disc) or {}).get("products", [])
+    current_pid = str(leg_to_replace.get("product_id", ""))
+    alternatives = [p for p in products if str(p.get("id", "")) != current_pid]
+    if not alternatives:
+        return {"error": f"No alternatives found for {category}"}
+    adaptive_card = _generate_refinement_card(category, leg_to_replace, alternatives, bundle_id)
+    return {
+        "data": {
+            "bundle_id": bundle_id,
+            "category": category,
+            "leg_to_replace": leg_to_replace,
+            "alternatives": alternatives[:5],
+        },
+        "adaptive_card": adaptive_card,
+        "summary": f"Here are some {category} options. Pick one to replace in your bundle.",
     }
 
 
@@ -330,13 +483,27 @@ async def run_agentic_loop(
         sq = (intent_data or {}).get("search_query") or ""
         generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "")
         skip_discover_bypass = rec == "discover_products" and sq.lower().strip() in generic_queries
-        if rec and rec in ("discover_composite", "discover_products") and intent_data and not skip_discover_bypass:
-            if rec == "discover_composite" and intent_data.get("intent_type") == "discover_composite":
+        if rec and rec in ("discover_composite", "discover_products", "refine_bundle_category") and intent_data and not skip_discover_bypass:
+            if rec == "refine_bundle_category" and intent_data.get("intent_type") == "refine_composite":
+                bid = (thread_context or {}).get("bundle_id") or state.get("bundle_id")
+                cat = intent_data.get("category_to_change", "").strip()
+                if bid and cat:
+                    plan = {
+                        "action": "tool",
+                        "tool_name": "refine_bundle_category",
+                        "tool_args": {"bundle_id": bid, "category": cat},
+                        "reasoning": "Intent recommended refine_bundle_category.",
+                    }
+                    rec = None
+                else:
+                    plan = None
+            elif rec == "discover_composite" and intent_data.get("intent_type") == "discover_composite":
                 plan = {
                     "action": "tool",
                     "tool_name": "discover_composite",
                     "tool_args": {
-                        "search_queries": intent_data.get("search_queries") or ["flowers", "dinner", "movies"],
+                        "bundle_options": intent_data.get("bundle_options") or [],
+                        "search_queries": intent_data.get("search_queries") or ["flowers", "restaurant", "movies"],
                         "experience_name": intent_data.get("experience_name") or "experience",
                         "location": _extract_location(intent_data),
                         "budget_max": _extract_budget(intent_data),
@@ -412,7 +579,8 @@ async def run_agentic_loop(
                             "action": "tool",
                             "tool_name": "discover_composite",
                             "tool_args": {
-                                "search_queries": intent_data.get("search_queries") or ["flowers", "dinner", "movies"],
+                                "bundle_options": intent_data.get("bundle_options") or [],
+                                "search_queries": intent_data.get("search_queries") or ["flowers", "restaurant", "movies"],
                                 "experience_name": intent_data.get("experience_name") or "date night",
                             },
                             "reasoning": "Proceeding after 2+ probes with assumptions.",
@@ -481,6 +649,8 @@ async def run_agentic_loop(
 
             if tool_name == "discover_composite" and intent_data and intent_data.get("intent_type") == "discover_composite":
                 tool_args = dict(tool_args)
+                if not tool_args.get("bundle_options") and intent_data.get("bundle_options"):
+                    tool_args["bundle_options"] = intent_data.get("bundle_options")
                 if not tool_args.get("search_queries"):
                     tool_args["search_queries"] = intent_data.get("search_queries") or []
                 if not tool_args.get("experience_name"):
@@ -490,7 +660,7 @@ async def run_agentic_loop(
                 if not tool_args.get("budget_max") and intent_data:
                     tool_args["budget_max"] = _extract_budget(intent_data)
 
-            async def _discover_composite_fn(search_queries, experience_name, location=None, budget_max=None):
+            async def _discover_composite_fn(search_queries, experience_name, location=None, budget_max=None, bundle_options=None):
                 return await _discover_composite(
                     search_queries=search_queries,
                     experience_name=experience_name,
@@ -498,6 +668,14 @@ async def run_agentic_loop(
                     limit=limit,
                     location=location,
                     budget_max=budget_max,
+                    bundle_options=bundle_options,
+                )
+
+            async def _refine_bundle_category_fn(bundle_id: str, category: str):
+                return await _refine_bundle_category(
+                    bundle_id=bundle_id,
+                    category=category,
+                    discover_products_fn=discover_products_fn,
                 )
 
             result = await execute_tool(
@@ -506,6 +684,7 @@ async def run_agentic_loop(
                 resolve_intent_fn=resolve_intent_fn,
                 discover_products_fn=discover_products_fn,
                 discover_composite_fn=_discover_composite_fn,
+                refine_bundle_category_fn=_refine_bundle_category_fn,
                 start_orchestration_fn=start_orchestration_fn,
                 create_standing_intent_fn=create_standing_intent_fn,
                 web_search_fn=_web_search,
@@ -532,14 +711,22 @@ async def run_agentic_loop(
                 await _emit_thinking(on_thinking, "after_weather", {"weather_desc": wd.get("description", ""), "location": wd.get("location", "")}, thinking_messages or {})
             elif tool_name == "get_upcoming_occasions":
                 engagement_data["occasions"] = result.get("data", result)
+            elif tool_name == "refine_bundle_category":
+                products_data = result.get("data", result)
+                adaptive_card = result.get("adaptive_card")
+                if products_data:
+                    engagement_data["refine_category"] = products_data.get("category")
             elif tool_name == "discover_composite":
                 products_data = result.get("data", result)
                 adaptive_card = result.get("adaptive_card")
                 machine_readable = result.get("machine_readable")
                 pc = (products_data or {}).get("products") or []
                 await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0}, thinking_messages or {})
-                # LLM-suggested bundle options: 2-4 options, each one product per category (when enabled)
-                if products_data and (products_data.get("categories") or products_data.get("products")):
+                # Use intent's bundle_options when already built; else LLM-suggest 2-4 options
+                has_intent_bundles = (products_data or {}).get("suggested_bundle_options")
+                if has_intent_bundles:
+                    engagement_data["suggested_bundle_options"] = has_intent_bundles
+                elif products_data and (products_data.get("categories") or products_data.get("products")):
                     await _emit_thinking(on_thinking, "before_bundle", intent_data or {}, thinking_messages or {})
                     try:
                         from api.admin import _get_platform_config

@@ -302,7 +302,9 @@ Rules:
 - Return a JSON object with key "options" = array of option objects. Each option: { "label": string, "description": string, "product_ids": string[], "total_price": number }.
 - ONLY use product IDs from the provided list. Do NOT invent IDs.
 - Each option must have one product per category (in category order).
-- Vary options: e.g. Romantic Classic, Budget-Friendly, Fresh & Fun. Consider price range, theme, diversity.
+- label: Creative name (e.g. Romantic Classic, Budget-Friendly, Fresh & Fun). NOT "Option 1" or "Tier 1".
+- description: A fancy, evocative 1-2 sentence description of the experience (e.g. "A timeless evening of blooms, fine dining, and cinema under the stars.").
+- Vary options by price range, theme, diversity.
 - Output ONLY valid JSON, no other text."""
 
 
@@ -494,10 +496,11 @@ User said: {user_message[:200]}
 Products (use ONLY these IDs):
 {product_list}
 
-Return JSON: {{ "options": [ {{ "label": "...", "description": "...", "product_ids": ["id1","id2"], "total_price": 99.99 }}, ... ] }}. 2-4 options, one product per category each."""
+Return JSON: {{ "options": [ {{ "label": "...", "description": "Fancy 1-2 sentence evocative description", "product_ids": ["id1","id2"], "total_price": 99.99 }}, ... ] }}. 2-4 options, one product per category each. Use creative labels and fancy descriptions."""
 
     valid_ids = {str(p["id"]) for p in product_rows}
     price_map = {str(p["id"]): float(p.get("price") or 0) for p in product_rows}
+    name_map = {str(p["id"]): p.get("name", "Item") for p in product_rows}
 
     try:
         if provider in ("azure", "openrouter", "custom"):
@@ -558,11 +561,19 @@ Return JSON: {{ "options": [ {{ "label": "...", "description": "...", "product_i
             if num_cats > 0 and len(valid) < num_cats:
                 continue
             total = sum(price_map.get(i, 0) for i in valid)
+            product_names = [name_map.get(i, "Item") for i in valid]
+            currency = "USD"
+            if product_rows and valid:
+                first_p = next((p for p in product_rows if str(p["id"]) == valid[0]), None)
+                if first_p:
+                    currency = first_p.get("currency", "USD") or "USD"
             out.append({
                 "label": str(opt.get("label", "Option")),
                 "description": str(opt.get("description", "")),
                 "product_ids": valid,
+                "product_names": product_names,
                 "total_price": float(opt.get("total_price", total)),
+                "currency": currency,
             })
         return out
     except Exception as e:

@@ -114,6 +114,7 @@ async def discover_products(
     limit: int = 20,
     location: Optional[str] = None,
     partner_id: Optional[str] = None,
+    exclude_partner_id: Optional[str] = None,
     budget_max: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Call Discovery service to find products by query. Retries on 429 (rate limit)."""
@@ -123,6 +124,8 @@ async def discover_products(
         params["location"] = location
     if partner_id:
         params["partner_id"] = partner_id
+    if exclude_partner_id:
+        params["exclude_partner_id"] = exclude_partner_id
     if budget_max is not None:
         params["budget_max"] = budget_max
     for attempt in range(DISCOVERY_RETRY_ATTEMPTS):
@@ -200,6 +203,26 @@ async def add_to_bundle_bulk(
                 "product_ids": product_ids,
                 "user_id": user_id,
                 "bundle_id": bundle_id,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def replace_in_bundle(
+    bundle_id: str,
+    leg_id: str,
+    new_product_id: str,
+) -> Dict[str, Any]:
+    """Replace a product in bundle (category refinement)."""
+    url = f"{settings.discovery_service_url}/api/v1/bundle/replace"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(
+            url,
+            json={
+                "bundle_id": bundle_id,
+                "leg_id": leg_id,
+                "new_product_id": new_product_id,
             },
         )
         r.raise_for_status()

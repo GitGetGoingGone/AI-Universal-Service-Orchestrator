@@ -166,7 +166,7 @@ async def _llm_resolve(
         parsed = json.loads(raw)
 
         intent_type = parsed.get("intent_type", "discover")
-        if intent_type not in ("discover", "discover_composite", "checkout", "track", "support", "browse"):
+        if intent_type not in ("discover", "discover_composite", "refine_composite", "checkout", "track", "support", "browse"):
             intent_type = "discover"
 
         out = {
@@ -175,13 +175,29 @@ async def _llm_resolve(
             "entities": parsed.get("entities") if isinstance(parsed.get("entities"), list) else [],
             "confidence_score": float(parsed.get("confidence_score", 0.8)),
         }
-        if intent_type == "discover_composite":
-            out["search_queries"] = parsed.get("search_queries") or []
+        if intent_type == "refine_composite":
+            out["category_to_change"] = (parsed.get("category_to_change") or "").strip()[:100]
+            out["recommended_next_action"] = "refine_bundle_category"
+        elif intent_type == "discover_composite":
             out["experience_name"] = (parsed.get("experience_name") or "experience")[:200]
+            bundle_opts = parsed.get("bundle_options")
+            if isinstance(bundle_opts, list) and bundle_opts:
+                out["bundle_options"] = [
+                    {"label": str(o.get("label", "Option")), "description": str(o.get("description", "")), "categories": [str(c) for c in (o.get("categories") or []) if c]}
+                    for o in bundle_opts[:10] if isinstance(o, dict)
+                ]
+            else:
+                # Fallback: derive from search_queries (legacy)
+                sq = parsed.get("search_queries") or []
+                if sq:
+                    out["bundle_options"] = [{"label": "Bundle", "description": "", "categories": [str(c) for c in sq if c]}]
+                else:
+                    out["bundle_options"] = []
+            out["search_queries"] = _bundle_options_to_search_queries(out.get("bundle_options", []))
             if parsed.get("unrelated_to_probing"):
                 out["unrelated_to_probing"] = True
         rec = parsed.get("recommended_next_action")
-        if rec and str(rec) in ("discover_composite", "discover_products", "complete_with_probing", "handle_unrelated", "complete"):
+        if rec and str(rec) in ("discover_composite", "discover_products", "refine_bundle_category", "complete_with_probing", "handle_unrelated", "complete"):
             out["recommended_next_action"] = str(rec)
         return out
     except (json.JSONDecodeError, KeyError, TypeError) as e:
@@ -189,9 +205,18 @@ async def _llm_resolve(
         return None
 
 
-# Generic search_queries for composite experiences (heuristic fallback only).
-# Works for many experience types: birthday, anniversary, date night, picnic, brunch, etc.
-_GENERIC_COMPOSITE_QUERIES = ["gifts", "dinner", "flowers"]
+def _bundle_options_to_search_queries(bundle_options: List[Dict[str, Any]]) -> List[str]:
+    """Extract unique categories from bundle_options for discovery (fetch products for all)."""
+    seen: set = set()
+    out: List[str] = []
+    for o in bundle_options:
+        if isinstance(o, dict):
+            for c in (o.get("categories") or []):
+                s = str(c).strip()
+                if s and s not in seen:
+                    seen.add(s)
+                    out.append(s)
+    return out
 
 
 def _extract_experience_name(text: str) -> Optional[str]:
@@ -217,10 +242,20 @@ def _extract_experience_name(text: str) -> Optional[str]:
     return None
 
 
+def _derive_composite_categories(text: str) -> List[str]:
+    """Derive product categories from text when LLM is not available. No hardcoded experiences."""
+    derived = derive_search_query(text or "")
+    if derived and derived.strip() and derived.lower() not in ("browse", "show", "options"):
+        return [derived.strip()]
+    return ["gifts"]
+
+
 def _experience_from_probing(last_suggestion_lower: str) -> tuple:
-    """Derive search_queries and experience_name from probing context in last_suggestion."""
+    """Derive bundle_options and experience_name from probing context. Bundle options come from LLM only; heuristic uses single generic bundle from derived categories."""
     exp = _extract_experience_name(last_suggestion_lower)
-    return (_GENERIC_COMPOSITE_QUERIES, exp or "experience")
+    categories = _derive_composite_categories(last_suggestion_lower)
+    opts = [{"label": (exp or "Bundle").replace("_", " ").title(), "description": "", "categories": categories}]
+    return (opts, exp or "experience")
 
 
 def _heuristic_resolve(
@@ -241,6 +276,20 @@ def _heuristic_resolve(
             "confidence_score": 0.5,
             "recommended_next_action": "complete_with_probing",
         }
+
+    # refine_composite: change category in bundle (requires bundle_id in thread_context)
+    if thread_context and thread_context.get("bundle_id"):
+        change_phrases = ("change the ", "change my ", "different ", "swap the ", "swap my ", "replace the ", "other ", "another ", "i want different ", "switch the ")
+        if any(p in text_lower for p in change_phrases):
+            cat = derive_search_query(text)
+            if cat and cat.strip():
+                return {
+                    "intent_type": "refine_composite",
+                    "category_to_change": cat.strip(),
+                    "entities": [],
+                    "confidence_score": 0.8,
+                    "recommended_next_action": "refine_bundle_category",
+                }
 
     # Checkout/track/support keywords
     if any(w in text_lower for w in ("checkout", "pay", "payment", "order")):
@@ -273,20 +322,35 @@ def _heuristic_resolve(
                 entities = []
                 if "dallas" in text_lower or "dallas" in text:
                     entities.append({"type": "location", "value": "Dallas"})
-                sq, exp = _experience_from_probing(ls_lower)
+                opts, exp = _experience_from_probing(ls_lower)
                 return {
                     "intent_type": "discover_composite",
-                    "search_queries": sq,
+                    "bundle_options": opts,
+                    "search_queries": _bundle_options_to_search_queries(opts),
                     "experience_name": exp,
                     "entities": entities,
                     "confidence_score": 0.75,
                     "recommended_next_action": "discover_composite",
                 }
-            # User did not answer our probing questions (anything: "show more options", "what's the weather", etc.)
-            sq, exp = _experience_from_probing(ls_lower)
+            # User did not answer probing but wants to see options ("show more options", "more options", etc.)
+            fetch_more_phrases = ("show me more", "more options", "other options", "just show me", "show me something", "show options", "show me options")
+            if any(p in text_lower for p in fetch_more_phrases):
+                opts, exp = _experience_from_probing(ls_lower)
+                return {
+                    "intent_type": "discover_composite",
+                    "bundle_options": opts,
+                    "search_queries": _bundle_options_to_search_queries(opts),
+                    "experience_name": exp,
+                    "entities": [],
+                    "confidence_score": 0.8,
+                    "recommended_next_action": "discover_composite",
+                }
+            # Other unrelated responses (e.g. "what's the weather") → probe gracefully
+            opts, exp = _experience_from_probing(ls_lower)
             return {
                 "intent_type": "discover_composite",
-                "search_queries": sq,
+                "bundle_options": opts,
+                "search_queries": _bundle_options_to_search_queries(opts),
                 "experience_name": exp,
                 "entities": [],
                 "unrelated_to_probing": True,
@@ -301,14 +365,18 @@ def _heuristic_resolve(
         " party", " celebration", " experience",
         "plan ", "organize ", "put together ",
     )
-    if any(ind in text_lower for ind in composite_indicators) or re.search(
+    composite_match = any(ind in text_lower for ind in composite_indicators) or re.search(
         r"\b(plan|organize|arrange)\b.*\b(date|birthday|picnic|anniversary|brunch|dinner|outing)\b", text_lower
-    ):
+    )
+    if composite_match or "gift bundle" in text_lower or "create gift bundle" in text_lower:
         exp = _extract_experience_name(text_lower) or "experience"
+        categories = _derive_composite_categories(text_lower)
+        opts = [{"label": (exp or "Bundle").replace("_", " ").title(), "description": "", "categories": categories}]
         return {
             "intent_type": "discover_composite",
             "search_query": "",
-            "search_queries": _GENERIC_COMPOSITE_QUERIES,
+            "bundle_options": opts,
+            "search_queries": _bundle_options_to_search_queries(opts),
             "experience_name": exp,
             "entities": [],
             "confidence_score": 0.7,

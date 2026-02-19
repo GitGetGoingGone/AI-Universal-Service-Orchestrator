@@ -12,6 +12,7 @@ from clients import (
     add_to_bundle as add_to_bundle_client,
     add_to_bundle_bulk as add_to_bundle_bulk_client,
     remove_from_bundle as remove_from_bundle_client,
+    replace_in_bundle as replace_in_bundle_client,
     proceed_to_checkout as proceed_to_checkout_client,
     create_payment_intent as create_payment_intent_client,
     confirm_payment as confirm_payment_client,
@@ -101,6 +102,31 @@ class RemoveFromBundleBody(BaseModel):
     """Request body for removing an item from a bundle."""
 
     item_id: str  # bundle_leg id from bundle card
+
+
+class ReplaceInBundleBody(BaseModel):
+    """Request body for replacing a product in bundle (category refinement)."""
+
+    bundle_id: str
+    leg_id: str
+    new_product_id: str
+
+
+@router.post("/bundle/replace")
+async def replace_in_bundle(body: ReplaceInBundleBody):
+    """Replace a product in bundle (category refinement)."""
+    try:
+        return await replace_in_bundle_client(
+            bundle_id=body.bundle_id,
+            leg_id=body.leg_id,
+            new_product_id=body.new_product_id,
+        )
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Bundle or product not found")
+        raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
 
 
 @router.post("/bundle/remove")

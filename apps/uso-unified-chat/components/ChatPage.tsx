@@ -56,7 +56,7 @@ type ChatMessage = {
   isFromHistory?: boolean;
 };
 
-const E2E_ACTIONS = ["add_to_bundle", "add_bundle_bulk", "view_bundle", "remove_from_bundle", "checkout", "complete_checkout"];
+const E2E_ACTIONS = ["add_to_bundle", "add_bundle_bulk", "view_bundle", "remove_from_bundle", "replace_in_bundle", "checkout", "complete_checkout"];
 const STANDING_INTENT_ACTION = "approve_standing_intent";
 
 const MAX_DISCOVERY_CYCLE = 5;
@@ -867,6 +867,28 @@ export function ChatPage(props: ChatPageProps = {}) {
           const json = await res.json();
           if (!res.ok) throw new Error(json.error || "Remove failed");
           const addMsg = { role: "assistant" as const, content: json.summary || "Item removed." };
+          addMessage(addMsg);
+          persistMessage(addMsg);
+          return;
+        }
+
+        if (action === "replace_in_bundle" && data.bundle_id && data.leg_id && data.product_id) {
+          const res = await fetch("/api/bundle/replace", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              bundle_id: data.bundle_id,
+              leg_id: data.leg_id,
+              new_product_id: data.product_id,
+            }),
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || "Replace failed");
+          const addMsg = {
+            role: "assistant" as const,
+            content: json.summary || "Replaced. Bundle updated.",
+            adaptiveCard: json.adaptive_card,
+          };
           addMessage(addMsg);
           persistMessage(addMsg);
           return;

@@ -219,12 +219,13 @@ async def chat(
             force_model=force_model,
         )
 
-    async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None, budget_max: Optional[int] = None):
+    async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None, exclude_partner_id: Optional[str] = None, budget_max: Optional[int] = None):
         return await discover_products(
             query=query,
             limit=limit,
             location=location,
             partner_id=partner_id or body.partner_id,
+            exclude_partner_id=exclude_partner_id,
             budget_max=budget_max,
         )
 

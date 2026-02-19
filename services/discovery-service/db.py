@@ -515,7 +515,7 @@ async def get_bundle_by_id(bundle_id: str) -> Optional[Dict[str, Any]]:
         if product_ids:
             products_result = (
                 client.table("products")
-                .select("id, name, currency")
+                .select("id, name, currency, capabilities")
                 .in_("id", product_ids)
                 .execute()
             )
@@ -527,12 +527,16 @@ async def get_bundle_by_id(bundle_id: str) -> Optional[Dict[str, Any]]:
         for leg in legs:
             pid = str(leg.get("product_id", ""))
             p = product_names.get(pid, {})
+            caps = p.get("capabilities") or []
+            if isinstance(caps, str):
+                caps = [caps] if caps else []
             items.append({
                 "id": str(leg.get("id", "")),
                 "product_id": pid,
                 "name": p.get("name", "Unknown"),
                 "price": float(leg.get("price", 0)),
                 "currency": p.get("currency", currency),
+                "capabilities": caps,
             })
 
         bundle["items"] = items
@@ -798,6 +802,33 @@ async def remove_from_bundle(item_id: str) -> Optional[Dict[str, Any]]:
         }
     except Exception:
         return None
+
+
+async def replace_product_in_bundle(
+    bundle_id: str,
+    leg_id_to_replace: str,
+    new_product_id: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Replace a bundle leg with a new product. Removes old leg, adds new product.
+    Returns updated bundle summary or None on failure.
+    """
+    remove_result = await remove_from_bundle(leg_id_to_replace)
+    if not remove_result or remove_result.get("bundle_id") != bundle_id:
+        return None
+    add_result = await add_product_to_bundle(
+        product_id=new_product_id,
+        bundle_id=bundle_id,
+    )
+    if not add_result:
+        return None
+    return {
+        "bundle_id": bundle_id,
+        "leg_replaced": leg_id_to_replace,
+        "product_added": add_result.get("product_added"),
+        "total_price": add_result.get("total_price"),
+        "currency": add_result.get("currency", "USD"),
+    }
 
 
 # --- Module 3: AI-First Discoverability ---
