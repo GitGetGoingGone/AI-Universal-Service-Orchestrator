@@ -392,7 +392,7 @@ def _heuristic_resolve(
                     "recommended_next_action": "discover_composite",
                 }
             # Other unrelated responses (e.g. "what's the weather") → probe gracefully
-            opts, exp = _experience_from_probing(ls_lower)
+            opts, exp = _experience_from_probing(ls_lower, recent_conversation)
             return {
                 "intent_type": "discover_composite",
                 "bundle_options": opts,

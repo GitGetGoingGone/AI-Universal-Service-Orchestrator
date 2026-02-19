@@ -722,10 +722,10 @@ async def run_agentic_loop(
                 machine_readable = result.get("machine_readable")
                 pc = (products_data or {}).get("products") or []
                 await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0}, thinking_messages or {})
-                # Use intent's bundle_options when already built; else LLM-suggest 2-4 options
-                has_intent_bundles = (products_data or {}).get("suggested_bundle_options")
-                if has_intent_bundles:
-                    engagement_data["suggested_bundle_options"] = has_intent_bundles
+                # Ensure 2-4 bundle options: use LLM when intent has <2; else keep intent's
+                intent_bundles = (products_data or {}).get("suggested_bundle_options") or []
+                if len(intent_bundles) >= 2:
+                    engagement_data["suggested_bundle_options"] = intent_bundles
                 elif products_data and (products_data.get("categories") or products_data.get("products")):
                     await _emit_thinking(on_thinking, "before_bundle", intent_data or {}, thinking_messages or {})
                     try:

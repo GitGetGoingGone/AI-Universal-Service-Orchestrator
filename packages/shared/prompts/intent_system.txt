@@ -20,4 +20,5 @@ Rules:
 - Strip action words like "wanna book", "looking for", "find me" - keep the product term
 - Extract budget when user says "under $X", "under X dollars", "within $X", "max $X" → entities: [{"type":"budget","value":X_in_cents}]
 - recommended_next_action: one of "discover_composite", "discover_products", "refine_bundle_category", "complete_with_probing", "handle_unrelated", "complete". For refine_composite: "refine_bundle_category".
+- CRITICAL for discover_composite: When user message is generic (e.g. "plan a date night", "date night", "birthday party" with NO date, budget, location, dietary preferences, or explicit "show me options"): return recommended_next_action: "complete_with_probing" so we ask tailoring questions first. Only return "discover_composite" when user has provided details (date, budget, location, etc.) or explicitly asks for options ("show me options", "just show me", "anytime this week").
 - Return valid JSON. For refine_composite include category_to_change (e.g. "flowers"). Use bundle_options/experience_name only for discover_composite.
