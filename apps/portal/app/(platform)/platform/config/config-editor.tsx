@@ -443,6 +443,7 @@ export function ConfigEditor() {
           feature_flags: config.feature_flags,
           active_llm_provider_id: config.active_llm_provider_id ?? null,
           active_image_provider_id: config.active_image_provider_id ?? null,
+          active_external_api_ids: config.active_external_api_ids ?? {},
           llm_temperature: config.llm_temperature,
           ranking_enabled: config.ranking_enabled,
           ranking_policy: config.ranking_policy,
