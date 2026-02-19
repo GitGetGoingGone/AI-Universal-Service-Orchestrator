@@ -4,7 +4,9 @@ import sys
 from pathlib import Path
 
 _root = Path(__file__).resolve().parents[2]
+_intent_svc = Path(__file__).resolve().parent
 sys.path.insert(0, str(_root))
+sys.path.insert(0, str(_intent_svc))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
