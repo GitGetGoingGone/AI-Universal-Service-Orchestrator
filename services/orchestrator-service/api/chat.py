@@ -347,7 +347,7 @@ def _build_summary(result: dict) -> str:
     count = products.get("count", len(product_list))
 
     if count == 0:
-        query = intent.get("search_query", "your search")
+        query = (intent.get("search_query") or "").strip() or "your search"
         return f"No products found for '{query}'."
 
     # For discover_composite with bundle: narrative experience plan, not product list

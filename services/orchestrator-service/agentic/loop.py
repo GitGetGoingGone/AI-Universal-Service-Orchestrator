@@ -567,7 +567,10 @@ async def run_agentic_loop(
                         "reasoning": "Intent recommended discover_composite.",
                     }
             elif rec == "discover_products" and intent_data.get("intent_type") in ("discover", "browse"):
-                sq = intent_data.get("search_query") or "browse"
+                sq = (intent_data.get("search_query") or "").strip()
+                if not sq:
+                    from packages.shared.discovery import fallback_search_query
+                    sq = fallback_search_query(user_message)
                 plan = {
                     "action": "tool",
                     "tool_name": "discover_products",
@@ -659,6 +662,10 @@ async def run_agentic_loop(
             if tool_name == "discover_products":
                 tool_args = dict(tool_args)
                 tool_args.setdefault("limit", limit)
+                # Never call discover with empty query: derive from user message if intent left it blank
+                if not (tool_args.get("query") or "").strip():
+                    from packages.shared.discovery import fallback_search_query
+                    tool_args["query"] = fallback_search_query(user_message)
                 if intent_data:
                     loc = _extract_location(intent_data)
                     if loc:
