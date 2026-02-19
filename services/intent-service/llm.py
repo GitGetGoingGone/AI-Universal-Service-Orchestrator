@@ -180,20 +180,33 @@ async def _llm_resolve(
             out["recommended_next_action"] = "refine_bundle_category"
         elif intent_type == "discover_composite":
             out["experience_name"] = (parsed.get("experience_name") or "experience")[:200]
+            exp_name = out["experience_name"]
             bundle_opts = parsed.get("bundle_options")
             if isinstance(bundle_opts, list) and bundle_opts:
-                out["bundle_options"] = [
-                    {"label": str(o.get("label", "Option")), "description": str(o.get("description", "")), "categories": [str(c) for c in (o.get("categories") or []) if c]}
-                    for o in bundle_opts[:10] if isinstance(o, dict)
-                ]
+                out["bundle_options"] = []
+                for o in bundle_opts[:10]:
+                    if not isinstance(o, dict):
+                        continue
+                    cats = [str(c) for c in (o.get("categories") or []) if c]
+                    cats = _sanitize_bundle_categories(cats, exp_name)
+                    label = str(o.get("label", "Option"))
+                    # Reject labels that are scheduling text (e.g. "Anytime This Week Depending On Weather")
+                    if any(b in label.lower() for b in ("anytime", "depending", "weather", "this week", "flexible")):
+                        label = (exp_name or "Bundle").replace("_", " ").title()
+                    out["bundle_options"].append({"label": label, "description": str(o.get("description", "")), "categories": cats})
             else:
                 # Fallback: derive from search_queries (legacy)
                 sq = parsed.get("search_queries") or []
                 if sq:
-                    out["bundle_options"] = [{"label": "Bundle", "description": "", "categories": [str(c) for c in sq if c]}]
+                    cats = _sanitize_bundle_categories([str(c) for c in sq if c], exp_name)
+                    out["bundle_options"] = [{"label": (exp_name or "Bundle").replace("_", " ").title(), "description": "", "categories": cats}]
                 else:
-                    out["bundle_options"] = []
+                    out["bundle_options"] = [{"label": (exp_name or "Bundle").replace("_", " ").title(), "description": "", "categories": _experience_name_to_default_categories(exp_name or None)}]
             out["search_queries"] = _bundle_options_to_search_queries(out.get("bundle_options", []))
+            # Ensure search_query is product terms, not scheduling text (e.g. "anytime this week")
+            sq_list = out["search_queries"]
+            if not (out.get("search_query") or "").strip() or any(bad in (out.get("search_query") or "").lower() for bad in ("anytime", "depending", "weather", "this week", "this weekend")):
+                out["search_query"] = ", ".join(sq_list[:3]) if sq_list else out["experience_name"].replace("_", " ")
             if parsed.get("unrelated_to_probing"):
                 out["unrelated_to_probing"] = True
         rec = parsed.get("recommended_next_action")
@@ -253,6 +266,15 @@ def _derive_composite_categories(text: str) -> List[str]:
     return ["gifts"]
 
 
+def _sanitize_bundle_categories(categories: List[str], experience_name: str) -> List[str]:
+    """Replace scheduling/non-product categories (e.g. 'anytime', 'weather') with experience defaults."""
+    bad_terms = ("anytime", "depending", "weather", "this week", "this weekend", "flexible", "whenever")
+    out = [c for c in categories if c and not any(b in str(c).lower() for b in bad_terms)]
+    if not out:
+        return _experience_name_to_default_categories(experience_name or None)
+    return out
+
+
 def _experience_name_to_default_categories(exp: Optional[str]) -> List[str]:
     """Map experience name to default product categories for discovery. Used when probing follow-up."""
     if not exp:
@@ -279,19 +301,24 @@ def _experience_from_probing(
     last_suggestion_lower: str,
     recent_conversation: Optional[List[Dict[str, Any]]] = None,
 ) -> tuple:
-    """Derive bundle_options and experience_name from probing context. Use USER message for categories, not assistant's probing text."""
+    """Derive bundle_options and experience_name from probing context. Use the ORIGINAL user request (e.g. 'plan a date night'), not the answer to probing ('anytime this week')."""
     exp = _extract_experience_name(last_suggestion_lower)
-    # Derive categories from the most recent USER message (e.g. "plan a date night"), not from assistant's probing
+    # Find the user message that triggered the probing (contains composite keywords), NOT the answer
+    composite_keywords = ("plan", "date", "night", "party", "picnic", "anniversary", "brunch", "celebration", "birthday", "outing")
     user_text = ""
     categories: List[str] = []
     if recent_conversation:
-        for m in reversed(recent_conversation):
+        for m in recent_conversation:
             if isinstance(m, dict) and (m.get("role") or "").lower() == "user":
-                user_text = (m.get("content") or m.get("text") or "")[:500]
-                break
+                content = (m.get("content") or m.get("text") or "")[:500].lower()
+                if any(kw in content for kw in composite_keywords):
+                    user_text = (m.get("content") or m.get("text") or "")[:500]
+                    break
             if isinstance(m, str) and "user:" in m.lower():
-                user_text = m.split(":", 1)[-1].strip()[:500]
-                break
+                content = m.split(":", 1)[-1].strip()[:500].lower()
+                if any(kw in content for kw in composite_keywords):
+                    user_text = m.split(":", 1)[-1].strip()[:500]
+                    break
     if user_text:
         categories = _derive_composite_categories(user_text)
         # If derived looks like experience phrase (e.g. "plan date night") not product terms, use defaults
@@ -369,10 +396,12 @@ def _heuristic_resolve(
                 if "dallas" in text_lower or "dallas" in text:
                     entities.append({"type": "location", "value": "Dallas"})
                 opts, exp = _experience_from_probing(ls_lower, recent_conversation)
+                sq = _bundle_options_to_search_queries(opts)
                 return {
                     "intent_type": "discover_composite",
                     "bundle_options": opts,
-                    "search_queries": _bundle_options_to_search_queries(opts),
+                    "search_queries": sq,
+                    "search_query": ", ".join(sq[:3]) if sq else exp.replace("_", " ") if exp else "experience",
                     "experience_name": exp,
                     "entities": entities,
                     "confidence_score": 0.75,
@@ -382,10 +411,12 @@ def _heuristic_resolve(
             fetch_more_phrases = ("show me more", "more options", "other options", "just show me", "show me something", "show options", "show me options")
             if any(p in text_lower for p in fetch_more_phrases):
                 opts, exp = _experience_from_probing(ls_lower, recent_conversation)
+                sq = _bundle_options_to_search_queries(opts)
                 return {
                     "intent_type": "discover_composite",
                     "bundle_options": opts,
-                    "search_queries": _bundle_options_to_search_queries(opts),
+                    "search_queries": sq,
+                    "search_query": ", ".join(sq[:3]) if sq else exp.replace("_", " ") if exp else "experience",
                     "experience_name": exp,
                     "entities": [],
                     "confidence_score": 0.8,
@@ -393,10 +424,12 @@ def _heuristic_resolve(
                 }
             # Other unrelated responses (e.g. "what's the weather") → probe gracefully
             opts, exp = _experience_from_probing(ls_lower, recent_conversation)
+            sq = _bundle_options_to_search_queries(opts)
             return {
                 "intent_type": "discover_composite",
                 "bundle_options": opts,
-                "search_queries": _bundle_options_to_search_queries(opts),
+                "search_queries": sq,
+                "search_query": ", ".join(sq[:3]) if sq else exp.replace("_", " ") if exp else "experience",
                 "experience_name": exp,
                 "entities": [],
                 "unrelated_to_probing": True,
