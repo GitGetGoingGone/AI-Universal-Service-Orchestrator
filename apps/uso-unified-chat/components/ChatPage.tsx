@@ -1811,20 +1811,6 @@ export function ChatPage(props: ChatPageProps = {}) {
             !sideNavCollapsed ? "md:ml-64" : ""
           }`}
         >
-          {sideNavCollapsed && (
-            <header className="flex flex-shrink-0 items-center border-b border-[var(--border)] px-4 py-3">
-              <button
-                type="button"
-                onClick={toggleSideNav}
-                aria-label="Open menu"
-                className="rounded p-2 text-[var(--muted)] transition-colors hover:bg-[var(--card)] hover:text-[var(--card-foreground)]"
-              >
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-            </header>
-          )}
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {chatContent}
           </div>
