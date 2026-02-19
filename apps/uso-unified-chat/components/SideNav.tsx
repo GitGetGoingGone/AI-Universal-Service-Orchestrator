@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AuthButtons } from "@/components/AuthWrapper";
 
 export type ThreadItem = {
   id: string;
@@ -120,7 +121,7 @@ export function SideNav({
                     >
                       {t.title.length > 28 ? t.title.slice(0, 25) + "…" : t.title || "Chat"}
                     </button>
-                    {onDeleteThread && (
+                    {onDeleteThread && !t.has_completed_order && (
                       <button
                         type="button"
                         onClick={() => onDeleteThread(t.id)}
@@ -160,6 +161,13 @@ export function SideNav({
             Settings
           </Link>
         </nav>
+      )}
+
+      {/* Sign in / Sign out in side panel */}
+      {!collapsed && (
+        <div className="border-t border-[var(--border)] p-2">
+          <AuthButtons />
+        </div>
       )}
     </aside>
   );

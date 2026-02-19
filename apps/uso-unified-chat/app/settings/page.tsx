@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useTheme } from "@/components/ThemeProvider";
 import { SideNav } from "@/components/SideNav";
 import { useSideNavCollapsed } from "@/hooks/useSideNavCollapsed";
+import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
+import { AuthButtons } from "@/components/AuthWrapper";
 import type { ThemeId } from "@/lib/theme";
 
 const THEME_OPTIONS: { id: ThemeId; label: string }[] = [
@@ -28,6 +30,29 @@ export default function SettingsPage() {
         <div className="flex-1 overflow-y-auto p-8">
         <div className="mx-auto max-w-2xl">
           <h1 className="text-2xl font-bold text-[var(--foreground)]">Settings</h1>
+
+        {/* Account / Sign in */}
+        <section className="mt-8">
+          <h2 className="text-sm font-medium text-[var(--muted)] uppercase tracking-wider">
+            Account
+          </h2>
+          <div className="mt-3">
+            <AuthButtons />
+          </div>
+        </section>
+
+        {/* Connect WhatsApp — continue conversations from WhatsApp */}
+        <section className="mt-8">
+          <h2 className="text-sm font-medium text-[var(--muted)] uppercase tracking-wider">
+            Connect WhatsApp
+          </h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Link your WhatsApp number to continue conversations from WhatsApp and get order updates.
+          </p>
+          <div className="mt-3">
+            <ConnectWhatsApp />
+          </div>
+        </section>
 
         {/* Theme */}
         <section className="mt-8">
