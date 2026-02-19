@@ -176,7 +176,10 @@ def _build_context(result: Dict[str, Any]) -> str:
                 f"Product data (ONLY these): {'; '.join(product_entries)}"
             )
         else:
-            query = intent.get("search_query", "your search")
+            query = intent.get("search_query")
+            sq_list = intent.get("search_queries") or []
+            if query is None or str(query).strip() in ("", "None"):
+                query = ", ".join(str(q) for q in sq_list[:5] if q) if sq_list else "your search"
             parts.append(f"No products found for '{query}'.")
 
     return " ".join(parts)

@@ -84,7 +84,10 @@ def generate_experience_card(
         body.append(text_block(section_title, size="Medium", weight="Bolder"))
 
         if not products:
-            body.append(text_block(f"No {section_title.lower()} found.", size="Small", is_subtle=True))
+            # Truncate long category names (e.g. from bad intent derivation)
+            qstr = str(query) if isinstance(query, str) else "products"
+            display_query = (qstr[:40] + "…") if len(qstr) > 40 else qstr
+            body.append(text_block(f"No {display_query} found.", size="Small", is_subtle=True))
             continue
 
         for p in products:

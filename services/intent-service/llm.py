@@ -246,14 +246,60 @@ def _derive_composite_categories(text: str) -> List[str]:
     """Derive product categories from text when LLM is not available. No hardcoded experiences."""
     derived = derive_search_query(text or "")
     if derived and derived.strip() and derived.lower() not in ("browse", "show", "options"):
+        # If derived is a long sentence (assistant probing message), it's not a product query
+        if len(derived) > 50:
+            return []
         return [derived.strip()]
     return ["gifts"]
 
 
-def _experience_from_probing(last_suggestion_lower: str) -> tuple:
-    """Derive bundle_options and experience_name from probing context. Bundle options come from LLM only; heuristic uses single generic bundle from derived categories."""
+def _experience_name_to_default_categories(exp: Optional[str]) -> List[str]:
+    """Map experience name to default product categories for discovery. Used when probing follow-up."""
+    if not exp:
+        return ["flowers", "dinner", "gifts"]
+    lower = exp.lower().replace("_", " ")
+    if "date" in lower and "night" in lower:
+        return ["flowers", "dinner", "limo"]
+    if "date" in lower:
+        return ["flowers", "dinner", "gifts"]
+    if "birthday" in lower or "party" in lower:
+        return ["cake", "party", "gifts"]
+    if "picnic" in lower:
+        return ["picnic", "food", "beverages"]
+    if "anniversary" in lower:
+        return ["flowers", "dinner", "gifts"]
+    if "brunch" in lower:
+        return ["brunch", "food", "beverages"]
+    if "dinner" in lower:
+        return ["dinner", "flowers", "dessert"]
+    return ["flowers", "dinner", "gifts"]
+
+
+def _experience_from_probing(
+    last_suggestion_lower: str,
+    recent_conversation: Optional[List[Dict[str, Any]]] = None,
+) -> tuple:
+    """Derive bundle_options and experience_name from probing context. Use USER message for categories, not assistant's probing text."""
     exp = _extract_experience_name(last_suggestion_lower)
-    categories = _derive_composite_categories(last_suggestion_lower)
+    # Derive categories from the most recent USER message (e.g. "plan a date night"), not from assistant's probing
+    user_text = ""
+    categories: List[str] = []
+    if recent_conversation:
+        for m in reversed(recent_conversation):
+            if isinstance(m, dict) and (m.get("role") or "").lower() == "user":
+                user_text = (m.get("content") or m.get("text") or "")[:500]
+                break
+            if isinstance(m, str) and "user:" in m.lower():
+                user_text = m.split(":", 1)[-1].strip()[:500]
+                break
+    if user_text:
+        categories = _derive_composite_categories(user_text)
+        # If derived looks like experience phrase (e.g. "plan date night") not product terms, use defaults
+        exp_phrases = ("plan", "date", "night", "party", "picnic", "anniversary", "brunch", "celebration")
+        if categories and any(p in (categories[0] or "").lower() for p in exp_phrases):
+            categories = _experience_name_to_default_categories(exp)
+    if not categories:
+        categories = _experience_name_to_default_categories(exp)
     opts = [{"label": (exp or "Bundle").replace("_", " ").title(), "description": "", "categories": categories}]
     return (opts, exp or "experience")
 
@@ -310,7 +356,7 @@ def _heuristic_resolve(
                 "casual", "romantic", "adventurous",
                 # Date/time answers: "any day next week", "this weekend", "friday", etc.
                 "any day", "next week", "weekend", "friday", "saturday", "sunday", "tomorrow", "next month",
-                "this weekend", "whenever", "flexible", "tonight", "this week",
+                "this weekend", "whenever", "flexible", "tonight", "this week", "anytime",
             ]
             # User answered with specific details (date, budget, location, etc.) or short non-question
             is_answer = any(k in text_lower for k in detail_indicators) or (
@@ -322,7 +368,7 @@ def _heuristic_resolve(
                 entities = []
                 if "dallas" in text_lower or "dallas" in text:
                     entities.append({"type": "location", "value": "Dallas"})
-                opts, exp = _experience_from_probing(ls_lower)
+                opts, exp = _experience_from_probing(ls_lower, recent_conversation)
                 return {
                     "intent_type": "discover_composite",
                     "bundle_options": opts,
@@ -335,7 +381,7 @@ def _heuristic_resolve(
             # User did not answer probing but wants to see options ("show more options", "more options", etc.)
             fetch_more_phrases = ("show me more", "more options", "other options", "just show me", "show me something", "show options", "show me options")
             if any(p in text_lower for p in fetch_more_phrases):
-                opts, exp = _experience_from_probing(ls_lower)
+                opts, exp = _experience_from_probing(ls_lower, recent_conversation)
                 return {
                     "intent_type": "discover_composite",
                     "bundle_options": opts,

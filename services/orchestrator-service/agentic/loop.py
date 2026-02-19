@@ -891,6 +891,11 @@ def _extract_budget(intent_data: Optional[Dict[str, Any]]) -> Optional[int]:
     return None
 
 
+def _format_step_key(step: str) -> str:
+    """Convert step key like 'before_discover_composite' to 'Before discover composite' for display."""
+    return step.replace("_", " ").title()
+
+
 def _thinking_message(step: str, context: Dict[str, Any], overrides: Optional[Dict[str, str]] = None) -> str:
     """Derive dynamic thinking message from step and current state. Admin overrides from platform_config.thinking_messages take precedence."""
     templates = {
@@ -906,19 +911,25 @@ def _thinking_message(step: str, context: Dict[str, Any], overrides: Optional[Di
         "before_bundle": "Curating your perfect bundle...",
         "before_response": "Putting it all together...",
     }
-    msg = (overrides or {}).get(step) or templates.get(step)
+    raw = (overrides or {}).get(step) or templates.get(step)
+    # If override is empty or equals the raw step key (e.g. "before_discover_composite"), use template
+    if not raw or raw.strip() == step:
+        msg = templates.get(step)
+    else:
+        msg = raw
     if msg is None and step == "after_weather":
         desc = (context.get("weather_desc") or "").lower()
         if any(w in desc for w in ("rain", "storm", "snow", "chilly", "cold")):
             return "Looks chilly next week - maybe pick a different day?"
         return "Looks perfect for outdoor plans!"
     if msg is None:
-        return "Thinking..."
+        return _format_step_key(step) + "..."
     loc = context.get("location") or "your area"
     query = context.get("query") or context.get("search_query") or "options"
     exp = context.get("experience_name") or "experience"
+    step_display = _format_step_key(step)
     try:
-        return msg.format(location=loc, query=query, experience_name=exp)
+        return msg.format(location=loc, query=query, experience_name=exp, step=step_display)
     except (KeyError, ValueError):
         return msg
 
