@@ -194,6 +194,17 @@ async def _discover_composite(
             })
 
     # Build suggested_bundle_options from intent's bundle_options (each tier = one product per category, own price)
+    def _get_products_for_category(cat: str) -> List[Dict[str, Any]]:
+        """Case-insensitive lookup; category_products keys are from search_queries."""
+        prods = category_products.get(cat, [])
+        if prods:
+            return prods
+        cat_lower = (cat or "").strip().lower()
+        for k, v in category_products.items():
+            if (k or "").strip().lower() == cat_lower:
+                return v
+        return []
+
     if bundle_options and category_products:
         id_to_product: Dict[str, Dict[str, Any]] = {}
         for prods in category_products.values():
@@ -208,7 +219,7 @@ async def _discover_composite(
             product_ids: List[str] = []
             total_price = 0.0
             for cat in opt_cats:
-                prods = category_products.get(cat, [])
+                prods = _get_products_for_category(cat)
                 if prods:
                     p = prods[0]  # Pick first (e.g. best-ranked)
                     pid = str(p.get("id", ""))
@@ -228,6 +239,31 @@ async def _discover_composite(
                     "total_price": round(total_price, 2),
                     "currency": currency,
                 })
+
+    # Fallback: when no bundle_options or none matched, build one curated bundle (one product per category)
+    if not suggested_bundle_options and category_products:
+        product_ids_fb: List[str] = []
+        product_names_fb: List[str] = []
+        total_price_fb = 0.0
+        currency_fb = "USD"
+        for q, prods in category_products.items():
+            if prods:
+                p = prods[0]
+                pid = str(p.get("id", ""))
+                if pid:
+                    product_ids_fb.append(pid)
+                    product_names_fb.append(p.get("name", "Item"))
+                    total_price_fb += float(p.get("price") or 0)
+                    currency_fb = p.get("currency", "USD") or currency_fb
+        if product_ids_fb:
+            suggested_bundle_options.append({
+                "label": (experience_name or "Curated").replace("_", " ").title(),
+                "description": "A curated selection for your experience.",
+                "product_ids": product_ids_fb,
+                "product_names": product_names_fb,
+                "total_price": round(total_price_fb, 2),
+                "currency": currency_fb,
+            })
 
     adaptive_card = generate_experience_card(
         experience_name or "experience",
@@ -722,9 +758,9 @@ async def run_agentic_loop(
                 machine_readable = result.get("machine_readable")
                 pc = (products_data or {}).get("products") or []
                 await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0}, thinking_messages or {})
-                # Ensure 2-4 bundle options: use LLM when intent has <2; else keep intent's
+                # Use intent's bundle options when we have 1+; call LLM only when 0 to generate 2-4
                 intent_bundles = (products_data or {}).get("suggested_bundle_options") or []
-                if len(intent_bundles) >= 2:
+                if len(intent_bundles) >= 1:
                     engagement_data["suggested_bundle_options"] = intent_bundles
                 elif products_data and (products_data.get("categories") or products_data.get("products")):
                     await _emit_thinking(on_thinking, "before_bundle", intent_data or {}, thinking_messages or {})
