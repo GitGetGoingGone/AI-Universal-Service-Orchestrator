@@ -12,6 +12,7 @@ function getAuthFromRequest(req: Request): { user_id: string | null; anonymous_i
 }
 
 async function resolveUserId(supabase: ReturnType<typeof getSupabase>): Promise<string | null> {
+  if (!supabase) return null;
   const clerkUserId = await auth().then((a) => a.userId ?? null);
   if (!clerkUserId) return null;
   const { data } = await supabase
