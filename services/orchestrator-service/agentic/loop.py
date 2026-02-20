@@ -718,9 +718,24 @@ async def run_agentic_loop(
                 tool_args = dict(tool_args)
                 if not tool_args.get("bundle_options") and intent_data.get("bundle_options"):
                     tool_args["bundle_options"] = intent_data.get("bundle_options")
-                if not tool_args.get("search_queries"):
-                    # Refinement leak: prefer purged list from state so removed categories stay purged
-                    tool_args["search_queries"] = state.get("purged_search_queries") or intent_data.get("search_queries") or []
+                # Always prefer purged list when user previously removed categories (e.g. "no limo")
+                purged_sq = state.get("purged_search_queries")
+                purged_set = {str(c).strip().lower() for c in (purged_sq or []) if c}
+                if purged_sq:
+                    tool_args["search_queries"] = purged_sq
+                    # Filter bundle_options to only tiers whose categories are in purged set (no limo etc.)
+                    if purged_set and tool_args.get("bundle_options"):
+                        filtered = []
+                        for opt in tool_args["bundle_options"]:
+                            if not isinstance(opt, dict):
+                                continue
+                            cats = opt.get("categories") or []
+                            if all(str(c).strip().lower() in purged_set for c in cats if c):
+                                filtered.append(opt)
+                        if filtered:
+                            tool_args["bundle_options"] = filtered
+                elif not tool_args.get("search_queries"):
+                    tool_args["search_queries"] = intent_data.get("search_queries") or []
                 if not tool_args.get("experience_name"):
                     tool_args["experience_name"] = intent_data.get("experience_name") or "experience"
                 if not tool_args.get("location") and intent_data:
@@ -801,10 +816,12 @@ async def run_agentic_loop(
                 if intent_data and intent_data.get("intent_type") == "refine_composite" and intent_data.get("removed_categories"):
                     state["purged_search_queries"] = intent_data.get("search_queries") or []
                     state["purged_proposed_plan"] = intent_data.get("proposed_plan") or []
-                elif intent_data and (intent_data.get("search_queries") or intent_data.get("proposed_plan")):
-                    # Clear purged state when starting a fresh composite (no removal)
+                elif intent_data and intent_data.get("intent_type") == "refine_composite" and not intent_data.get("removed_categories"):
+                    # User added categories back (e.g. "add limo back"); clear purged state
                     state.pop("purged_search_queries", None)
                     state.pop("purged_proposed_plan", None)
+                # Do NOT clear purged state when intent is discover_composite (e.g. "show me options")
+                # so "no limo" stays in effect until user starts a new plan or adds categories back
                 # Variety leak patch: user asked for "other options" / "something else" -> rotate tier next
                 if intent_data and intent_data.get("request_variety"):
                     state["rotate_tier"] = True

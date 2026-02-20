@@ -1422,6 +1422,7 @@ export function ChatPage(props: ChatPageProps = {}) {
                             text={m.content}
                             speedMs={typingSpeedMs}
                             enabled={typingEnabled}
+                            render={(displayed) => <ReactMarkdown>{displayed}</ReactMarkdown>}
                           />
                         ) : (
                           <ReactMarkdown>{m.content}</ReactMarkdown>

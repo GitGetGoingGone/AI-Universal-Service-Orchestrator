@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 
 type TypewriterTextProps = {
   text: string;
   speedMs?: number;
   enabled?: boolean;
   className?: string;
+  /** When set, the displayed substring is rendered with this renderer (e.g. markdown). Otherwise plain text. */
+  render?: (displayed: string) => ReactNode;
 };
 
 export function TypewriterText({
@@ -14,6 +16,7 @@ export function TypewriterText({
   speedMs = 30,
   enabled = true,
   className = "",
+  render,
 }: TypewriterTextProps) {
   const [displayed, setDisplayed] = useState("");
   const [done, setDone] = useState(false);
@@ -39,12 +42,14 @@ export function TypewriterText({
   }, [text, speedMs, enabled]);
 
   if (!enabled) {
-    return <span className={className}>{text}</span>;
+    const content = render ? render(text) : text;
+    return <span className={className}>{content}</span>;
   }
 
+  const content = render ? render(displayed) : displayed;
   return (
     <span className={className}>
-      {displayed}
+      {content}
       {!done && (
         <span
           className="inline-block w-0.5 h-4 ml-0.5 align-middle bg-current opacity-70 animate-pulse"
