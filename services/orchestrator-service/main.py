@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 
 _root = Path(__file__).resolve().parents[2]
+_svc = Path(__file__).resolve().parent  # orchestrator-service dir so "api", "config", "agentic" resolve
+sys.path.insert(0, str(_svc))
 sys.path.insert(0, str(_root))
 
 from fastapi import FastAPI

@@ -181,7 +181,7 @@ def _build_context(result: Dict[str, Any]) -> str:
             parts.append(
                 f"Allowed CTAs (suggest ONLY these): {', '.join(allowed_ctas)}. Do NOT suggest same-day delivery, delivery options, or any feature not listed. "
                 f"User asked for {exp_name}. Found products in: {', '.join(cat_names) or 'categories'}. "
-                f"Present as a curated bundle. ONLY mention products from Product data below—do NOT invent any. Product data (ONLY these): {'; '.join(all_items[:10])}. Be warm and helpful."
+                f"Present as a curated bundle. ONLY mention products from Product data below—do NOT invent any. Product data (ONLY these): {'; '.join((all_items or [])[:10])}. Be warm and helpful."
             )
         else:
             parts.append(
@@ -192,10 +192,11 @@ def _build_context(result: Dict[str, Any]) -> str:
         product_list = products.get("products") if isinstance(products, dict) else []
         if not product_list and isinstance(products, list):
             product_list = products
-        count = products.get("count", len(product_list)) if isinstance(products, dict) else len(product_list)
+        _plist = product_list if isinstance(product_list, list) else []
+        count = products.get("count", len(_plist)) if isinstance(products, dict) else len(_plist)
         if product_list:
             top_products = product_list[:6] if isinstance(product_list, list) else []
-            product_entries: List[str] = []
+            discover_product_entries: List[str] = []
             any_eligible_checkout = False
             for p in top_products:
                 if isinstance(p, dict):
@@ -210,7 +211,7 @@ def _build_context(result: Dict[str, Any]) -> str:
                         entry += f" — {desc}"
                     if price is not None:
                         entry += f" ({currency} {price})"
-                    product_entries.append(entry)
+                    discover_product_entries.append(entry)
             allowed_ctas = ["Add to bundle"]
             if any_eligible_checkout:
                 allowed_ctas.append("Book now")
@@ -225,7 +226,7 @@ def _build_context(result: Dict[str, Any]) -> str:
                 parts.append(f"Location context: {location}.")
             parts.append(
                 f"Found {count} products. Format as curated listing (top 5–6). ONLY mention products from Product data below—do NOT invent any. Per entry: use exact name and price from data, brief description, CTA from Allowed CTAs only. "
-                f"Product data (ONLY these): {'; '.join(product_entries)}"
+                f"Product data (ONLY these): {'; '.join(discover_product_entries)}"
             )
         else:
             query = intent.get("search_query")
@@ -276,13 +277,16 @@ async def generate_engagement_response(
     if llm_config is None:
         from api.admin import get_llm_config  # type: ignore[reportMissingImports]
         llm_config = get_llm_config()
+    if not llm_config:
+        return None
 
     from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
     provider, client = _get_planner_client_for_config(llm_config)
     if not client:
         return None
 
-    model = llm_config.get("model") or "gpt-4o"
+    cfg = llm_config
+    model = cfg.get("model") or "gpt-4o"
     # Use admin model_temperature for creative engagement when available
     try:
         from db import get_admin_orchestration_settings
@@ -290,9 +294,9 @@ async def generate_engagement_response(
         if admin and admin.get("model_temperature") is not None:
             temperature = max(0.0, min(2.0, float(admin["model_temperature"])))
         else:
-            temperature = min(0.7, float(llm_config.get("temperature", 0.1)) + 0.3)
+            temperature = min(0.7, float(cfg.get("temperature", 0.1)) + 0.3)
     except Exception:
-        temperature = min(0.7, float(llm_config.get("temperature", 0.1)) + 0.3)
+        temperature = min(0.7, float(cfg.get("temperature", 0.1)) + 0.3)
 
     data = result.get("data") or {}
     intent = data.get("intent") or {}
@@ -303,12 +307,12 @@ async def generate_engagement_response(
     try:
         from db import get_supabase, get_admin_orchestration_settings
         from packages.shared.platform_llm import get_model_interaction_prompt
-        client = get_supabase()
+        supabase_client = get_supabase()
         interaction_type = _intent_to_interaction_type(intent_type)
-        prompt_cfg = get_model_interaction_prompt(client, interaction_type) if client else None
-        if prompt_cfg and prompt_cfg.get("enabled", True):
-            db_prompt = prompt_cfg.get("system_prompt")
-            db_max = prompt_cfg.get("max_tokens")
+        prompt_cfg = get_model_interaction_prompt(supabase_client, interaction_type) if supabase_client else None
+        if prompt_cfg and (prompt_cfg or {}).get("enabled", True):
+            db_prompt = (prompt_cfg or {}).get("system_prompt")
+            db_max = (prompt_cfg or {}).get("max_tokens")
             system_prompt = (db_prompt or "").strip() or default_prompt
             max_tokens = db_max if db_max is not None else default_max_tokens
         else:
@@ -336,8 +340,8 @@ async def generate_engagement_response(
 
     try:
         if provider in ("azure", "openrouter", "custom"):
-            def _call():
-                return client.chat.completions.create(
+            def _call_openai_engagement():
+                return client.chat.completions.create(  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
                     model=model,
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -346,18 +350,18 @@ async def generate_engagement_response(
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
-            response = await asyncio.to_thread(_call)
+            response = await asyncio.to_thread(_call_openai_engagement)
             text = (response.choices[0].message.content or "").strip()
             return text if text else None
 
         if provider == "gemini":
-            gen_model = client.GenerativeModel(model)
-            def _call():
+            gen_model = client.GenerativeModel(model)  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
+            def _call_gemini_engagement():
                 return gen_model.generate_content(
                     f"{system_prompt}\n\n{user_content}",
                     generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
                 )
-            resp = await asyncio.to_thread(_call)
+            resp = await asyncio.to_thread(_call_gemini_engagement)
             if resp and resp.candidates:
                 text = (getattr(resp, "text", None) or "").strip()
                 return text if text else None
@@ -549,6 +553,8 @@ async def suggest_composite_bundle(
     if llm_config is None:
         from api.admin import get_llm_config  # type: ignore[reportMissingImports]
         llm_config = get_llm_config()
+    if not llm_config:
+        return []
 
     from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
     provider, client = _get_planner_client_for_config(llm_config)
@@ -575,8 +581,8 @@ Return JSON: {{"product_ids": ["id1", "id2", ...]}} one per category, best fit f
 
     try:
         if provider in ("azure", "openrouter", "custom"):
-            def _call():
-                return client.chat.completions.create(
+            def _call_openai_suggest():
+                return client.chat.completions.create(  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
                     model=model,
                     messages=[
                         {"role": "system", "content": SUGGEST_BUNDLE_SYSTEM},
@@ -585,16 +591,16 @@ Return JSON: {{"product_ids": ["id1", "id2", ...]}} one per category, best fit f
                     temperature=temperature,
                     max_tokens=300,
                 )
-            response = await asyncio.to_thread(_call)
+            response = await asyncio.to_thread(_call_openai_suggest)
             text = (response.choices[0].message.content or "").strip()
         elif provider == "gemini":
-            gen_model = client.GenerativeModel(model)
-            def _call():
+            gen_model = client.GenerativeModel(model)  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
+            def _call_gemini_suggest():
                 return gen_model.generate_content(
                     f"{SUGGEST_BUNDLE_SYSTEM}\n\n{user_content}",
                     generation_config={"temperature": temperature, "max_output_tokens": 300},
                 )
-            resp = await asyncio.to_thread(_call)
+            resp = await asyncio.to_thread(_call_gemini_suggest)
             text = (getattr(resp, "text", None) or "").strip() if resp and resp.candidates else ""
         else:
             return []
@@ -676,6 +682,8 @@ async def suggest_composite_bundle_options(
     if llm_config is None:
         from api.admin import get_llm_config  # type: ignore[reportMissingImports]
         llm_config = get_llm_config()
+    if not llm_config:
+        return []
 
     from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
     provider, client = _get_planner_client_for_config(llm_config)
@@ -693,11 +701,11 @@ async def suggest_composite_bundle_options(
         from packages.shared.platform_llm import get_model_interaction_prompt
         supabase = get_supabase()
         prompt_cfg = get_model_interaction_prompt(supabase, "suggest_composite_bundle") if supabase else None
-        if prompt_cfg and prompt_cfg.get("enabled", True):
-            db_prompt = (prompt_cfg.get("system_prompt") or "").strip()
+        if prompt_cfg and (prompt_cfg or {}).get("enabled", True):
+            db_prompt = ((prompt_cfg or {}).get("system_prompt") or "").strip()
             if db_prompt:
                 system_prompt = db_prompt
-            db_max = prompt_cfg.get("max_tokens")
+            db_max = (prompt_cfg or {}).get("max_tokens")
             if db_max is not None:
                 max_tokens = db_max
     except Exception:
@@ -722,8 +730,8 @@ Return JSON: {{ "options": [ {{ "label": "...", "description": "Fancy 1-2 senten
 
     try:
         if provider in ("azure", "openrouter", "custom"):
-            def _call():
-                return client.chat.completions.create(
+            def _call_openai_suggest_options():
+                return client.chat.completions.create(  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
                     model=model,
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -732,16 +740,16 @@ Return JSON: {{ "options": [ {{ "label": "...", "description": "Fancy 1-2 senten
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
-            response = await asyncio.to_thread(_call)
+            response = await asyncio.to_thread(_call_openai_suggest_options)
             text = (response.choices[0].message.content or "").strip()
         elif provider == "gemini":
-            gen_model = client.GenerativeModel(model)
-            def _call():
+            gen_model = client.GenerativeModel(model)  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
+            def _call_gemini_suggest_options():
                 return gen_model.generate_content(
                     f"{system_prompt}\n\n{user_content}",
                     generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
                 )
-            resp = await asyncio.to_thread(_call)
+            resp = await asyncio.to_thread(_call_gemini_suggest_options)
             text = (getattr(resp, "text", None) or "").strip() if resp and resp.candidates else ""
         else:
             return []
