@@ -61,6 +61,7 @@ export async function POST(req: Request) {
       bundle_id,
       order_id,
       stream: streamRequested,
+      debug: debugRequested,
     } = body as {
       messages?: { role: string; content: string }[];
       partner_id?: string;
@@ -70,6 +71,7 @@ export async function POST(req: Request) {
       bundle_id?: string;
       order_id?: string;
       stream?: boolean;
+      debug?: boolean;
     };
 
     const lastUserMessage =
@@ -162,6 +164,7 @@ export async function POST(req: Request) {
     }
     if (bundle_id) payload.bundle_id = bundle_id;
     if (order_id) payload.order_id = order_id;
+    if (debugRequested === true) payload.debug = true;
 
     const chatUrl = `${ORCHESTRATOR_URL}/api/v1/chat${streamRequested ? "?stream=true" : ""}`;
     const res = await fetch(chatUrl, {

@@ -241,21 +241,45 @@ def _heuristic_resolve(
         "show more", "got anything else", "anything else", "other choices", "alternatives",
     )
     if any(p in t for p in _MORE_OPTIONS_PHRASES):
-        # Composite context: last suggestion or any message mentions bundle/date night/total
+        # "More options" after a simple product list (discover): reuse previous search query so we don't ask for date/area
+        from packages.shared.discovery import derive_search_query
+        prev_user_msgs = [c.get("content", "") or "" for c in conv if isinstance(c, dict) and c.get("role") == "user"]
+        for prev_msg in reversed(prev_user_msgs):
+            prev_msg = (prev_msg or "").strip()
+            if not prev_msg or prev_msg.lower() == t.lower():
+                continue
+            prev_query = derive_search_query(prev_msg)
+            if prev_query and prev_query not in ("more", "options", "browse"):
+                # User was in simple discover (e.g. "baby products", "looking for baby products"); give more of same
+                return {
+                    "intent_type": "discover",
+                    "search_query": prev_query,
+                    "entities": [],
+                    "recommended_next_action": "discover_products",
+                    "confidence_score": 0.85,
+                }
+
+        # Composite context: last suggestion or assistant message has composite framing (not just "bundle" in product names)
         in_composite_context = False
-        if ls and ("bundle" in ls or "date night" in ls or "total:" in ls or "add this" in ls or "curated" in ls):
+        _composite_signals = ("date night", "total:", "add this bundle", "add this", "curated", "option 1 of", "plan a perfect")
+        if ls and any(s in ls.lower() for s in _composite_signals):
             in_composite_context = True
         for c in conv:
             if isinstance(c, dict) and c.get("role") == "assistant" and (c.get("content") or ""):
                 msg = (c.get("content") or "").lower()
-                if "bundle" in msg or "date night" in msg or "total:" in msg or "add this" in msg:
+                if any(s in msg for s in _composite_signals):
                     in_composite_context = True
                     break
         if not in_composite_context:
             for c in conv:
                 if isinstance(c, dict) and c.get("role") == "user" and (c.get("content") or ""):
+                    ucontent = (c.get("content") or "").lower()
+                    if "not " in ucontent and "shower" in ucontent:
+                        continue  # "not baby shower" -> user wants products, not composite
+                    if "looking for" in ucontent and "product" in ucontent:
+                        continue  # "looking for baby products" -> simple discover
                     for pat, _, _ in _COMPOSITE_PATTERNS:
-                        if re.search(pat, (c.get("content") or "").lower()):
+                        if re.search(pat, ucontent):
                             in_composite_context = True
                             break
                     break
@@ -283,23 +307,6 @@ def _heuristic_resolve(
                 "recommended_next_action": "discover_composite",
                 "confidence_score": 0.85,
             }
-
-        # "More options" after a product list (discover context): reuse previous category so we don't search "more options"
-        from packages.shared.discovery import derive_search_query
-        for c in reversed(conv):
-            if isinstance(c, dict) and c.get("role") == "user":
-                prev_msg = (c.get("content") or "").strip()
-                if prev_msg and prev_msg.lower() != t:
-                    prev_query = derive_search_query(prev_msg)
-                    if prev_query and prev_query not in ("more", "options", "browse"):
-                        return {
-                            "intent_type": "discover",
-                            "search_query": prev_query,
-                            "entities": [],
-                            "recommended_next_action": "discover_products",
-                            "confidence_score": 0.85,
-                        }
-                break
 
     # Refinement leak patch: "no limo", "remove the flowers", "skip chocolates" -> refine_composite + removed_categories
     removed: List[str] = []

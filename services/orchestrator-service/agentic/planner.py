@@ -323,7 +323,10 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
             exp_name = intent_data.get("experience_name") or "date night"
             loc_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() == "location"), None)
             time_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() in ("time", "date")), None)
-            if not has_location or not has_time:
+            # When user said "more options" / "show me more" etc., skip date/area probe and fetch products
+            if intent_data.get("unrelated_to_probing"):
+                pass  # fall through to discover_composite below
+            elif not has_location or not has_time:
                 # Concierge-style one-liner: acknowledge what we have, ask for the next missing piece
                 if has_time and has_location:
                     pass  # fall through to discover_composite

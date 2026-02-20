@@ -279,11 +279,13 @@ async def generate_engagement_response(
     result: Dict[str, Any],
     llm_config: Optional[Dict[str, Any]] = None,
     allow_markdown: bool = False,
-) -> Optional[str]:
+    return_debug: bool = False,
+):
     """
     Generate a natural, engaging response using the LLM.
     When allow_markdown is True (e.g. no adaptive cards), the model may use markdown and the client should render it.
     Returns None on failure (caller should fall back to templated summary).
+    When return_debug is True, returns (summary, debug_dict) with debug_dict having prompt_sent and response_received.
     """
     if result.get("error"):
         return None
@@ -351,6 +353,7 @@ async def generate_engagement_response(
 
     context = _build_context(result)
     user_content = f"User said: {user_message[:300]}\n\nWhat we did: {context}\n\nWrite a brief friendly response:"
+    prompt_sent = f"[System]\n{system_prompt}\n\n[User]\n{user_content}"
 
     try:
         if provider in ("azure", "openrouter", "custom"):
@@ -366,6 +369,8 @@ async def generate_engagement_response(
                 )
             response = await asyncio.to_thread(_call_openai_engagement)
             text = (response.choices[0].message.content or "").strip()
+            if return_debug:
+                return (text if text else None, {"prompt_sent": prompt_sent, "response_received": text or ""})
             return text if text else None
 
         if provider == "gemini":
@@ -378,9 +383,13 @@ async def generate_engagement_response(
             resp = await asyncio.to_thread(_call_gemini_engagement)
             if resp and resp.candidates:
                 text = (getattr(resp, "text", None) or "").strip()
+                if return_debug:
+                    return (text if text else None, {"prompt_sent": prompt_sent, "response_received": text or ""})
                 return text if text else None
     except Exception as e:
         logger.warning("Engagement response LLM failed: %s", e)
+    if return_debug:
+        return (None, {"prompt_sent": prompt_sent, "response_received": ""})
     return None
 
 

@@ -50,6 +50,14 @@ import { useSideNavCollapsed } from "@/hooks/useSideNavCollapsed";
 
 type SuggestedCta = { label: string; action: string };
 
+/** Debug trace: prompt sent to model and response received (when Settings → Developer → Prompt trace on) */
+export type PromptTrace = {
+  request_payload?: { text?: string; messages_count?: number; limit?: number; platform?: string };
+  intent?: { request?: { text?: string }; response?: Record<string, unknown> };
+  engagement?: { prompt_sent?: string; response_received?: string };
+  agent_reasoning?: string[];
+};
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -63,7 +71,80 @@ type ChatMessage = {
   ctaContext?: {
     suggested_bundle_options?: Array<{ product_ids?: string[]; option_label?: string; [k: string]: unknown }>;
   };
+  /** When Settings → Show prompt trace is on: full prompt and response for this turn */
+  promptTrace?: PromptTrace;
 };
+
+function PromptTraceBlock({ trace }: { trace: PromptTrace; messageId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState<"request" | "intent" | "engagement" | "steps">("engagement");
+  const req = trace.request_payload;
+  const intent = trace.intent;
+  const engagement = trace.engagement;
+  const steps = trace.agent_reasoning ?? [];
+  return (
+    <div className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--card)]/50 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center justify-between px-3 py-2 text-left text-xs font-medium text-[var(--muted)] hover:bg-[var(--border)]/30 transition-colors"
+      >
+        <span>Prompt trace (request → intent → engagement → steps)</span>
+        <span className="text-[var(--muted)]">{expanded ? "▼" : "▶"}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-[var(--border)] p-3 space-y-3 text-xs">
+          <div className="flex gap-2 border-b border-[var(--border)] pb-2 flex-wrap">
+            {req && <button type="button" onClick={() => setActiveTab("request")} className={activeTab === "request" ? "font-medium text-[var(--primary-color)]" : "text-[var(--muted)]"}>{`Request`}</button>}
+            {intent && <button type="button" onClick={() => setActiveTab("intent")} className={activeTab === "intent" ? "font-medium text-[var(--primary-color)]" : "text-[var(--muted)]"}>{`Intent`}</button>}
+            {engagement && <button type="button" onClick={() => setActiveTab("engagement")} className={activeTab === "engagement" ? "font-medium text-[var(--primary-color)]" : "text-[var(--muted)]"}>{`Engagement`}</button>}
+            {steps.length > 0 && <button type="button" onClick={() => setActiveTab("steps")} className={activeTab === "steps" ? "font-medium text-[var(--primary-color)]" : "text-[var(--muted)]"}>{`Steps (${steps.length})`}</button>}
+          </div>
+          {activeTab === "request" && req && (
+            <div className="space-y-1">
+              <div className="font-medium text-[var(--muted)]">Sent to backend</div>
+              <pre className="whitespace-pre-wrap break-words rounded bg-[var(--background)] p-2 max-h-48 overflow-y-auto">{JSON.stringify(req, null, 2)}</pre>
+            </div>
+          )}
+          {activeTab === "intent" && intent && (
+            <div className="space-y-2">
+              <div>
+                <div className="font-medium text-[var(--muted)]">Intent request</div>
+                <pre className="whitespace-pre-wrap break-words rounded bg-[var(--background)] p-2 max-h-32 overflow-y-auto">{JSON.stringify(intent.request ?? {}, null, 2)}</pre>
+              </div>
+              <div>
+                <div className="font-medium text-[var(--muted)]">Intent response</div>
+                <pre className="whitespace-pre-wrap break-words rounded bg-[var(--background)] p-2 max-h-48 overflow-y-auto">{JSON.stringify(intent.response ?? {}, null, 2)}</pre>
+              </div>
+            </div>
+          )}
+          {activeTab === "engagement" && engagement && (
+            <div className="space-y-2">
+              <div>
+                <div className="font-medium text-[var(--muted)]">Prompt sent to model</div>
+                <pre className="whitespace-pre-wrap break-words rounded bg-[var(--background)] p-2 max-h-64 overflow-y-auto text-[11px]">{(engagement.prompt_sent ?? "").slice(0, 8000)}{(engagement.prompt_sent?.length ?? 0) > 8000 ? "\n\n… (truncated)" : ""}</pre>
+              </div>
+              <div>
+                <div className="font-medium text-[var(--muted)]">Response received</div>
+                <pre className="whitespace-pre-wrap break-words rounded bg-[var(--background)] p-2 max-h-48 overflow-y-auto">{(engagement.response_received ?? "") || "(empty)"}</pre>
+              </div>
+            </div>
+          )}
+          {activeTab === "steps" && steps.length > 0 && (
+            <div className="space-y-1">
+              <div className="font-medium text-[var(--muted)]">Agent flow (planner steps and tool calls)</div>
+              <ol className="list-decimal list-inside space-y-1 rounded bg-[var(--background)] p-2 max-h-48 overflow-y-auto">
+                {steps.map((s, i) => (
+                  <li key={i} className="text-[11px] whitespace-pre-wrap break-words">{s || "(empty)"}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const E2E_ACTIONS = ["add_to_bundle", "add_bundle_bulk", "view_bundle", "remove_from_bundle", "replace_in_bundle", "checkout", "complete_checkout"];
 const STANDING_INTENT_ACTION = "approve_standing_intent";
@@ -598,6 +679,13 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (bundleId) payload.bundle_id = bundleId;
         if (latestOrder?.id) payload.order_id = latestOrder.id;
         payload.stream = true;
+        try {
+          if (typeof window !== "undefined" && localStorage.getItem("chat_debug_show_prompt_trace") === "true") {
+            payload.debug = true;
+          }
+        } catch {
+          /* ignore */
+        }
 
         setThinkingText(null);
         const res = await fetch("/api/chat", {
@@ -618,6 +706,7 @@ export function ChatPage(props: ChatPageProps = {}) {
           error?: string;
           adaptive_card?: Record<string, unknown>;
           suggested_ctas?: SuggestedCta[];
+          prompt_trace?: PromptTrace;
         };
 
         const contentType = res.headers.get("content-type") || "";
@@ -695,12 +784,14 @@ export function ChatPage(props: ChatPageProps = {}) {
           fetchThreads();
           const suggestedCtas = Array.isArray((data as ChatResponse).suggested_ctas) ? (data as ChatResponse).suggested_ctas : undefined;
           const opts = (data as ChatResponse).data?.engagement?.suggested_bundle_options;
+          const promptTrace = (data as ChatResponse).prompt_trace;
           addMessage({
             role: "assistant",
             content: assistantContent,
             adaptiveCard: data.adaptive_card,
             ...(suggestedCtas?.length && { suggestedCtas }),
             ...(suggestedCtas?.length && opts?.length && { ctaContext: { suggested_bundle_options: opts } }),
+            ...(promptTrace && { promptTrace }),
           });
         } else {
           let data: ChatResponse;
@@ -741,12 +832,14 @@ export function ChatPage(props: ChatPageProps = {}) {
           fetchThreads();
           const suggestedCtas = Array.isArray(data.suggested_ctas) ? data.suggested_ctas : undefined;
           const opts = data.data?.engagement?.suggested_bundle_options;
+          const promptTraceNonStream = data.prompt_trace;
           addMessage({
             role: "assistant",
             content: assistantContent,
             adaptiveCard: data.adaptive_card,
             ...(suggestedCtas?.length && { suggestedCtas }),
             ...(suggestedCtas?.length && opts?.length && { ctaContext: { suggested_bundle_options: opts } }),
+            ...(promptTraceNonStream && { promptTrace: promptTraceNonStream }),
           });
         }
       } catch (err) {
@@ -1509,6 +1602,10 @@ export function ChatPage(props: ChatPageProps = {}) {
                           </button>
                         ))}
                       </div>
+                    )}
+                    {/* Debug: prompt trace (when Settings → Developer → Prompt trace on) */}
+                    {m.role === "assistant" && m.promptTrace && (
+                      <PromptTraceBlock trace={m.promptTrace} messageId={m.id} />
                     )}
                   </div>
                   {m.role === "assistant" && (

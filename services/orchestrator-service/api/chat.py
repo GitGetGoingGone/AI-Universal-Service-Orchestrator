@@ -36,6 +36,7 @@ class ChatRequest(BaseModel):
     partner_id: Optional[str] = Field(None, description="Filter products to this partner (for embed/white-label)")
     bundle_id: Optional[str] = Field(None, description="Thread's bundle ID - use for order context, never ask user")
     order_id: Optional[str] = Field(None, description="Thread's paid order ID - use for track/support, never ask user")
+    debug: bool = Field(False, description="When true, include prompt_trace (prompt sent and response received) for inspection")
 
 
 async def _stream_chat_events(
@@ -136,12 +137,24 @@ async def _stream_chat_events(
 
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
+    engagement_debug: Optional[Dict[str, Any]] = None
     if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
+        if body.debug:
+            engagement_debug = {"prompt_sent": "(engagement skipped; used planner message)", "response_received": planner_message}
     else:
-        summary = await generate_engagement_response(body.text, result, allow_markdown=not use_adaptive_cards)
+        if body.debug:
+            summary, engagement_debug = await generate_engagement_response(
+                body.text, result, allow_markdown=not use_adaptive_cards, return_debug=True
+            )
+            if summary is None:
+                engagement_debug = (engagement_debug or {}) | {"response_received": ""}
+        else:
+            summary = await generate_engagement_response(body.text, result, allow_markdown=not use_adaptive_cards)
         if not summary:
             summary = _build_summary(result)
+            if body.debug and not engagement_debug:
+                engagement_debug = {"prompt_sent": "(engagement LLM failed or unavailable)", "response_received": summary}
     if not summary:
         summary = "I'm here to help. What would you like to explore?"
     response_data = chat_first_response(
@@ -154,6 +167,21 @@ async def _stream_chat_events(
         suggested_ctas=suggested_ctas_stream if suggested_ctas_stream else None,
         summary_format="markdown" if not use_adaptive_cards else None,
     )
+    if body.debug:
+        response_data["prompt_trace"] = {
+            "request_payload": {
+                "text": body.text,
+                "messages_count": len(body.messages or []),
+                "limit": body.limit,
+                "platform": body.platform,
+            },
+            "intent": {
+                "request": {"text": body.text},
+                "response": (result.get("data") or {}).get("intent") or {},
+            },
+            "engagement": engagement_debug or {},
+            "agent_reasoning": result.get("agent_reasoning") or [],
+        }
     body_json = json.dumps(response_data, default=str)
     yield f"event: done\ndata: {body_json}\n\n"
 
@@ -340,13 +368,25 @@ async def chat(
     # so the LLM can generate natural, empathetic replies (e.g. "I know, it's a lot to take in!").
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
+    engagement_debug_ns: Optional[Dict[str, Any]] = None
     if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
+        if body.debug:
+            engagement_debug_ns = {"prompt_sent": "(engagement skipped; used planner message)", "response_received": planner_message}
     else:
-        summary = await generate_engagement_response(body.text, result, allow_markdown=not use_adaptive_cards)
+        if body.debug:
+            summary, engagement_debug_ns = await generate_engagement_response(
+                body.text, result, allow_markdown=not use_adaptive_cards, return_debug=True
+            )
+            if summary is None:
+                engagement_debug_ns = (engagement_debug_ns or {}) | {"response_received": ""}
+        else:
+            summary = await generate_engagement_response(body.text, result, allow_markdown=not use_adaptive_cards)
         if not summary:
             summary = _build_summary(result)
-    return chat_first_response(
+            if body.debug and not engagement_debug_ns:
+                engagement_debug_ns = {"prompt_sent": "(engagement LLM failed or unavailable)", "response_received": summary}
+    response_data_ns = chat_first_response(
         data=result.get("data", {}),
         machine_readable=result.get("machine_readable", {}),
         adaptive_card=adaptive_card,
@@ -356,6 +396,14 @@ async def chat(
         suggested_ctas=suggested_ctas if suggested_ctas else None,
         summary_format="markdown" if not use_adaptive_cards else None,
     )
+    if body.debug:
+        response_data_ns["prompt_trace"] = {
+            "request_payload": {"text": body.text, "messages_count": len(body.messages or []), "limit": body.limit, "platform": body.platform},
+            "intent": {"request": {"text": body.text}, "response": (result.get("data") or {}).get("intent") or {}},
+            "engagement": engagement_debug_ns or {},
+            "agent_reasoning": result.get("agent_reasoning") or [],
+        }
+    return response_data_ns
 
 
 def _build_summary(result: dict) -> str:

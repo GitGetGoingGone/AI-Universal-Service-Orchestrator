@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "@/components/ThemeProvider";
 import { SideNav } from "@/components/SideNav";
@@ -15,9 +16,31 @@ const THEME_OPTIONS: { id: ThemeId; label: string }[] = [
   { id: "winter", label: "Winter" },
 ];
 
+const PROMPT_TRACE_STORAGE_KEY = "chat_debug_show_prompt_trace";
+
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { collapsed: sideNavCollapsed, toggle: toggleSideNav } = useSideNavCollapsed();
+  const [showPromptTrace, setShowPromptTrace] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(PROMPT_TRACE_STORAGE_KEY);
+      setShowPromptTrace(stored === "true");
+    } catch {
+      setShowPromptTrace(false);
+    }
+  }, []);
+
+  const togglePromptTrace = () => {
+    const next = !showPromptTrace;
+    setShowPromptTrace(next);
+    try {
+      localStorage.setItem(PROMPT_TRACE_STORAGE_KEY, String(next));
+    } catch {
+      /* ignore */
+    }
+  };
 
   return (
     <div className="flex h-[100dvh] sm:h-screen bg-[var(--background)]">
@@ -51,6 +74,36 @@ export default function SettingsPage() {
           </p>
           <div className="mt-3">
             <ConnectWhatsApp />
+          </div>
+        </section>
+
+        {/* Developer: prompt trace */}
+        <section className="mt-8">
+          <h2 className="text-sm font-medium text-[var(--muted)] uppercase tracking-wider">
+            Developer
+          </h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Show the full prompt sent to the model and the raw response for each chat turn. Useful for debugging the agent flow.
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showPromptTrace}
+              onClick={togglePromptTrace}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)] focus:ring-offset-2 ${
+                showPromptTrace ? "bg-[var(--primary-color)]" : "bg-[var(--muted)]/40"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
+                  showPromptTrace ? "translate-x-5" : "translate-x-1"
+                }`}
+              />
+            </button>
+            <span className="text-sm text-[var(--foreground)]">
+              {showPromptTrace ? "Prompt trace on" : "Prompt trace off"}
+            </span>
           </div>
         </section>
 
