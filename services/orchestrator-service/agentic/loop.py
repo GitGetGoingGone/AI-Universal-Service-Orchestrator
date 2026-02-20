@@ -16,7 +16,7 @@ HTTP_TIMEOUT = 15.0
 
 
 def _get_llm_config() -> Dict[str, Any]:
-    from api.admin import get_llm_config
+    from api.admin import get_llm_config  # type: ignore[reportMissingImports]
     return get_llm_config()
 
 
@@ -145,7 +145,7 @@ async def _discover_composite(
 
     # Use composite_discovery_config.products_per_category when available (default 3 for curated bundle)
     try:
-        from api.admin import get_composite_discovery_config
+        from api.admin import get_composite_discovery_config  # type: ignore[reportMissingImports]
         cdc = get_composite_discovery_config()
         per_cat = cdc.get("products_per_category")
         if per_cat is not None and isinstance(per_cat, (int, float)):
@@ -482,7 +482,7 @@ async def run_agentic_loop(
     llm_config = _get_llm_config()
     if thinking_messages is None:
         try:
-            from api.admin import get_thinking_messages
+            from api.admin import get_thinking_messages  # type: ignore[reportMissingImports]
             thinking_messages = get_thinking_messages()
         except Exception:
             thinking_messages = {}
@@ -514,7 +514,7 @@ async def run_agentic_loop(
 
             # Rules layer: upsell, surge, promo (after intent)
             try:
-                from api.admin import get_upsell_surge_rules
+                from api.admin import get_upsell_surge_rules  # type: ignore[reportMissingImports]
                 from agentic.rules import evaluate_upsell_surge_rules
                 rules_cfg = get_upsell_surge_rules()
                 bundle_item_count = 0  # TODO: get from bundle when available
@@ -898,7 +898,7 @@ async def run_agentic_loop(
                 elif products_data and (products_data.get("categories") or products_data.get("products")):
                     await _emit_thinking(on_thinking, "before_bundle", intent_data or {}, thinking_messages or {})
                     try:
-                        from api.admin import _get_platform_config
+                        from api.admin import _get_platform_config  # type: ignore[reportMissingImports]
                         cfg = _get_platform_config() or {}
                         if cfg.get("enable_composite_bundle_suggestion", True) is False:
                             pass  # Skip bundle suggestion when disabled
