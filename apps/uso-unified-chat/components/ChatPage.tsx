@@ -107,6 +107,11 @@ function PromptTraceBlock({ trace }: { trace: PromptTrace; messageId: string }) 
           </div>
           {activeTab === "prompt" && promptSentFull && (
             <div className="space-y-2">
+              {promptSentFull.includes("No engagement LLM") || promptSentFull.includes("engagement skipped") ? (
+                <p className="text-[var(--muted)]">
+                  This reply was returned by the <strong>planner</strong> (e.g. asking for date/area) instead of the engagement LLM. The text below is what was used as the reply.
+                </p>
+              ) : null}
               <div className="font-medium text-[var(--muted)]">Prompt sent to model</div>
               <pre className="whitespace-pre-wrap break-words rounded bg-[var(--background)] p-2 max-h-[24rem] overflow-y-auto text-[11px]">{promptSentFull.length > 12000 ? `${promptSentFull.slice(0, 12000)}\n\n… (truncated)` : promptSentFull}</pre>
             </div>
@@ -131,6 +136,11 @@ function PromptTraceBlock({ trace }: { trace: PromptTrace; messageId: string }) 
           )}
           {activeTab === "engagement" && engagement && (
             <div className="space-y-2">
+              {(engagement.prompt_sent ?? "").includes("No engagement LLM") || (engagement.prompt_sent ?? "").includes("engagement skipped") ? (
+                <p className="text-[var(--muted)]">
+                  This reply was returned by the <strong>planner</strong> (e.g. asking for date/area) instead of the engagement LLM. The text below is what was used as the reply.
+                </p>
+              ) : null}
               <div>
                 <div className="font-medium text-[var(--muted)]">Prompt sent to model</div>
                 <pre className="whitespace-pre-wrap break-words rounded bg-[var(--background)] p-2 max-h-64 overflow-y-auto text-[11px]">{(engagement.prompt_sent ?? "").slice(0, 8000)}{(engagement.prompt_sent?.length ?? 0) > 8000 ? "\n\n… (truncated)" : ""}</pre>
@@ -449,7 +459,14 @@ export function ChatPage(props: ChatPageProps = {}) {
   const sessionId = useSessionId();
   const { isSignedIn } = useAuthState();
   const [userId, setUserId] = useState<string | null>(null);
-  const [promptTraceEnabled, setPromptTraceEnabled] = useState(false);
+  const [promptTraceEnabled, setPromptTraceEnabled] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("chat_debug_show_prompt_trace") === "true";
+    } catch {
+      return false;
+    }
+  });
   useEffect(() => {
     const read = () => {
       try {
@@ -458,7 +475,6 @@ export function ChatPage(props: ChatPageProps = {}) {
         setPromptTraceEnabled(false);
       }
     };
-    read();
     window.addEventListener("storage", read);
     window.addEventListener("focus", read);
     return () => {
