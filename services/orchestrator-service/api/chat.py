@@ -141,7 +141,10 @@ async def _stream_chat_events(
     if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
         if body.debug:
-            engagement_debug = {"prompt_sent": "(engagement skipped; used planner message)", "response_received": planner_message}
+            engagement_debug = {
+                "prompt_sent": f"No engagement LLM was called. The planner returned this message directly:\n\n---\n{planner_message}",
+                "response_received": planner_message,
+            }
     else:
         if body.debug:
             summary, engagement_debug = await generate_engagement_response(
@@ -168,6 +171,9 @@ async def _stream_chat_events(
         summary_format="markdown" if not use_adaptive_cards else None,
     )
     if body.debug:
+        engagement_debug_or = engagement_debug or {}
+        prompt_sent_full = engagement_debug_or.get("prompt_sent") or ""
+        intent_request = _intent_request_for_trace(body)
         response_data["prompt_trace"] = {
             "request_payload": {
                 "text": body.text,
@@ -176,11 +182,12 @@ async def _stream_chat_events(
                 "platform": body.platform,
             },
             "intent": {
-                "request": {"text": body.text},
+                "request": intent_request,
                 "response": (result.get("data") or {}).get("intent") or {},
             },
-            "engagement": engagement_debug or {},
+            "engagement": engagement_debug_or,
             "agent_reasoning": result.get("agent_reasoning") or [],
+            "prompt_sent": prompt_sent_full,
         }
     body_json = json.dumps(response_data, default=str)
     yield f"event: done\ndata: {body_json}\n\n"
@@ -372,7 +379,10 @@ async def chat(
     if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
         if body.debug:
-            engagement_debug_ns = {"prompt_sent": "(engagement skipped; used planner message)", "response_received": planner_message}
+            engagement_debug_ns = {
+                "prompt_sent": f"No engagement LLM was called. The planner returned this message directly:\n\n---\n{planner_message}",
+                "response_received": planner_message,
+            }
     else:
         if body.debug:
             summary, engagement_debug_ns = await generate_engagement_response(
@@ -397,13 +407,36 @@ async def chat(
         summary_format="markdown" if not use_adaptive_cards else None,
     )
     if body.debug:
+        engagement_debug_ns_or = engagement_debug_ns or {}
+        prompt_sent_full_ns = engagement_debug_ns_or.get("prompt_sent") or ""
         response_data_ns["prompt_trace"] = {
             "request_payload": {"text": body.text, "messages_count": len(body.messages or []), "limit": body.limit, "platform": body.platform},
-            "intent": {"request": {"text": body.text}, "response": (result.get("data") or {}).get("intent") or {}},
-            "engagement": engagement_debug_ns or {},
+            "intent": {"request": _intent_request_for_trace(body), "response": (result.get("data") or {}).get("intent") or {}},
+            "engagement": engagement_debug_ns_or,
             "agent_reasoning": result.get("agent_reasoning") or [],
+            "prompt_sent": prompt_sent_full_ns,
         }
     return response_data_ns
+
+
+def _intent_request_for_trace(body: ChatRequest) -> Dict[str, Any]:
+    """Build full intent request payload for prompt_trace (what we send to resolve_intent)."""
+    out: Dict[str, Any] = {"text": body.text}
+    messages = body.messages or []
+    if messages:
+        out["messages_count"] = len(messages)
+        last_assistant = next(
+            (m.get("content") or "" for m in reversed(messages) if (m.get("role") or "") == "assistant"),
+            None,
+        )
+        if last_assistant:
+            out["last_suggestion"] = last_assistant[:500] + ("..." if len(last_assistant) > 500 else "")
+        out["recent_conversation"] = [
+            {"role": m.get("role"), "content": (m.get("content") or "")[:200]}
+            for m in messages[-6:]
+        ]
+    out["experience_categories"] = "(auto-fetched from Discovery when available)"
+    return out
 
 
 def _build_summary(result: dict) -> str:

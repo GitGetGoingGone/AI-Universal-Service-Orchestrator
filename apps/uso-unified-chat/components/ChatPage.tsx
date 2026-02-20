@@ -53,9 +53,11 @@ type SuggestedCta = { label: string; action: string };
 /** Debug trace: prompt sent to model and response received (when Settings → Developer → Prompt trace on) */
 export type PromptTrace = {
   request_payload?: { text?: string; messages_count?: number; limit?: number; platform?: string };
-  intent?: { request?: { text?: string }; response?: Record<string, unknown> };
+  intent?: { request?: Record<string, unknown>; response?: Record<string, unknown> };
   engagement?: { prompt_sent?: string; response_received?: string };
   agent_reasoning?: string[];
+  /** Full prompt sent to the model (engagement LLM or planner fallback) — same as engagement.prompt_sent, surfaced for visibility */
+  prompt_sent?: string;
 };
 
 type ChatMessage = {
@@ -76,12 +78,14 @@ type ChatMessage = {
 };
 
 function PromptTraceBlock({ trace }: { trace: PromptTrace; messageId: string }) {
+  const hasPrompt = !!(trace.prompt_sent ?? trace.engagement?.prompt_sent);
   const [expanded, setExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState<"request" | "intent" | "engagement" | "steps">("engagement");
+  const [activeTab, setActiveTab] = useState<"prompt" | "request" | "intent" | "engagement" | "steps">(hasPrompt ? "prompt" : "engagement");
   const req = trace.request_payload;
   const intent = trace.intent;
   const engagement = trace.engagement;
   const steps = trace.agent_reasoning ?? [];
+  const promptSentFull = trace.prompt_sent ?? engagement?.prompt_sent ?? "";
   return (
     <div className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--card)]/50 overflow-hidden">
       <button
@@ -95,11 +99,18 @@ function PromptTraceBlock({ trace }: { trace: PromptTrace; messageId: string }) 
       {expanded && (
         <div className="border-t border-[var(--border)] p-3 space-y-3 text-xs">
           <div className="flex gap-2 border-b border-[var(--border)] pb-2 flex-wrap">
+            {hasPrompt && <button type="button" onClick={() => setActiveTab("prompt")} className={activeTab === "prompt" ? "font-medium text-[var(--primary-color)]" : "text-[var(--muted)]"}>{`Prompt sent`}</button>}
             {req && <button type="button" onClick={() => setActiveTab("request")} className={activeTab === "request" ? "font-medium text-[var(--primary-color)]" : "text-[var(--muted)]"}>{`Request`}</button>}
             {intent && <button type="button" onClick={() => setActiveTab("intent")} className={activeTab === "intent" ? "font-medium text-[var(--primary-color)]" : "text-[var(--muted)]"}>{`Intent`}</button>}
             {engagement && <button type="button" onClick={() => setActiveTab("engagement")} className={activeTab === "engagement" ? "font-medium text-[var(--primary-color)]" : "text-[var(--muted)]"}>{`Engagement`}</button>}
             {steps.length > 0 && <button type="button" onClick={() => setActiveTab("steps")} className={activeTab === "steps" ? "font-medium text-[var(--primary-color)]" : "text-[var(--muted)]"}>{`Steps (${steps.length})`}</button>}
           </div>
+          {activeTab === "prompt" && promptSentFull && (
+            <div className="space-y-2">
+              <div className="font-medium text-[var(--muted)]">Prompt sent to model</div>
+              <pre className="whitespace-pre-wrap break-words rounded bg-[var(--background)] p-2 max-h-[24rem] overflow-y-auto text-[11px]">{promptSentFull.length > 12000 ? `${promptSentFull.slice(0, 12000)}\n\n… (truncated)` : promptSentFull}</pre>
+            </div>
+          )}
           {activeTab === "request" && req && (
             <div className="space-y-1">
               <div className="font-medium text-[var(--muted)]">Sent to backend</div>
