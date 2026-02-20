@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const FLIP_WORDS = ["Discover", "Bundle", "Plan", "Payment"];
@@ -459,29 +459,27 @@ export function ChatPage(props: ChatPageProps = {}) {
   const sessionId = useSessionId();
   const { isSignedIn } = useAuthState();
   const [userId, setUserId] = useState<string | null>(null);
-  const [promptTraceEnabled, setPromptTraceEnabled] = useState(() => {
+  const [promptTraceEnabled, setPromptTraceEnabled] = useState(false);
+  const getPromptTraceFromStorage = useCallback(() => {
     if (typeof window === "undefined") return false;
     try {
       return localStorage.getItem("chat_debug_show_prompt_trace") === "true";
     } catch {
       return false;
     }
-  });
+  }, []);
+  useLayoutEffect(() => {
+    setPromptTraceEnabled(getPromptTraceFromStorage());
+  }, [getPromptTraceFromStorage]);
   useEffect(() => {
-    const read = () => {
-      try {
-        setPromptTraceEnabled(typeof window !== "undefined" && localStorage.getItem("chat_debug_show_prompt_trace") === "true");
-      } catch {
-        setPromptTraceEnabled(false);
-      }
-    };
+    const read = () => setPromptTraceEnabled(getPromptTraceFromStorage());
     window.addEventListener("storage", read);
     window.addEventListener("focus", read);
     return () => {
       window.removeEventListener("storage", read);
       window.removeEventListener("focus", read);
     };
-  }, []);
+  }, [getPromptTraceFromStorage]);
 
   useEffect(() => {
     if (!isSignedIn) {
@@ -723,7 +721,8 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (bundleId) payload.bundle_id = bundleId;
         if (latestOrder?.id) payload.order_id = latestOrder.id;
         payload.stream = true;
-        if (promptTraceEnabled || (typeof window !== "undefined" && localStorage.getItem("chat_debug_show_prompt_trace") === "true")) {
+        // Always read at send time so the first message (and every message) gets trace when setting is on
+        if (typeof window !== "undefined" && localStorage.getItem("chat_debug_show_prompt_trace") === "true") {
           payload.debug = true;
         }
 
@@ -891,7 +890,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (fromPrompt) onPromptSent?.();
       }
     },
-    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId, fetchThreads, bundleId, latestOrder, promptTraceEnabled]
+    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId, fetchThreads, bundleId, latestOrder]
   );
 
   const lastSentPromptRef = useRef<string | null>(null);

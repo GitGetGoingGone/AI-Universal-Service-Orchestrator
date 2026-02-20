@@ -458,6 +458,33 @@ async def resolve_intent(
             thread_context=thread_context,
         )
 
+    # Refinement short-circuit: "no limo" / "remove flowers" etc. in composite context -> use heuristic so we get refine_composite
+    t = (text or "").strip().lower()
+    for pat, _ in _REMOVE_PATTERNS:
+        if re.search(pat, t):
+            ls = (last_suggestion or "").lower()
+            conv = list(recent_conversation or [])
+            in_composite = bool(
+                "date night" in ls or ("flowers" in ls and "dinner" in ls) or "limo" in ls
+                or "flowers and dinner" in ls or "proposed_plan" in ls
+            )
+            if not in_composite and conv:
+                for c in reversed(conv):
+                    if isinstance(c, dict) and (c.get("role") or "").lower() == "assistant":
+                        ac = (c.get("content") or "").lower()
+                        if "date night" in ac or ("flowers" in ac and "dinner" in ac) or "limo" in ac:
+                            in_composite = True
+                        break
+            if in_composite:
+                return _heuristic_resolve(
+                    text,
+                    last_suggestion=last_suggestion,
+                    recent_conversation=recent_conversation,
+                    probe_count=probe_count,
+                    thread_context=thread_context,
+                )
+            break
+
     prompt_cfg = get_model_interaction_prompt(client, "intent") if client else None
     system_prompt = (prompt_cfg.get("system_prompt") if prompt_cfg else None) or get_intent_system_prompt()
     if not system_prompt:
