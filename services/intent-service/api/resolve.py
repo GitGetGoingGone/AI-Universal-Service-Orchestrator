@@ -102,6 +102,7 @@ async def resolve(
     if resolved.get("intent_type") == "discover_composite":
         data["search_queries"] = resolved.get("search_queries", [])
         data["experience_name"] = resolved.get("experience_name", "experience")
+        data["proposed_plan"] = resolved.get("proposed_plan", [])  # Draft Itinerary for orchestrator/frontend
         if resolved.get("bundle_options"):
             data["bundle_options"] = resolved["bundle_options"]  # may include experience_tags per option
         if resolved.get("theme_experience_tag"):

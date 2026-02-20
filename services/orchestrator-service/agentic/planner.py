@@ -118,26 +118,35 @@ async def plan_next_action(
     if state.get("bundle_id"):
         thread_context["bundle_id"] = state["bundle_id"]
 
-    # Intent Preview: pass proposed_plan, experience_name, entities so planner can write concierge probe message
+    # Intent Preview: pass full intent context so planner can write concierge probe and use bundle_options
     intent_from_result = None
     last_result = state.get("last_tool_result")
     if last_result and isinstance(last_result, dict):
         data = last_result.get("data", last_result)
         if isinstance(data, dict) and data.get("intent_type"):
             intent_from_result = data
+    i = intent_from_result or {}
+    # Bundle option labels only (save tokens); full bundle_options stay in last_tool_result for tool calls
+    bundle_labels = []
+    for opt in (i.get("bundle_options") or [])[:8]:
+        if isinstance(opt, dict) and opt.get("label"):
+            bundle_labels.append(opt.get("label"))
     state_summary = {
         "iteration": state.get("iteration", 0),
         "probe_count": state.get("probe_count", 0),
-        "last_tool_result": state.get("last_tool_result"),
         "last_suggestion": state.get("last_suggestion"),
         "recent_conversation": recent_conversation[-4:] if recent_conversation else None,
         "thread_context": thread_context if thread_context else None,
         "ucp_prioritized": state.get("ucp_prioritized", False),
-        "proposed_plan": (intent_from_result or {}).get("proposed_plan"),
-        "experience_name": (intent_from_result or {}).get("experience_name"),
-        "entities": (intent_from_result or {}).get("entities") or [],
+        "intent_type": i.get("intent_type"),
+        "recommended_next_action": i.get("recommended_next_action"),
+        "proposed_plan": i.get("proposed_plan"),
+        "experience_name": i.get("experience_name"),
+        "search_queries": i.get("search_queries"),
+        "bundle_option_labels": bundle_labels if bundle_labels else None,
+        "entities": i.get("entities") or [],
     }
-    user_content = f"User message: {user_message}\n\nCurrent state: {json.dumps(state_summary, default=str)[:1800]}"
+    user_content = f"User message: {user_message}\n\nCurrent state: {json.dumps(state_summary, default=str)[:2200]}"
 
     # Use admin-configured planner prompt from DB when available and enabled
     planner_prompt = PLANNER_SYSTEM

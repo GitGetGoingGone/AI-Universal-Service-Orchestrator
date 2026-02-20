@@ -721,10 +721,16 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (bundleId) payload.bundle_id = bundleId;
         if (latestOrder?.id) payload.order_id = latestOrder.id;
         payload.stream = true;
-        // Always read at send time so the first message (and every message) gets trace when setting is on
-        if (typeof window !== "undefined" && localStorage.getItem("chat_debug_show_prompt_trace") === "true") {
-          payload.debug = true;
+        // Always read at send time so the first message gets trace when setting is on (don't rely on state alone)
+        let wantTrace = promptTraceEnabled;
+        if (typeof window !== "undefined") {
+          try {
+            wantTrace = wantTrace || localStorage.getItem("chat_debug_show_prompt_trace") === "true";
+          } catch {
+            /* localStorage may throw in private mode */
+          }
         }
+        if (wantTrace) payload.debug = true;
 
         setThinkingText(null);
         const res = await fetch("/api/chat", {
@@ -890,7 +896,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (fromPrompt) onPromptSent?.();
       }
     },
-    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId, fetchThreads, bundleId, latestOrder]
+    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId, fetchThreads, bundleId, latestOrder, promptTraceEnabled]
   );
 
   const lastSentPromptRef = useRef<string | null>(null);

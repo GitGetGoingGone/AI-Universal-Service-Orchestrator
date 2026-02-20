@@ -54,6 +54,9 @@ def _build_context(result: Dict[str, Any]) -> str:
     engagement = data.get("engagement") or {}
 
     parts = []
+    planner_msg = (result.get("planner_complete_message") or "").strip()
+    if planner_msg and planner_msg.lower() not in ("processed your request.", "done.", "complete."):
+        parts.append(f"Planner suggested reply (use or adapt naturally): {planner_msg[:500]}")
     intent_type = intent.get("intent_type", "unknown")
     parts.append(f"Intent: {intent_type}")
 
@@ -288,17 +291,23 @@ async def generate_engagement_response(
     When return_debug is True, returns (summary, debug_dict) with debug_dict having prompt_sent and response_received.
     """
     if result.get("error"):
+        if return_debug:
+            return (None, {"prompt_sent": "(skipped: result has error)", "response_received": ""})
         return None
 
     if llm_config is None:
         from api.admin import get_llm_config  # type: ignore[reportMissingImports]
         llm_config = get_llm_config()
     if not llm_config:
+        if return_debug:
+            return (None, {"prompt_sent": "(skipped: no LLM config)", "response_received": ""})
         return None
 
     from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
     provider, client = _get_planner_client_for_config(llm_config)
     if not client:
+        if return_debug:
+            return (None, {"prompt_sent": "(skipped: no LLM client)", "response_received": ""})
         return None
 
     cfg = llm_config
