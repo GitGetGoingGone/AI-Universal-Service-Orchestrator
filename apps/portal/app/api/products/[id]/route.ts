@@ -69,7 +69,7 @@ export async function PATCH(
         experience_tags: Array.isArray(body.experience_tags)
           ? body.experience_tags.filter((t: unknown): t is string => typeof t === "string" && t.trim().length > 0).map((t: string) => t.trim().toLowerCase()).slice(0, 20)
           : typeof body.experience_tags === "string"
-            ? body.experience_tags.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).slice(0, 20)
+            ? body.experience_tags.split(",").map((s: string) => s.trim().toLowerCase()).filter(Boolean).slice(0, 20)
             : [],
       }),
       updated_at: new Date().toISOString(),
