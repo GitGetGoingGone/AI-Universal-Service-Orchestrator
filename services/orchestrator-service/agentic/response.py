@@ -12,6 +12,11 @@ Be conversational and helpful. Mention key findings (e.g. product categories, co
 Do NOT use markdown, bullets, or formal structure. Keep it under 100 words.
 """
 
+# When adaptive cards are off, we allow markdown so the client can render formatted text
+RESPONSE_SYSTEM_MARKDOWN_NOTE = """FORMATTING: Reply in markdown. You may use **bold**, lists, headings, and line breaks for clarity and emphasis. The message will be rendered as markdown. Keep it concise."""
+RESPONSE_SYSTEM_MARKDOWN_REPLACE = "Do NOT use markdown, bullets, or formal structure."
+RESPONSE_SYSTEM_MARKDOWN_WITH = "You may use markdown (**bold**, lists, line breaks) for structure and emphasis."
+
 RESPONSE_SYSTEM_COMPOSITE = """You are a luxury Universal Services Orchestrator Concierge (Proactive Concierge, not a form-filler).
 
 Tone & Style: [INJECT ADMIN_CONFIG.GLOBAL_TONE AND LANGUAGE].
@@ -51,6 +56,11 @@ def _build_context(result: Dict[str, Any]) -> str:
     parts = []
     intent_type = intent.get("intent_type", "unknown")
     parts.append(f"Intent: {intent_type}")
+
+    # Use purged proposed_plan from intent (e.g. after "no limo" → Flowers, Dinner only) so reply doesn't echo removed categories
+    proposed_plan = intent.get("proposed_plan")
+    if isinstance(proposed_plan, list) and proposed_plan:
+        parts.append(f"Current plan — use ONLY these categories in your reply: {', '.join(str(p) for p in proposed_plan)}.")
 
     last_suggestion = result.get("last_suggestion")
     if last_suggestion:
@@ -253,19 +263,21 @@ async def generate_engagement_response(
     user_message: str,
     result: Dict[str, Any],
     llm_config: Optional[Dict[str, Any]] = None,
+    allow_markdown: bool = False,
 ) -> Optional[str]:
     """
     Generate a natural, engaging response using the LLM.
+    When allow_markdown is True (e.g. no adaptive cards), the model may use markdown and the client should render it.
     Returns None on failure (caller should fall back to templated summary).
     """
     if result.get("error"):
         return None
 
     if llm_config is None:
-        from api.admin import get_llm_config
+        from api.admin import get_llm_config  # type: ignore[reportMissingImports]
         llm_config = get_llm_config()
 
-    from .planner import _get_planner_client_for_config
+    from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
     provider, client = _get_planner_client_for_config(llm_config)
     if not client:
         return None
@@ -313,6 +325,11 @@ async def generate_engagement_response(
     except Exception:
         system_prompt = default_prompt
         max_tokens = default_max_tokens
+
+    if allow_markdown:
+        if RESPONSE_SYSTEM_MARKDOWN_REPLACE in system_prompt:
+            system_prompt = system_prompt.replace(RESPONSE_SYSTEM_MARKDOWN_REPLACE, RESPONSE_SYSTEM_MARKDOWN_WITH)
+        system_prompt = (system_prompt.rstrip() + "\n\n" + RESPONSE_SYSTEM_MARKDOWN_NOTE).strip()
 
     context = _build_context(result)
     user_content = f"User said: {user_message[:300]}\n\nWhat we did: {context}\n\nWrite a brief friendly response:"
@@ -530,10 +547,10 @@ async def suggest_composite_bundle(
         return []
 
     if llm_config is None:
-        from api.admin import get_llm_config
+        from api.admin import get_llm_config  # type: ignore[reportMissingImports]
         llm_config = get_llm_config()
 
-    from .planner import _get_planner_client_for_config
+    from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
     provider, client = _get_planner_client_for_config(llm_config)
     if not client:
         return []
@@ -657,10 +674,10 @@ async def suggest_composite_bundle_options(
         return []
 
     if llm_config is None:
-        from api.admin import get_llm_config
+        from api.admin import get_llm_config  # type: ignore[reportMissingImports]
         llm_config = get_llm_config()
 
-    from .planner import _get_planner_client_for_config
+    from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
     provider, client = _get_planner_client_for_config(llm_config)
     if not client:
         return []

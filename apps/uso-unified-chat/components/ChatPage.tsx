@@ -48,6 +48,8 @@ import { BundleFulfillmentModal } from "@/components/BundleFulfillmentModal";
 import { SideNav } from "@/components/SideNav";
 import { useSideNavCollapsed } from "@/hooks/useSideNavCollapsed";
 
+type SuggestedCta = { label: string; action: string };
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -55,6 +57,12 @@ type ChatMessage = {
   adaptiveCard?: Record<string, unknown>;
   /** When true, message was loaded from history — skip typewriter effect */
   isFromHistory?: boolean;
+  /** When no adaptive card: CTAs to show as buttons (Add to bundle, Proceed to payment) */
+  suggestedCtas?: SuggestedCta[];
+  /** Context for CTA actions (e.g. first bundle option for add_to_bundle) */
+  ctaContext?: {
+    suggested_bundle_options?: Array<{ product_ids?: string[]; option_label?: string; [k: string]: unknown }>;
+  };
 };
 
 const E2E_ACTIONS = ["add_to_bundle", "add_bundle_bulk", "view_bundle", "remove_from_bundle", "replace_in_bundle", "checkout", "complete_checkout"];
@@ -601,6 +609,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         type ChatResponse = {
           data?: {
             products?: { products?: Array<{ name?: string; price?: number }>; count?: number };
+            engagement?: { suggested_bundle_options?: Array<{ product_ids?: string[]; option_label?: string; [k: string]: unknown }> };
             text?: string;
             error?: string;
           };
@@ -608,6 +617,7 @@ export function ChatPage(props: ChatPageProps = {}) {
           message?: string;
           error?: string;
           adaptive_card?: Record<string, unknown>;
+          suggested_ctas?: SuggestedCta[];
         };
 
         const contentType = res.headers.get("content-type") || "";
@@ -683,10 +693,14 @@ export function ChatPage(props: ChatPageProps = {}) {
             });
           }
           fetchThreads();
+          const suggestedCtas = Array.isArray((data as ChatResponse).suggested_ctas) ? (data as ChatResponse).suggested_ctas : undefined;
+          const opts = (data as ChatResponse).data?.engagement?.suggested_bundle_options;
           addMessage({
             role: "assistant",
             content: assistantContent,
             adaptiveCard: data.adaptive_card,
+            ...(suggestedCtas?.length && { suggestedCtas }),
+            ...(suggestedCtas?.length && opts?.length && { ctaContext: { suggested_bundle_options: opts } }),
           });
         } else {
           let data: ChatResponse;
@@ -725,10 +739,14 @@ export function ChatPage(props: ChatPageProps = {}) {
             });
           }
           fetchThreads();
+          const suggestedCtas = Array.isArray(data.suggested_ctas) ? data.suggested_ctas : undefined;
+          const opts = data.data?.engagement?.suggested_bundle_options;
           addMessage({
             role: "assistant",
             content: assistantContent,
             adaptiveCard: data.adaptive_card,
+            ...(suggestedCtas?.length && { suggestedCtas }),
+            ...(suggestedCtas?.length && opts?.length && { ctaContext: { suggested_bundle_options: opts } }),
           });
         }
       } catch (err) {
@@ -987,6 +1005,18 @@ export function ChatPage(props: ChatPageProps = {}) {
           });
           const json = await res.json();
           if (!res.ok) throw new Error(json.error || "Checkout failed");
+          const orderId = json.order_id ?? json.data?.order_id;
+          if (orderId) {
+            setLatestOrder({
+              id: orderId,
+              status: "pending",
+              payment_status: "pending",
+              created_at: new Date().toISOString(),
+              currency: (json.data?.currency as string) ?? "USD",
+              total_amount: typeof json.data?.total_amount === "number" ? json.data.total_amount : 0,
+              items: Array.isArray(json.data?.items) ? json.data.items : [],
+            });
+          }
           const addMsg = { role: "assistant" as const, content: json.summary, adaptiveCard: json.adaptive_card };
           addMessage(addMsg);
           persistMessage(addMsg);
@@ -1452,6 +1482,33 @@ export function ChatPage(props: ChatPageProps = {}) {
                         </div>
                       );
                     })()}
+                    {/* When no adaptive card: render suggested_ctas as buttons (Add to bundle, Proceed to payment) */}
+                    {m.role === "assistant" && m.suggestedCtas && m.suggestedCtas.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {m.suggestedCtas.map((cta, idx) => (
+                          <button
+                            key={`${cta.action}-${idx}`}
+                            type="button"
+                            onClick={() => {
+                              if (cta.action === "add_to_bundle") {
+                                const first = m.ctaContext?.suggested_bundle_options?.[0];
+                                const productIds = first?.product_ids;
+                                if (productIds?.length) {
+                                  handleAction({ action: "add_bundle_bulk", product_ids: productIds, option_label: first?.option_label });
+                                } else if (bundleId) {
+                                  handleAction({ action: "view_bundle", bundle_id: bundleId });
+                                }
+                              } else if (cta.action === "proceed_to_payment" && latestOrder?.id) {
+                                handleAction({ action: "complete_checkout", order_id: latestOrder.id });
+                              }
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--primary-color)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
+                          >
+                            {cta.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {m.role === "assistant" && (
                     <div className="flex items-center gap-1 pl-1 flex-wrap">

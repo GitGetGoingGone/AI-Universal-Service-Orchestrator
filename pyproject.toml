@@ -45,3 +45,8 @@ addopts = "-v --tb=short"
 markers = [
     "server: marks tests as server-based (run against deployed URL)",
 ]
+
+[tool.pyright]
+# Resolve imports like "api.admin", "db" when analyzing orchestrator-service (run from repo root)
+extraPaths = ["services/orchestrator-service"]
+reportMissingImports = "warning"

@@ -125,12 +125,21 @@ async def _stream_chat_events(
     adaptive_card = result.get("adaptive_card") if use_adaptive_cards else None
     # Do NOT inject agent_reasoning into the card — it's internal and not user-facing
 
+    suggested_ctas_stream: List[Dict[str, str]] = []
+    if not use_adaptive_cards:
+        res_data = result.get("data") or {}
+        res_engagement = res_data.get("engagement") or {}
+        if res_engagement.get("suggested_bundle_options"):
+            suggested_ctas_stream.append({"label": "Add to bundle", "action": "add_to_bundle"})
+        if body.order_id or res_engagement.get("order_status"):
+            suggested_ctas_stream.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
+
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
     if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
     else:
-        summary = await generate_engagement_response(body.text, result)
+        summary = await generate_engagement_response(body.text, result, allow_markdown=not use_adaptive_cards)
         if not summary:
             summary = _build_summary(result)
     if not summary:
@@ -142,6 +151,8 @@ async def _stream_chat_events(
         request_id=request_id,
         summary=summary or "I'm here to help. What would you like to explore?",
         agent_reasoning=result.get("agent_reasoning", []),
+        suggested_ctas=suggested_ctas_stream if suggested_ctas_stream else None,
+        summary_format="markdown" if not use_adaptive_cards else None,
     )
     body_json = json.dumps(response_data, default=str)
     yield f"event: done\ndata: {body_json}\n\n"
@@ -312,6 +323,16 @@ async def chat(
     adaptive_card = result.get("adaptive_card") if use_adaptive_cards else None
     # Do NOT inject agent_reasoning into the card — it's internal and not user-facing
 
+    # When adaptive cards are off, expose CTAs so the client can show "Add to bundle" / "Proceed to payment" buttons
+    suggested_ctas: List[Dict[str, str]] = []
+    if not use_adaptive_cards:
+        res_data = result.get("data") or {}
+        res_engagement = res_data.get("engagement") or {}
+        if res_engagement.get("suggested_bundle_options"):
+            suggested_ctas.append({"label": "Add to bundle", "action": "add_to_bundle"})
+        if body.order_id or res_engagement.get("order_status"):
+            suggested_ctas.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
+
     # Prefer planner message only when it's specific (e.g. probing questions).
     # For generic fallbacks ("Processed your request.", "Done."), always use engagement response
     # so the LLM can generate natural, empathetic replies (e.g. "I know, it's a lot to take in!").
@@ -320,7 +341,7 @@ async def chat(
     if planner_message and planner_message.lower() not in generic_messages:
         summary = planner_message
     else:
-        summary = await generate_engagement_response(body.text, result)
+        summary = await generate_engagement_response(body.text, result, allow_markdown=not use_adaptive_cards)
         if not summary:
             summary = _build_summary(result)
     return chat_first_response(
@@ -330,6 +351,8 @@ async def chat(
         request_id=request_id,
         summary=summary,
         agent_reasoning=result.get("agent_reasoning", []),
+        suggested_ctas=suggested_ctas if suggested_ctas else None,
+        summary_format="markdown" if not use_adaptive_cards else None,
     )
 
 
@@ -345,8 +368,12 @@ def _build_summary(result: dict) -> str:
     products = data.get("products") or {}
     product_list = products.get("products") or []
     count = products.get("count", len(product_list))
+    last_suggestion = (result.get("last_suggestion") or "").lower()
 
     if count == 0:
+        # After checkout, "ok" / "sure" should not trigger "No products found"
+        if "checkout" in last_suggestion or "order" in last_suggestion or engagement.get("order_status"):
+            return "Your order is ready for payment. Complete payment when you're ready."
         query = (intent.get("search_query") or "").strip() or "your search"
         return f"No products found for '{query}'."
 
