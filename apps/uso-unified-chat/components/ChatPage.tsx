@@ -438,6 +438,23 @@ export function ChatPage(props: ChatPageProps = {}) {
   const sessionId = useSessionId();
   const { isSignedIn } = useAuthState();
   const [userId, setUserId] = useState<string | null>(null);
+  const [promptTraceEnabled, setPromptTraceEnabled] = useState(false);
+  useEffect(() => {
+    const read = () => {
+      try {
+        setPromptTraceEnabled(typeof window !== "undefined" && localStorage.getItem("chat_debug_show_prompt_trace") === "true");
+      } catch {
+        setPromptTraceEnabled(false);
+      }
+    };
+    read();
+    window.addEventListener("storage", read);
+    window.addEventListener("focus", read);
+    return () => {
+      window.removeEventListener("storage", read);
+      window.removeEventListener("focus", read);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isSignedIn) {
@@ -679,12 +696,8 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (bundleId) payload.bundle_id = bundleId;
         if (latestOrder?.id) payload.order_id = latestOrder.id;
         payload.stream = true;
-        try {
-          if (typeof window !== "undefined" && localStorage.getItem("chat_debug_show_prompt_trace") === "true") {
-            payload.debug = true;
-          }
-        } catch {
-          /* ignore */
+        if (promptTraceEnabled || (typeof window !== "undefined" && localStorage.getItem("chat_debug_show_prompt_trace") === "true")) {
+          payload.debug = true;
         }
 
         setThinkingText(null);
@@ -851,7 +864,7 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (fromPrompt) onPromptSent?.();
       }
     },
-    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId, fetchThreads, bundleId, latestOrder]
+    [addMessage, loading, messages, partnerId, sessionId, threadId, anonymousId, setThreadId, onPromptSent, userId, fetchThreads, bundleId, latestOrder, promptTraceEnabled]
   );
 
   const lastSentPromptRef = useRef<string | null>(null);
@@ -1606,6 +1619,11 @@ export function ChatPage(props: ChatPageProps = {}) {
                     {/* Debug: prompt trace (when Settings → Developer → Prompt trace on) */}
                     {m.role === "assistant" && m.promptTrace && (
                       <PromptTraceBlock trace={m.promptTrace} messageId={m.id} />
+                    )}
+                    {m.role === "assistant" && promptTraceEnabled && !m.promptTrace && (
+                      <div className="mt-3 rounded-lg border border-dashed border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-xs text-[var(--muted)]">
+                        Prompt trace is on. Send a <strong>new message</strong> to see &quot;Prompt trace (request → intent → engagement → steps)&quot; under the next reply. Restart the Orchestrator service if you still don&apos;t see it.
+                      </div>
                     )}
                   </div>
                   {m.role === "assistant" && (
