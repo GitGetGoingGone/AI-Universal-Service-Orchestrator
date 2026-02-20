@@ -55,7 +55,7 @@ TOOL_DEFS = [
             "type": "object",
             "properties": {
                 "bundle_options": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "description": {"type": "string"}, "categories": {"type": "array", "items": {"type": "string"}}}}, "description": "Bundle tiers from intent with model-generated labels (e.g. [{label: 'Romantic Classic', categories: [flowers, restaurant, movies]}, ...])"},
-                "search_queries": {"type": "array", "items": {"type": "string"}, "description": "All unique categories across bundles (fallback when bundle_options absent)"},
+                "search_queries": {"type": "array", "items": {"type": "string"}, "description": "Categories to include. When intent is refine_composite (e.g. user said 'no limo'), use the search_queries from the intent result—they are already purged. Otherwise all unique categories across bundles or from bundle_options."},
                 "experience_name": {"type": "string", "description": "Experience name (e.g. date night, baby shower)", "default": "experience"},
                 "location": {"type": "string", "description": "Optional location filter"},
                 "budget_max": {"type": "integer", "description": "Max price in cents (e.g. 5000 for $50)"},

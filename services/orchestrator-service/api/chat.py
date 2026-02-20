@@ -350,7 +350,7 @@ def _build_summary(result: dict) -> str:
         query = (intent.get("search_query") or "").strip() or "your search"
         return f"No products found for '{query}'."
 
-    # For discover_composite with bundle: narrative experience plan, not product list
+    # For discover_composite with bundle: narrative from actual bundle items only (no hardcoded limo/flowers/restaurant)
     suggested = engagement.get("suggested_bundle_options") or []
     if intent_type == "discover_composite" and suggested:
         opt = suggested[0]
@@ -360,10 +360,15 @@ def _build_summary(result: dict) -> str:
         exp = products.get("experience_name", "experience")
         exp_title = str(exp).replace("_", " ").title()
         total_str = f"{curr} {total:.2f}" if total is not None else ""
+        # Describe only what's in the bundle (respects "no limo" / removed categories)
+        if not names:
+            intro = f"Your perfect {exp_title} is ready."
+        elif len(names) == 1:
+            intro = f"Your perfect {exp_title}: {names[0]}."
+        else:
+            intro = f"Your perfect {exp_title}: {' — '.join(names)}."
         return (
-            f"Your perfect {exp_title}: Pick up at 6:00 PM—we'll need your address for that. "
-            f"The {names[0] if names else 'flowers'} will be sent to the restaurant. "
-            f"A driver from the limo company will pick you up; the limo features {names[-1] if len(names) > 1 else 'premium decor'}. "
+            f"{intro} "
             f"To place this order I'll need pickup time, pickup address, and delivery address—you can share them in the chat now or when you tap Add this bundle. "
             f"Total: {total_str}. Add this bundle when you're ready."
         )

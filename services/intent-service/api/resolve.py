@@ -102,8 +102,16 @@ async def resolve(
         data["experience_name"] = resolved.get("experience_name", "experience")
         if resolved.get("unrelated_to_probing"):
             data["unrelated_to_probing"] = True
+    if resolved.get("intent_type") == "refine_composite":
+        # Purged list so orchestrator runs discover_composite without removed categories (e.g. "no limo" -> flowers, dinner only)
+        data["search_queries"] = resolved.get("search_queries", [])
+        data["experience_name"] = resolved.get("experience_name", "experience")
+        data["proposed_plan"] = resolved.get("proposed_plan", [])
+        data["removed_categories"] = resolved.get("removed_categories", [])
     if resolved.get("recommended_next_action"):
         data["recommended_next_action"] = resolved["recommended_next_action"]
+    if resolved.get("proposed_plan") is not None and "proposed_plan" not in data:
+        data["proposed_plan"] = resolved.get("proposed_plan", [])
     return chat_first_response(
         data=data,
         machine_readable=machine_readable,
