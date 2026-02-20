@@ -35,7 +35,7 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 -- Chocolate product
-INSERT INTO products (id, partner_id, name, description, price, currency, capabilities, created_at, updated_at)
+INSERT INTO products (id, partner_id, name, description, price, currency, capabilities, experience_tags, created_at, updated_at)
 VALUES (
   'c3eebc99-9c0b-4ef8-bb6d-6bb9bd380a34',
   'b2eebc99-9c0b-4ef8-bb6d-6bb9bd380a23',
@@ -44,10 +44,11 @@ VALUES (
   29.99,
   'USD',
   '["chocolates"]'::jsonb,
+  '["gift", "celebration", "luxury", "romantic"]'::jsonb,
   NOW(),
   NOW()
 )
-ON CONFLICT (id) DO UPDATE SET description = EXCLUDED.description, updated_at = NOW();
+ON CONFLICT (id) DO UPDATE SET description = EXCLUDED.description, experience_tags = EXCLUDED.experience_tags, updated_at = NOW();
 
 -- Bundle (flowers + chocolates)
 INSERT INTO bundles (id, user_id, bundle_name, total_price, currency, status, created_at)

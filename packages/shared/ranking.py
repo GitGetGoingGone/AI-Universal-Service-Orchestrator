@@ -106,9 +106,12 @@ def sort_products_by_rank(
     commission_map: Optional[Dict[str, float]] = None,
     active_sponsorships: Optional[Set[str]] = None,
     config: Optional[Dict[str, Any]] = None,
+    experience_tag_boost: Optional[str] = None,
+    experience_tag_boost_amount: float = 0.2,
 ) -> List[Dict[str, Any]]:
     """
     Sort products by rank score. Sponsored products get a boost (up to max_sponsored_per_query).
+    When experience_tag_boost is set, products whose experience_tags contain that tag get an extra boost.
     """
     config = config or {}
     if not config.get("ranking_enabled", True):
@@ -133,6 +136,13 @@ def sort_products_by_rank(
 
         if pid in active_sponsorships and max_sponsored > 0:
             score += sponsorship_boost
+
+        if experience_tag_boost and experience_tag_boost_amount:
+            tags = p.get("experience_tags")
+            if isinstance(tags, list):
+                tag_set = {str(t).strip().lower() for t in tags if t}
+                if experience_tag_boost.strip().lower() in tag_set:
+                    score += experience_tag_boost_amount
 
         scored.append((score, p))
 

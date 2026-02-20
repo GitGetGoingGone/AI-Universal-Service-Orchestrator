@@ -15,6 +15,7 @@ from db import (
     get_active_sponsorships,
     get_admin_orchestration_settings,
     get_composite_discovery_config,
+    get_internal_agent_urls,
     get_partner_ratings_map,
     get_partners_by_ids,
     get_platform_config_ranking,
@@ -23,7 +24,11 @@ from db import (
 from semantic_search import semantic_search
 
 
-async def _apply_ranking(products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def _apply_ranking(
+    products: List[Dict[str, Any]],
+    experience_tag: Optional[str] = None,
+    experience_tag_boost_amount: float = 0.2,
+) -> List[Dict[str, Any]]:
     """Apply partner ranking to products. Returns sorted list."""
     if not products:
         return products
@@ -46,6 +51,8 @@ async def _apply_ranking(products: List[Dict[str, Any]]) -> List[Dict[str, Any]]
         commission_map=None,
         active_sponsorships=active_sponsorships,
         config=config,
+        experience_tag_boost=experience_tag,
+        experience_tag_boost_amount=experience_tag_boost_amount,
     )
 
 
@@ -137,16 +144,24 @@ async def _fetch_via_aggregator(
     fetch_limit: int,
     partner_id: Optional[str],
     exclude_partner_id: Optional[str],
+    experience_tag: Optional[str] = None,
+    experience_tags: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Fetch via DiscoveryAggregator (LocalDB + UCP + MCP) with timeout."""
+    """Fetch via DiscoveryAggregator (LocalDB + optional UCP from private registry) with timeout."""
     admin = await get_admin_orchestration_settings()
     timeout_ms = 5000
     if admin and isinstance(admin.get("discovery_timeout_ms"), (int, float)):
         timeout_ms = int(admin["discovery_timeout_ms"])
     local_driver = LocalDBDriver(search_products)
+    ucp_driver = None
+    internal_urls = await get_internal_agent_urls()
+    if internal_urls:
+        async def _get_partner_urls():
+            return internal_urls
+        ucp_driver = UCPManifestDriver(get_partner_manifest_urls=_get_partner_urls)
     aggregator = DiscoveryAggregator(
         local_db_driver=local_driver,
-        ucp_driver=None,
+        ucp_driver=ucp_driver,
         mcp_driver=None,
         timeout_ms=timeout_ms,
     )
@@ -155,6 +170,8 @@ async def _fetch_via_aggregator(
         limit=fetch_limit,
         partner_id=partner_id,
         exclude_partner_id=exclude_partner_id,
+        experience_tag=experience_tag,
+        experience_tags=experience_tags,
     )
     return [p.to_dict() for p in ucp_products]
 
@@ -165,6 +182,9 @@ async def _fetch_and_rank(
     partner_id: Optional[str],
     exclude_partner_id: Optional[str],
     use_semantic: bool,
+    experience_tag: Optional[str] = None,
+    experience_tags: Optional[List[str]] = None,
+    experience_tag_boost_amount: float = 0.2,
 ) -> List[Dict[str, Any]]:
     """Fetch products (semantic or text) and apply ranking or product_mix."""
     fetch_limit = limit
@@ -181,30 +201,30 @@ async def _fetch_and_rank(
 
     if not query or not query.strip():
         if use_aggregator:
-            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id)
+            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
         else:
-            products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+            products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
     elif is_browse_query(query):
         if use_aggregator:
-            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id)
+            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
         else:
-            products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+            products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
     else:
         if use_semantic and not use_aggregator:
-            products = await semantic_search(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+            products = await semantic_search(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
             if not products:
-                products = await search_products(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+                products = await search_products(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
         elif use_aggregator:
-            products = await _fetch_via_aggregator(query, fetch_limit, partner_id, exclude_partner_id)
+            products = await _fetch_via_aggregator(query, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
         else:
-            products = await search_products(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+            products = await search_products(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
         if not products and query.lower() in ("gifts", "gift"):
             for fallback in ("gift", "birthday", "present"):
                 if fallback != query.lower():
                     if use_aggregator:
-                        products = await _fetch_via_aggregator(fallback, fetch_limit, partner_id, exclude_partner_id)
+                        products = await _fetch_via_aggregator(fallback, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
                     else:
-                        products = await search_products(query=fallback, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+                        products = await search_products(query=fallback, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
                     if products:
                         break
 
@@ -221,7 +241,9 @@ async def _fetch_and_rank(
             products, product_mix, limit,
             partners_map, partner_ratings_map, active_sponsorships,
         )
-    return await _apply_ranking(products)
+    # Use first tag for boost when multiple tags provided
+    boost_tag = (experience_tags[0] if experience_tags else experience_tag) if (experience_tags or experience_tag) else None
+    return await _apply_ranking(products, experience_tag=boost_tag, experience_tag_boost_amount=experience_tag_boost_amount)
 
 
 async def search(
@@ -231,21 +253,27 @@ async def search(
     partner_id: Optional[str] = None,
     exclude_partner_id: Optional[str] = None,
     use_semantic: bool = True,
+    experience_tag: Optional[str] = None,
+    experience_tags: Optional[List[str]] = None,
+    experience_tag_boost_amount: float = 0.2,
 ) -> List[Dict[str, Any]]:
     """
     Unified product discovery: semantic search when available, else text search.
 
     - use_semantic=True: Try pgvector first; fallback to text if no results or embeddings unavailable
     - location: Reserved for future geospatial filter (PostGIS)
+    - experience_tag: Optional filter/boost by experience tag (e.g. baby, celebration)
+    - experience_tags: Optional filter by multiple tags (AND semantics; e.g. luxury, travel-friendly)
+    - experience_tag_boost_amount: Score boost for products matching experience tag (default 0.2)
     - Applies action-word stripping when query looks like full sentence (e.g. "wanna book limo" -> "limo")
     - Applies partner ranking when ranking_enabled in platform_config
     - When composite_discovery_config.product_mix is set: composes results from slices (price, rating, sponsored, etc.)
     """
     if not query or not query.strip():
-        return await _fetch_and_rank("", limit, partner_id, exclude_partner_id, use_semantic)
+        return await _fetch_and_rank("", limit, partner_id, exclude_partner_id, use_semantic, experience_tag, experience_tags, experience_tag_boost_amount)
 
     if is_browse_query(query):
-        return await _fetch_and_rank("", limit, partner_id, exclude_partner_id, use_semantic)
+        return await _fetch_and_rank("", limit, partner_id, exclude_partner_id, use_semantic, experience_tag, experience_tags, experience_tag_boost_amount)
 
     if " " in query.strip():
         derived = derive_search_query(query)
@@ -253,8 +281,8 @@ async def search(
             query = derived
 
     if use_semantic:
-        results = await _fetch_and_rank(query, limit, partner_id, exclude_partner_id, True)
+        results = await _fetch_and_rank(query, limit, partner_id, exclude_partner_id, True, experience_tag, experience_tags, experience_tag_boost_amount)
         if results:
             return results
 
-    return await _fetch_and_rank(query, limit, partner_id, exclude_partner_id, False)
+    return await _fetch_and_rank(query, limit, partner_id, exclude_partner_id, False, experience_tag, experience_tags, experience_tag_boost_amount)

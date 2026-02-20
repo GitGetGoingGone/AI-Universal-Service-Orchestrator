@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 import httpx
 from pydantic import BaseModel
@@ -10,7 +10,19 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from config import settings
-from db import get_product_by_id, get_products_for_acp_export, add_product_to_bundle, add_products_to_bundle_bulk, get_bundle_by_id, remove_from_bundle, replace_product_in_bundle, create_order_from_bundle
+from db import (
+    get_distinct_experience_tags,
+    get_product_by_id,
+    get_products_for_acp_export,
+    add_product_to_bundle,
+    add_products_to_bundle_bulk,
+    get_bundle_by_id,
+    remove_from_bundle,
+    replace_product_in_bundle,
+    create_order_from_bundle,
+    mask_products,
+    resolve_masked_id,
+)
 from scout_engine import search
 from protocols.acp_compliance import validate_product_acp
 from protocols.ucp_compliance import validate_product_ucp
@@ -18,6 +30,27 @@ from packages.shared.adaptive_cards import generate_product_card, generate_bundl
 from packages.shared.adaptive_cards.base import create_card, text_block
 
 router = APIRouter(prefix="/api/v1", tags=["Discover"])
+
+
+def _product_for_public_response(product: dict) -> dict:
+    """Strip internal-only fields (experience_tags) so Planner/UCP clients never see them."""
+    out = {k: v for k, v in product.items() if k != "experience_tags"}
+    return out
+
+
+@router.get("/experience-categories")
+async def get_experience_categories(request: Request):
+    """Return distinct experience categories (tags) for filtering discovery (e.g. baby, celebration)."""
+    categories = await get_distinct_experience_tags()
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    return {
+        "data": {"experience_categories": categories},
+        "metadata": {
+            "api_version": "v1",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "request_id": request_id,
+        },
+    }
 
 
 class AddToBundleBody(BaseModel):
@@ -69,6 +102,8 @@ async def discover_products(
     exclude_partner_id: Optional[str] = Query(None, description="Exclude partner (for re-sourcing)"),
     limit: int = Query(20, ge=1, le=100),
     budget_max: Optional[int] = Query(None, ge=0, description="Max price in cents (e.g. 5000 for $50)"),
+    experience_tag: Optional[str] = Query(None, description="Filter/boost by experience category (e.g. baby, celebration)"),
+    experience_tags: Optional[List[str]] = Query(None, description="Filter by multiple experience categories (AND semantics; e.g. luxury, travel-friendly)"),
 ):
     """
     Discover products by intent/query.
@@ -77,7 +112,11 @@ async def discover_products(
     products = await search(
         query=intent, limit=limit * 2 if budget_max else limit,
         partner_id=partner_id, exclude_partner_id=exclude_partner_id,
+        experience_tag=experience_tag,
+        experience_tags=experience_tags,
     )
+    if settings.id_masking_enabled and products:
+        products = await mask_products(products, source="local")
     if budget_max is not None:
         filtered = []
         for p in products:
@@ -92,9 +131,12 @@ async def discover_products(
     else:
         products = products[:limit]
 
+    # Multi-Agent encapsulation: do not expose experience_tags to Planner/UCP
+    products_public = [_product_for_public_response(p) for p in products]
+
     # Build JSON-LD ItemList (schema.org)
     item_list_elements = []
-    for p in products:
+    for p in products_public:
         item_list_elements.append(
             {
                 "@type": "Product",
@@ -114,16 +156,16 @@ async def discover_products(
 
     return {
         "data": {
-            "products": products,
-            "count": len(products),
+            "products": products_public,
+            "count": len(products_public),
         },
         "machine_readable": {
             "@context": "https://schema.org",
             "@type": "ItemList",
-            "numberOfItems": len(products),
+            "numberOfItems": len(products_public),
             "itemListElement": item_list_elements,
         },
-        "adaptive_card": generate_product_card(products[:5]),
+        "adaptive_card": generate_product_card(products_public[:5]),
         "metadata": {
             "api_version": "v1",
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -203,24 +245,36 @@ async def get_product(
     request: Request,
     product_id: str,
 ):
-    """Get product by ID. For View Details action."""
-    product = await get_product_by_id(product_id)
+    """Get product by ID. For View Details action. Accepts masked id (uso_*) when ID masking is enabled."""
+    internal_id = product_id
+    if str(product_id).startswith("uso_"):
+        resolved = resolve_masked_id(product_id)
+        if resolved:
+            internal_id = resolved[0]
+        else:
+            raise HTTPException(status_code=404, detail="Product not found")
+    product = await get_product_by_id(internal_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    if settings.id_masking_enabled and str(product_id).startswith("uso_"):
+        product = dict(product)
+        product["id"] = product_id
+        product.pop("partner_id", None)
+    product_public = _product_for_public_response(product)
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
     return {
-        "data": product,
+        "data": product_public,
         "machine_readable": {
             "@context": "https://schema.org",
             "@type": "Product",
-            "name": product.get("name"),
-            "description": product.get("description"),
+            "name": product_public.get("name"),
+            "description": product_public.get("description"),
             "offers": {
                 "@type": "Offer",
-                "price": float(product.get("price", 0)),
-                "priceCurrency": product.get("currency", "USD"),
+                "price": float(product_public.get("price", 0)),
+                "priceCurrency": product_public.get("currency", "USD"),
             },
-            "identifier": str(product.get("id")),
+            "identifier": str(product_public.get("id")),
         },
         "metadata": {
             "api_version": "v1",

@@ -8,11 +8,44 @@ import httpx
 
 from config import settings
 from packages.shared.discovery import fallback_search_query
+from packages.shared.gateway_signature import sign_request
 
 logger = logging.getLogger(__name__)
 
+
+def _gateway_headers_for_discovery(method: str, path: str, body: bytes = b"") -> Dict[str, str]:
+    """When GATEWAY_INTERNAL_SECRET is set, return X-Gateway-Signature and X-Gateway-Timestamp for Discovery requests."""
+    if not getattr(settings, "gateway_internal_secret", ""):
+        return {}
+    sig, ts = sign_request(method, path, body, settings.gateway_internal_secret)
+    return {"X-Gateway-Signature": sig, "X-Gateway-Timestamp": str(ts)}
+
 # Render cold starts can take 30-60s; use 60s timeout for staging
 HTTP_TIMEOUT = 60.0
+
+
+async def get_experience_categories() -> List[str]:
+    """
+    Fetch available experience categories from Discovery (GET /api/v1/experience-categories).
+    Used to pre-fill intent resolve so the LLM knows available tags for theme bundles.
+    Returns empty list if Discovery is unavailable or endpoint errors.
+    """
+    url = f"{settings.discovery_service_url}/api/v1/experience-categories"
+    path = "/api/v1/experience-categories"
+    headers = _gateway_headers_for_discovery("GET", path)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(url, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+        inner = data.get("data") or data
+        cats = inner.get("experience_categories")
+        if isinstance(cats, list):
+            return [str(t).strip() for t in cats if t and str(t).strip()]
+        return []
+    except Exception as e:
+        logger.debug("Could not fetch experience categories from Discovery: %s", e)
+        return []
 
 
 async def resolve_intent_with_fallback(
@@ -28,7 +61,11 @@ async def resolve_intent_with_fallback(
     Resolve intent via Intent service. On 502/timeout/unavailable, use local fallback
     so chat still returns products (Intent service outage resilience).
     When force_model=True (ChatGPT/Gemini with force_model_based_intent), do not fall back.
+    Automatically fetches experience_categories from Discovery and passes to Intent for theme-bundle prompts.
     """
+    experience_categories: List[str] = []
+    if getattr(settings, "discovery_service_url", None):
+        experience_categories = await get_experience_categories()
     try:
         return await resolve_intent(
             text,
@@ -37,6 +74,7 @@ async def resolve_intent_with_fallback(
             recent_conversation=recent_conversation,
             probe_count=probe_count,
             thread_context=thread_context,
+            experience_categories=experience_categories,
             force_model=force_model,
         )
     except (httpx.HTTPStatusError, httpx.RequestError, RuntimeError) as e:
@@ -64,12 +102,14 @@ async def resolve_intent(
     recent_conversation: Optional[List[Dict[str, Any]]] = None,
     probe_count: Optional[int] = None,
     thread_context: Optional[Dict[str, Any]] = None,
+    experience_categories: Optional[List[str]] = None,
     force_model: bool = False,
 ) -> Dict[str, Any]:
     """
     Call Intent service to resolve intent from natural language.
     Raises on 4xx/5xx. Callers should catch and use local fallback when Intent is unavailable.
     When force_model=True, intent service will not fall back to heuristics on LLM failure.
+    experience_categories: optional list of experience tags (from GET experience-categories) for theme bundle options.
     """
     url = f"{settings.intent_service_url}/api/v1/resolve"
     payload: Dict[str, Any] = {"text": text, "user_id": user_id, "persist": True}
@@ -81,6 +121,8 @@ async def resolve_intent(
         payload["probe_count"] = probe_count
     if thread_context:
         payload["thread_context"] = thread_context
+    if experience_categories:
+        payload["experience_categories"] = experience_categories
     if force_model:
         payload["force_model"] = True
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
@@ -116,6 +158,8 @@ async def discover_products(
     partner_id: Optional[str] = None,
     exclude_partner_id: Optional[str] = None,
     budget_max: Optional[int] = None,
+    experience_tag: Optional[str] = None,
+    experience_tags: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Call Discovery service to find products by query. Retries on 429 (rate limit)."""
     url = f"{settings.discovery_service_url}/api/v1/discover"
@@ -128,9 +172,15 @@ async def discover_products(
         params["exclude_partner_id"] = exclude_partner_id
     if budget_max is not None:
         params["budget_max"] = budget_max
+    if experience_tag:
+        params["experience_tag"] = experience_tag
+    if experience_tags:
+        params["experience_tags"] = experience_tags
+    path = "/api/v1/discover"
+    headers = _gateway_headers_for_discovery("GET", path)
     for attempt in range(DISCOVERY_RETRY_ATTEMPTS):
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            r = await client.get(url, params=params)
+            r = await client.get(url, params=params, headers=headers)
             if r.status_code == 429 and attempt < DISCOVERY_RETRY_ATTEMPTS - 1:
                 delay = DISCOVERY_RETRY_BASE_DELAY
                 retry_after = r.headers.get("Retry-After")
@@ -154,8 +204,10 @@ async def discover_products(
 async def get_product_details(product_id: str) -> Dict[str, Any]:
     """Call Discovery service to get product by ID (View Details)."""
     url = f"{settings.discovery_service_url}/api/v1/products/{product_id}"
+    path = f"/api/v1/products/{product_id}"
+    headers = _gateway_headers_for_discovery("GET", path)
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.get(url)
+        r = await client.get(url, headers=headers)
         r.raise_for_status()
         return r.json()
 
@@ -163,8 +215,10 @@ async def get_product_details(product_id: str) -> Dict[str, Any]:
 async def get_bundle_details(bundle_id: str) -> Dict[str, Any]:
     """Call Discovery service to get bundle by ID (View Bundle)."""
     url = f"{settings.discovery_service_url}/api/v1/bundles/{bundle_id}"
+    path = f"/api/v1/bundles/{bundle_id}"
+    headers = _gateway_headers_for_discovery("GET", path)
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.get(url)
+        r = await client.get(url, headers=headers)
         r.raise_for_status()
         return r.json()
 
@@ -176,6 +230,7 @@ async def add_to_bundle(
 ) -> Dict[str, Any]:
     """Call Discovery service to add product to bundle."""
     url = f"{settings.discovery_service_url}/api/v1/bundle/add"
+    headers = _gateway_headers_for_discovery("POST", "/api/v1/bundle/add")
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         r = await client.post(
             url,
@@ -184,6 +239,7 @@ async def add_to_bundle(
                 "user_id": user_id,
                 "bundle_id": bundle_id,
             },
+            headers=headers,
         )
         r.raise_for_status()
         return r.json()
@@ -213,8 +269,9 @@ async def add_to_bundle_bulk(
         payload["delivery_address"] = delivery_address
     if fulfillment_fields is not None:
         payload["fulfillment_fields"] = fulfillment_fields
+    headers = _gateway_headers_for_discovery("POST", "/api/v1/bundle/add-bulk")
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.post(url, json=payload)
+        r = await client.post(url, json=payload, headers=headers)
         r.raise_for_status()
         return r.json()
 
@@ -226,6 +283,7 @@ async def replace_in_bundle(
 ) -> Dict[str, Any]:
     """Replace a product in bundle (category refinement)."""
     url = f"{settings.discovery_service_url}/api/v1/bundle/replace"
+    headers = _gateway_headers_for_discovery("POST", "/api/v1/bundle/replace")
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         r = await client.post(
             url,
@@ -234,6 +292,7 @@ async def replace_in_bundle(
                 "leg_id": leg_id,
                 "new_product_id": new_product_id,
             },
+            headers=headers,
         )
         r.raise_for_status()
         return r.json()
@@ -242,8 +301,9 @@ async def replace_in_bundle(
 async def remove_from_bundle(item_id: str) -> Dict[str, Any]:
     """Call Discovery service to remove item from bundle."""
     url = f"{settings.discovery_service_url}/api/v1/bundle/remove"
+    headers = _gateway_headers_for_discovery("POST", "/api/v1/bundle/remove")
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.post(url, json={"item_id": item_id})
+        r = await client.post(url, json={"item_id": item_id}, headers=headers)
         r.raise_for_status()
         return r.json()
 
@@ -251,8 +311,10 @@ async def remove_from_bundle(item_id: str) -> Dict[str, Any]:
 async def get_order_status(order_id: str) -> Dict[str, Any]:
     """Call Discovery service to get order status. For track_order tool."""
     url = f"{settings.discovery_service_url}/api/v1/orders/{order_id}/status"
+    path = f"/api/v1/orders/{order_id}/status"
+    headers = _gateway_headers_for_discovery("GET", path)
     async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(url)
+        r = await client.get(url, headers=headers)
         if r.status_code == 404:
             return {"error": "Order not found"}
         r.raise_for_status()
@@ -262,8 +324,9 @@ async def get_order_status(order_id: str) -> Dict[str, Any]:
 async def proceed_to_checkout(bundle_id: str) -> Dict[str, Any]:
     """Call Discovery service to proceed to checkout with bundle. Creates order, returns order_id."""
     url = f"{settings.discovery_service_url}/api/v1/checkout"
+    headers = _gateway_headers_for_discovery("POST", "/api/v1/checkout")
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.post(url, json={"bundle_id": bundle_id})
+        r = await client.post(url, json={"bundle_id": bundle_id}, headers=headers)
         r.raise_for_status()
         return r.json()
 

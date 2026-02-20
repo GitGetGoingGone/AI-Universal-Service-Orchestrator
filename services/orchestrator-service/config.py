@@ -63,6 +63,14 @@ class Settings:
         get_env("ORCHESTRATOR_SERVICE_URL") or "http://localhost:8002"
     ).rstrip("/")
 
+    # Exclusive Gateway: public base URL for /.well-known/ucp (single USO manifest)
+    gateway_public_url: str = (
+        get_env("GATEWAY_PUBLIC_URL") or get_env("ORCHESTRATOR_PUBLIC_URL") or orchestrator_base_url
+    ).rstrip("/")
+
+    # Shared secret with Discovery for X-Gateway-Signature (when Discovery has GATEWAY_SIGNATURE_REQUIRED=true)
+    gateway_internal_secret: str = get_env("GATEWAY_INTERNAL_SECRET") or ""
+
     # Agentic handoff (Clerk SSO 2.0 - optional)
     clerk_publishable_key: str = get_env("CLERK_PUBLISHABLE_KEY") or ""
     clerk_secret_key: str = get_env("CLERK_SECRET_KEY") or ""

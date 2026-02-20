@@ -76,6 +76,28 @@ def _heuristic_resolve(
             "recommended_next_action": "complete_with_probing",
         }
 
+    # Open-ended product queries: probe for experience (do not list products or call discover yet)
+    _OPEN_ENDED_PRODUCT_PATTERNS = (
+        r"what\s+products?\s+(do\s+you\s+)?have",
+        r"what\s+do\s+you\s+have",
+        r"what('s|\s+is)\s+available",
+        r"show\s+me\s+(what('s|\s+you\s+have)|options|everything)",
+        r"what\s+can\s+you\s+(do|offer|get)",
+        r"what\s+options?\s+(do\s+you\s+)?have",
+        r"what\s+(do\s+you\s+)?(sell|offer)",
+        r"do\s+you\s+have\s+(any\s+)?(products?|options?)",
+        r"show\s+(me\s+)?(your\s+)?(products?|stuff|things|catalog)",
+        r"list\s+(all\s+)?(your\s+)?(products?|options?)",
+    )
+    if any(re.search(pat, t) for pat in _OPEN_ENDED_PRODUCT_PATTERNS):
+        return {
+            "intent_type": "browse",
+            "search_query": "browse",
+            "entities": [],
+            "confidence_score": 0.9,
+            "recommended_next_action": "complete_with_probing",
+        }
+
     # Checkout / track / support
     if any(w in t for w in ("checkout", "pay", "payment", "order", "cart")):
         return {"intent_type": "checkout", "search_query": "", "entities": [], "confidence_score": 0.95}
@@ -404,6 +426,7 @@ async def resolve_intent(
     recent_conversation: Optional[List[Dict[str, Any]]] = None,
     probe_count: Optional[int] = None,
     thread_context: Optional[Dict[str, Any]] = None,
+    experience_categories: Optional[List[str]] = None,
     force_model: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -449,7 +472,9 @@ async def resolve_intent(
     if recent_conversation:
         conv_str = "; ".join(f"{c.get('role','')}: {(c.get('content') or '')[:80]}" for c in recent_conversation[-4:] if isinstance(c, dict))
         user_content += f"\nRecent conversation: {conv_str}"
-    user_content += "\n\nReturn valid JSON only."
+    if experience_categories:
+        user_content += f"\nAvailable experience categories (use for theme bundle options experience_tags): {', '.join(str(t) for t in experience_categories)}"
+    user_content += "\n\nReturn valid JSON only. For discover_composite, include bundle_options with label, description, categories, and optionally experience_tags (e.g. [\"romantic\"]) per option. For multi-tag intents (e.g. 'luxury travel-friendly night out') you may set theme_experience_tags to an array of tags (AND filter; e.g. [\"luxury\", \"travel-friendly\"]); otherwise use theme_experience_tag (single string)."
 
     try:
         if provider in ("azure", "openrouter", "custom", "openai"):

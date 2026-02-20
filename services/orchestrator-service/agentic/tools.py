@@ -54,11 +54,13 @@ TOOL_DEFS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "bundle_options": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "description": {"type": "string"}, "categories": {"type": "array", "items": {"type": "string"}}}}, "description": "Bundle tiers from intent with model-generated labels (e.g. [{label: 'Romantic Classic', categories: [flowers, restaurant, movies]}, ...])"},
+                "bundle_options": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "description": {"type": "string"}, "categories": {"type": "array", "items": {"type": "string"}}, "experience_tags": {"type": "array", "items": {"type": "string"}, "description": "Theme tags for this option (e.g. romantic, celebration)"}}}, "description": "Bundle tiers from intent with model-generated labels (e.g. [{label: 'Romantic Classic', categories: [flowers, restaurant, movies], experience_tags: ['romantic']}, ...])"},
                 "search_queries": {"type": "array", "items": {"type": "string"}, "description": "Categories to include. When intent is refine_composite (e.g. user said 'no limo'), use the search_queries from the intent result—they are already purged. Otherwise all unique categories across bundles or from bundle_options."},
                 "experience_name": {"type": "string", "description": "Experience name (e.g. date night, baby shower)", "default": "experience"},
                 "location": {"type": "string", "description": "Optional location filter"},
                 "budget_max": {"type": "integer", "description": "Max price in cents (e.g. 5000 for $50)"},
+                "theme_experience_tag": {"type": "string", "description": "Optional single experience tag to filter/boost discovery (e.g. romantic, baby)"},
+                "theme_experience_tags": {"type": "array", "items": {"type": "string"}, "description": "Optional multiple experience tags for AND filter (e.g. luxury, travel-friendly)"},
             },
         },
     },
@@ -372,6 +374,8 @@ async def execute_tool(
             bundle_options=bundle_opts,
             location=params.get("location"),
             budget_max=params.get("budget_max"),
+            theme_experience_tag=params.get("theme_experience_tag"),
+            theme_experience_tags=params.get("theme_experience_tags"),
         )
 
     if name == "refine_bundle_category":

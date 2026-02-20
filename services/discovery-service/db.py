@@ -41,18 +41,28 @@ async def search_products(
     limit: int = 20,
     partner_id: Optional[str] = None,
     exclude_partner_id: Optional[str] = None,
+    experience_tag: Optional[str] = None,
+    experience_tags: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Search products by name/description.
     Uses simple text search for MVP; semantic search (pgvector) can be added later.
+    When experience_tag is set, filter to products whose experience_tags JSONB contains that tag.
+    When experience_tags (list) is set, filter to products that contain ALL tags (AND semantics).
     """
     client = get_supabase()
     if not client:
         return []
 
+    tags_to_apply: List[str] = []
+    if experience_tags:
+        tags_to_apply = [str(t).strip() for t in experience_tags if t and str(t).strip()]
+    if not tags_to_apply and experience_tag and experience_tag.strip():
+        tags_to_apply = [experience_tag.strip()]
+
     select_cols = (
         "id, name, description, price, currency, capabilities, metadata, partner_id, "
-        "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability, created_at"
+        "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability, experience_tags, created_at"
     )
     try:
         q = (
@@ -67,6 +77,8 @@ async def search_products(
             q = q.eq("partner_id", partner_id)
         if exclude_partner_id:
             q = q.neq("partner_id", exclude_partner_id)
+        for tag in tags_to_apply:
+            q = q.contains("experience_tags", [tag])
         result = q.order("created_at", desc=True).limit(limit).execute()
         data = result.data or []
         for row in data:
@@ -87,6 +99,8 @@ async def search_products(
                 q = q.eq("partner_id", partner_id)
             if exclude_partner_id:
                 q = q.neq("partner_id", exclude_partner_id)
+            for tag in tags_to_apply:
+                q = q.contains("experience_tags", [tag])
             result = q.order("created_at", desc=True).limit(limit).execute()
             data = result.data or []
             for row in data:
@@ -94,6 +108,123 @@ async def search_products(
             return data
         except Exception:
             return []
+
+
+async def get_distinct_experience_tags() -> List[str]:
+    """Return distinct experience_tags values from products (for experience-categories API)."""
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        result = client.rpc("get_distinct_experience_tags").execute()
+        data = result.data or []
+        return [str(row.get("tag", "")).strip() for row in data if row.get("tag")]
+    except Exception:
+        return []
+
+
+async def get_internal_agent_urls(capability: Optional[str] = None) -> List[str]:
+    """
+    Return list of internal Business Agent base URLs from the private registry.
+    Used only server-side by Scout; never expose these URLs in responses.
+    If capability is set, return URLs for that capability only; otherwise all enabled.
+    """
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        q = client.table("internal_agent_registry").select("base_url").eq("enabled", True)
+        if capability and str(capability).strip():
+            q = q.eq("capability", str(capability).strip())
+        result = q.execute()
+        data = result.data or []
+        urls = [str(r.get("base_url", "")).strip() for r in data if r.get("base_url")]
+        return [u for u in urls if u]
+    except Exception:
+        return []
+
+
+def _mask_id_insert(internal_product_id: str, partner_id: Optional[str], source: Optional[str]) -> Optional[str]:
+    """Insert one mapping and return masked_id. Caller holds sync DB."""
+    client = get_supabase()
+    if not client:
+        return None
+    masked_id = "uso_" + str(uuid_module.uuid4()).replace("-", "")[:24]
+    try:
+        client.table("id_masking_map").insert({
+            "masked_id": masked_id,
+            "internal_product_id": str(internal_product_id),
+            "partner_id": str(partner_id) if partner_id else None,
+            "source": str(source) if source else None,
+        }).execute()
+        return masked_id
+    except Exception:
+        return None
+
+
+async def mask_product_id(
+    internal_product_id: str,
+    partner_id: Optional[str] = None,
+    source: Optional[str] = None,
+) -> Optional[str]:
+    """Create masked id for internal product; store mapping. Returns uso_* id or None."""
+    return _mask_id_insert(internal_product_id, partner_id, source)
+
+
+def resolve_masked_id(masked_id: str) -> Optional[tuple]:
+    """
+    Resolve masked id to (internal_product_id, partner_id).
+    Returns None if not found or not a masked id.
+    """
+    if not masked_id or not str(masked_id).startswith("uso_"):
+        return None
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("id_masking_map")
+            .select("internal_product_id, partner_id")
+            .eq("masked_id", str(masked_id))
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            return None
+        row = result.data[0]
+        return (str(row.get("internal_product_id", "")), row.get("partner_id"))
+    except Exception:
+        return None
+
+
+async def mask_products(products: List[Dict[str, Any]], source: str = "local") -> List[Dict[str, Any]]:
+    """
+    Replace each product's id with a masked id (uso_*); store mapping.
+    Removes partner_id from each product so internal identifiers are not exposed.
+    Returns new list of product dicts (shallow copy with id/partner_id updated).
+    """
+    if not products:
+        return []
+    client = get_supabase()
+    if not client:
+        return products
+    out = []
+    for p in products:
+        internal_id = str(p.get("id", ""))
+        if not internal_id:
+            out.append(dict(p))
+            continue
+        partner_id = p.get("partner_id")
+        masked = _mask_id_insert(internal_id, partner_id, source)
+        if masked:
+            new_p = {k: v for k, v in p.items() if k != "partner_id"}
+            new_p["id"] = masked
+            out.append(new_p)
+        else:
+            new_p = dict(p)
+            new_p.pop("partner_id", None)
+            out.append(new_p)
+    return out
 
 
 async def get_product_by_id(product_id: str) -> Optional[Dict[str, Any]]:
@@ -106,7 +237,7 @@ async def get_product_by_id(product_id: str) -> Optional[Dict[str, Any]]:
             client.table("products")
             .select(
                 "id, name, description, price, currency, capabilities, metadata, partner_id, "
-                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability"
+                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability, experience_tags"
             )
             .eq("id", product_id)
             .is_("deleted_at", "null")
@@ -312,7 +443,7 @@ async def get_products_for_acp_export(
             client.table("products")
             .select(
                 "id, name, description, price, currency, capabilities, metadata, partner_id, "
-                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability"
+                "url, brand, image_url, is_eligible_search, is_eligible_checkout, target_countries, availability, experience_tags"
             )
             .is_("deleted_at", "null")
         )
@@ -359,13 +490,22 @@ async def add_product_to_bundle(
 ) -> Optional[Dict[str, Any]]:
     """
     Add product to bundle. Creates new draft bundle if bundle_id not provided.
+    If product_id is masked (uso_*), resolve to internal id before lookup.
     Returns bundle with updated info.
     """
     client = get_supabase()
     if not client:
         return None
 
-    product = await get_product_by_id(product_id)
+    internal_id = product_id
+    if str(product_id).startswith("uso_"):
+        resolved = resolve_masked_id(product_id)
+        if resolved:
+            internal_id = resolved[0]
+        else:
+            return None
+
+    product = await get_product_by_id(internal_id)
     if not product:
         return None
 
@@ -400,7 +540,7 @@ async def add_product_to_bundle(
             client.table("bundle_legs").insert({
                 "bundle_id": bundle_id,
                 "leg_sequence": next_seq,
-                "product_id": product_id,
+                "product_id": internal_id,
                 "partner_id": partner_id,
                 "leg_type": "product",
                 "price": price,
@@ -440,7 +580,7 @@ async def add_product_to_bundle(
             client.table("bundle_legs").insert({
                 "bundle_id": new_bundle_id,
                 "leg_sequence": 1,
-                "product_id": product_id,
+                "product_id": internal_id,
                 "partner_id": partner_id,
                 "leg_type": "product",
                 "price": price,
@@ -724,7 +864,14 @@ async def create_bundle_from_ucp_items(
             qty = int(li.get("quantity", 1))
             if not product_id or qty < 1:
                 continue
-            product = await get_product_by_id(product_id)
+            internal_id = product_id
+            if product_id.startswith("uso_"):
+                resolved = resolve_masked_id(product_id)
+                if resolved:
+                    internal_id = resolved[0]
+                else:
+                    continue
+            product = await get_product_by_id(internal_id)
             if not product:
                 continue
             price = float(product.get("price", 0))
@@ -733,7 +880,7 @@ async def create_bundle_from_ucp_items(
                 client.table("bundle_legs").insert({
                     "bundle_id": bundle_id,
                     "leg_sequence": seq,
-                    "product_id": product_id,
+                    "product_id": internal_id,
                     "partner_id": partner_id,
                     "leg_type": "product",
                     "price": price,

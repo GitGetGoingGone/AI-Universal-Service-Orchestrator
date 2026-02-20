@@ -65,6 +65,13 @@ export async function PATCH(
               ? body.target_countries.split(",").map((s: string) => s.trim()).filter(Boolean)
               : null,
       }),
+      ...(body.experience_tags !== undefined && {
+        experience_tags: Array.isArray(body.experience_tags)
+          ? body.experience_tags.filter((t): t is string => typeof t === "string" && t.trim().length > 0).map((t) => t.trim().toLowerCase()).slice(0, 20)
+          : typeof body.experience_tags === "string"
+            ? body.experience_tags.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).slice(0, 20)
+            : [],
+      }),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)

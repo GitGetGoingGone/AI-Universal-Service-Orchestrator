@@ -69,10 +69,13 @@ async def semantic_search(
     limit: int = 20,
     partner_id: Optional[str] = None,
     exclude_partner_id: Optional[str] = None,
+    experience_tag: Optional[str] = None,
+    experience_tags: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Search products by semantic similarity (pgvector).
     Falls back to empty list if embeddings not configured or query embedding fails.
+    When experience_tags (list) is set, only products that contain ALL tags are returned (AND semantics).
     """
     client = get_supabase()
     if not client:
@@ -82,28 +85,44 @@ async def semantic_search(
     if not embedding:
         return []
 
+    tags_list: List[str] = []
+    if experience_tags:
+        tags_list = [str(t).strip().lower() for t in experience_tags if t and str(t).strip()]
+    if not tags_list and experience_tag and experience_tag.strip():
+        tags_list = [experience_tag.strip().lower()]
+
     try:
         # pgvector expects string format for RPC: "[0.1,0.2,...]"
         embedding_str = "[" + ",".join(str(float(x)) for x in embedding) + "]"
 
         kwargs = {
             "query_embedding": embedding_str,
-            "match_count": limit,
+            "match_count": limit * 3 if tags_list else limit,  # fetch extra for post-filter when multi-tag
             "match_threshold": 0.0,
         }
         if partner_id:
             kwargs["filter_partner_id"] = partner_id
         if exclude_partner_id:
             kwargs["exclude_partner_id"] = exclude_partner_id
+        if tags_list:
+            kwargs["filter_experience_tag"] = tags_list[0]
 
         result = client.rpc("match_products", kwargs).execute()
         rows = result.data or []
 
-        # Normalize to dict with expected keys (created_at for ranking, sold_count for product_mix)
-        select_cols = ("id", "name", "description", "price", "currency", "capabilities", "metadata", "partner_id", "created_at", "sold_count")
-        return [
+        # Normalize to dict with expected keys (created_at for ranking, sold_count for product_mix, experience_tags for discovery)
+        select_cols = ("id", "name", "description", "price", "currency", "capabilities", "metadata", "partner_id", "created_at", "sold_count", "experience_tags")
+        out = [
             {k: r.get(k) for k in select_cols if k in r}
             for r in rows
         ]
+        # AND semantics: keep only products that have all requested tags
+        if len(tags_list) > 1:
+            out = [
+                r for r in out
+                if r and isinstance(r.get("experience_tags"), list)
+                and set(str(t).strip().lower() for t in r["experience_tags"] if t) >= set(tags_list)
+            ]
+        return out[:limit]
     except Exception:
         return []

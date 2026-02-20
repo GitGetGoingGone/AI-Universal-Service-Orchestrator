@@ -37,6 +37,13 @@ class Settings:
     # Portal/public URL for UCP continue_url (e.g. https://your-portal.vercel.app)
     portal_public_url: str = get_env("PORTAL_PUBLIC_URL") or get_env("DISCOVERY_PUBLIC_URL") or ""
 
+    # Exclusive Gateway: mask product ids returned to clients (uso_*); mapping stored for checkout
+    id_masking_enabled: bool = (get_env("ID_MASKING_ENABLED") or "false").strip().lower() == "true"
+
+    # Exclusive Gateway: require X-Gateway-Signature on /api/* when True (shared secret with Orchestrator)
+    gateway_signature_required: bool = (get_env("GATEWAY_SIGNATURE_REQUIRED") or "false").strip().lower() == "true"
+    gateway_internal_secret: str = get_env("GATEWAY_INTERNAL_SECRET") or ""
+
     @property
     def supabase_configured(self) -> bool:
         """Check if Supabase is configured."""

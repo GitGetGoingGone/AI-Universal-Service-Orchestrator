@@ -230,7 +230,7 @@ async def chat(
             force_model=force_model,
         )
 
-    async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None, exclude_partner_id: Optional[str] = None, budget_max: Optional[int] = None):
+    async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None, exclude_partner_id: Optional[str] = None, budget_max: Optional[int] = None, experience_tag: Optional[str] = None, experience_tags: Optional[List[str]] = None):
         return await discover_products(
             query=query,
             limit=limit,
@@ -238,6 +238,8 @@ async def chat(
             partner_id=partner_id or body.partner_id,
             exclude_partner_id=exclude_partner_id,
             budget_max=budget_max,
+            experience_tag=experience_tag,
+            experience_tags=experience_tags,
         )
 
     async def _create_standing_intent(

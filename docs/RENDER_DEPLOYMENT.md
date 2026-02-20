@@ -378,6 +378,36 @@ Ensure Discovery has `DISCOVERY_PUBLIC_URL` or `PUBLIC_URL` set to its Render UR
 
 ---
 
+## Experience tags and distributed agent (A2A)
+
+Experience-tag discovery, multi-tag filter (AND semantics), and automatic category pre-fetch work with your existing Render setup. No new environment variables are required.
+
+### Required configuration
+
+- **Orchestrator** must have `INTENT_SERVICE_URL` and `DISCOVERY_SERVICE_URL` (already in Step 4). The Orchestrator uses `DISCOVERY_SERVICE_URL` to fetch experience categories before each intent resolve.
+- **Discovery** and **Intent** use the same env as today (Supabase via `uso-shared`; Discovery may have `DISCOVERY_PUBLIC_URL` for UCP).
+
+### What to do on Render
+
+1. **Redeploy** these three services so they run the latest code: **uso-discovery**, **uso-orchestrator**, **uso-intent**. (Push to the connected branch and let Render auto-deploy, or trigger a manual deploy for each.)
+2. No new env vars need to be set for experience tags, multi-tag filter, or auto category pre-fetch.
+
+### Optional: Exclusive Gateway (ID masking, gateway signature)
+
+If you want ID masking or signed gateway requests between Orchestrator and Discovery, add these **optional** variables:
+
+| Service | Key | Value | Purpose |
+|---------|-----|-------|--------|
+| **Discovery** | `ID_MASKING_ENABLED` | `true` | Return masked product IDs in discover/get_product; add-to-bundle and checkout resolve IDs server-side. |
+| **Discovery** | `GATEWAY_SIGNATURE_REQUIRED` | `true` | Require `X-Gateway-Signature` and `X-Gateway-Timestamp` on `/api/*` requests. |
+| **Discovery** | `GATEWAY_INTERNAL_SECRET` | *shared secret string* | Used to verify Orchestrator requests (set the same value on both services). |
+| **Orchestrator** | `GATEWAY_PUBLIC_URL` | `https://uso-orchestrator.onrender.com` | Public base URL for `/.well-known/ucp` manifest (defaults to service URL if unset). |
+| **Orchestrator** | `GATEWAY_INTERNAL_SECRET` | *same secret as Discovery* | Used to sign requests to Discovery when calling discover, experience-categories, etc. |
+
+If you do not set these, Discovery and Orchestrator work as before (no masking, no signature requirement).
+
+---
+
 ## Environment Groups summary
 
 | Source | Variables |
@@ -478,6 +508,10 @@ curl -s "$DISCOVERY/api/v1/ucp/items?q=flowers&limit=2" | jq '.items | length'
 ---
 
 ## Render-Specific Notes
+
+### Experience tags and A2A (no config change)
+
+Experience-tag discovery, multi-tag filter, and automatic category pre-fetch require **no new env vars**. Ensure **uso-discovery**, **uso-orchestrator**, and **uso-intent** are redeployed after pulling the latest code. See [Experience tags and distributed agent (A2A)](#experience-tags-and-distributed-agent-a2a) above for optional Gateway variables.
 
 ### Free Tier
 

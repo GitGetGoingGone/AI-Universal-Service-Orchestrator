@@ -23,6 +23,7 @@ class ResolveRequest(BaseModel):
     recent_conversation: Optional[List[Dict[str, Any]]] = Field(None, description="Recent user/assistant exchanges for context")
     probe_count: Optional[int] = Field(None, description="Number of probing rounds so far")
     thread_context: Optional[Dict[str, Any]] = Field(None, description="Thread context: order_id, bundle_id")
+    experience_categories: Optional[List[str]] = Field(None, description="Available experience tags for theme bundles (e.g. baby, celebration); injected into prompt when set")
     persist: bool = Field(True, description="Persist intent to database")
     force_model: bool = Field(False, description="When true, use LLM only; do not fall back to heuristics on failure (for ChatGPT/Gemini)")
 
@@ -51,6 +52,7 @@ async def resolve(
         recent_conversation=body.recent_conversation,
         probe_count=body.probe_count,
         thread_context=body.thread_context,
+        experience_categories=body.experience_categories,
         force_model=body.force_model,
     )
 
@@ -100,6 +102,12 @@ async def resolve(
     if resolved.get("intent_type") == "discover_composite":
         data["search_queries"] = resolved.get("search_queries", [])
         data["experience_name"] = resolved.get("experience_name", "experience")
+        if resolved.get("bundle_options"):
+            data["bundle_options"] = resolved["bundle_options"]  # may include experience_tags per option
+        if resolved.get("theme_experience_tag"):
+            data["theme_experience_tag"] = resolved["theme_experience_tag"]
+        if resolved.get("theme_experience_tags"):
+            data["theme_experience_tags"] = resolved["theme_experience_tags"]
         if resolved.get("unrelated_to_probing"):
             data["unrelated_to_probing"] = True
     if resolved.get("intent_type") == "refine_composite":
@@ -108,6 +116,8 @@ async def resolve(
         data["experience_name"] = resolved.get("experience_name", "experience")
         data["proposed_plan"] = resolved.get("proposed_plan", [])
         data["removed_categories"] = resolved.get("removed_categories", [])
+        if resolved.get("bundle_options"):
+            data["bundle_options"] = resolved["bundle_options"]
     if resolved.get("recommended_next_action"):
         data["recommended_next_action"] = resolved["recommended_next_action"]
     if resolved.get("proposed_plan") is not None and "proposed_plan" not in data:

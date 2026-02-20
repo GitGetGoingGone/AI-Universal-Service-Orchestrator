@@ -41,6 +41,8 @@ app = FastAPI(
 
 # Middleware
 app.middleware("http")(request_id_middleware)
+from middleware.gateway_signature import gateway_signature_middleware
+app.middleware("http")(gateway_signature_middleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

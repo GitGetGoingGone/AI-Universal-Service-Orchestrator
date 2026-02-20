@@ -134,8 +134,10 @@ async def _discover_composite(
     budget_max: Optional[int] = None,
     bundle_options: Optional[List[Dict[str, Any]]] = None,
     fulfillment_hints: Optional[Dict[str, str]] = None,
+    theme_experience_tag: Optional[str] = None,
+    theme_experience_tags: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Call discover_products per query, compose experience bundle. When bundle_options provided, build multiple bundles with prices."""
+    """Call discover_products per query, compose experience bundle. When bundle_options provided, build multiple bundles with prices. theme_experience_tag or theme_experience_tags filter/boost discovery (multi-tag = AND semantics)."""
     from packages.shared.adaptive_cards.experience_card import generate_experience_card
 
     categories: List[Dict[str, Any]] = []
@@ -170,6 +172,8 @@ async def _discover_composite(
                 partner_id=partner_id,
                 exclude_partner_id=exclude_partner_id,
                 budget_max=budget_max,
+                experience_tag=theme_experience_tag,
+                experience_tags=theme_experience_tags,
             )
         except Exception as e:
             logger.warning("Discover composite query %s failed: %s", q, e)
@@ -207,6 +211,29 @@ async def _discover_composite(
                 return v
         return []
 
+    def _pick_best_product_for_theme(
+        products: List[Dict[str, Any]],
+        experience_tags: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Pick the product that best matches the option's experience_tags (most tag overlap)."""
+        if not products:
+            return None
+        tags = [str(t).strip().lower() for t in (experience_tags or []) if t]
+        if not tags:
+            return products[0]
+        best: Optional[Dict[str, Any]] = None
+        best_count = -1
+        for p in products:
+            p_tags = p.get("experience_tags")
+            if not isinstance(p_tags, list):
+                p_tags = []
+            p_set = {str(t).strip().lower() for t in p_tags if t}
+            match_count = sum(1 for t in tags if t in p_set)
+            if match_count > best_count:
+                best_count = match_count
+                best = p
+        return best if best is not None else products[0]
+
     if bundle_options and category_products:
         id_to_product: Dict[str, Dict[str, Any]] = {}
         for prods in category_products.values():
@@ -218,12 +245,13 @@ async def _discover_composite(
             if not isinstance(opt, dict):
                 continue
             opt_cats = [str(c) for c in (opt.get("categories") or []) if c]
+            opt_tags = [str(t) for t in (opt.get("experience_tags") or []) if t]
             product_ids: List[str] = []
             total_price = 0.0
             for cat in opt_cats:
                 prods = _get_products_for_category(cat)
-                if prods:
-                    p = prods[0]  # Pick first (e.g. best-ranked)
+                p = _pick_best_product_for_theme(prods, opt_tags) if prods else None
+                if p:
                     pid = str(p.get("id", ""))
                     if pid:
                         product_ids.append(pid)
@@ -241,6 +269,7 @@ async def _discover_composite(
                     "total_price": round(total_price, 2),
                     "currency": currency,
                     "categories": opt_cats,
+                    "experience_tags": opt_tags,
                 })
 
     # Fallback: when no bundle_options or none matched, build one curated bundle (one product per category)
@@ -768,8 +797,9 @@ async def run_agentic_loop(
                                 f"Weather in {loc}: {weather_desc}. We've adjusted your plan for indoor options."
                             )
 
-            async def _discover_composite_fn(search_queries, experience_name, location=None, budget_max=None, bundle_options=None):
+            async def _discover_composite_fn(search_queries, experience_name, location=None, budget_max=None, bundle_options=None, theme_experience_tag=None, theme_experience_tags=None):
                 fulfillment_hints = _extract_fulfillment_hints(intent_data, user_message)
+                intent = intent_data or {}
                 return await _discover_composite(
                     search_queries=search_queries,
                     experience_name=experience_name,
@@ -779,6 +809,8 @@ async def run_agentic_loop(
                     budget_max=budget_max,
                     bundle_options=bundle_options,
                     fulfillment_hints=fulfillment_hints,
+                    theme_experience_tag=theme_experience_tag or intent.get("theme_experience_tag"),
+                    theme_experience_tags=theme_experience_tags or intent.get("theme_experience_tags"),
                 )
 
             async def _refine_bundle_category_fn(bundle_id: str, category: str):

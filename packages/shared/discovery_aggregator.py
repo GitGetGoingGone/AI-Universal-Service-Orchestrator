@@ -35,6 +35,7 @@ class UCPProduct:
     is_eligible_search: bool = True
     is_eligible_checkout: bool = False
     sold_count: int = 0
+    experience_tags: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict for API/LLM context."""
@@ -55,6 +56,7 @@ class UCPProduct:
             "is_eligible_search": self.is_eligible_search,
             "is_eligible_checkout": self.is_eligible_checkout,
             "sold_count": self.sold_count,
+            "experience_tags": list(self.experience_tags),
         }
 
 
@@ -75,6 +77,11 @@ def _normalize_to_ucp_product(raw: Dict[str, Any], source: str = "DB") -> UCPPro
         feats = [str(f) for f in feats if f]
     else:
         feats = []
+    exp_tags = raw.get("experience_tags")
+    if isinstance(exp_tags, list):
+        exp_tags = [str(t).strip().lower() for t in exp_tags if t and str(t).strip()]
+    else:
+        exp_tags = []
     meta = raw.get("metadata") or {}
     if isinstance(meta, dict):
         pass
@@ -98,6 +105,7 @@ def _normalize_to_ucp_product(raw: Dict[str, Any], source: str = "DB") -> UCPPro
         is_eligible_search=bool(raw.get("is_eligible_search", True)),
         is_eligible_checkout=bool(raw.get("is_eligible_checkout", False)),
         sold_count=int(raw.get("sold_count", 0)),
+        experience_tags=exp_tags,
     )
 
 
@@ -113,6 +121,8 @@ class LocalDBDriver:
         limit: int = 20,
         partner_id: Optional[str] = None,
         exclude_partner_id: Optional[str] = None,
+        experience_tag: Optional[str] = None,
+        experience_tags: Optional[List[str]] = None,
     ) -> List[UCPProduct]:
         try:
             raw = await self._search(
@@ -120,6 +130,8 @@ class LocalDBDriver:
                 limit=limit,
                 partner_id=partner_id,
                 exclude_partner_id=exclude_partner_id,
+                experience_tag=experience_tag,
+                experience_tags=experience_tags,
             )
             return [_normalize_to_ucp_product(p, "DB") for p in (raw if isinstance(raw, list) else [])]
         except Exception as e:
@@ -251,6 +263,8 @@ class DiscoveryAggregator:
         limit: int = 20,
         partner_id: Optional[str] = None,
         exclude_partner_id: Optional[str] = None,
+        experience_tag: Optional[str] = None,
+        experience_tags: Optional[List[str]] = None,
     ) -> List[UCPProduct]:
         if is_browse_query(query):
             query = ""
@@ -259,7 +273,14 @@ class DiscoveryAggregator:
         if self._local:
             tasks.append(
                 asyncio.create_task(
-                    self._local.search(query=query, limit=limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+                    self._local.search(
+                        query=query,
+                        limit=limit,
+                        partner_id=partner_id,
+                        exclude_partner_id=exclude_partner_id,
+                        experience_tag=experience_tag,
+                        experience_tags=experience_tags,
+                    )
                 )
             )
         if self._ucp:

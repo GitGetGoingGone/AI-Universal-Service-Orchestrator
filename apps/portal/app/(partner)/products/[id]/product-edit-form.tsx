@@ -50,6 +50,7 @@ export function ProductEditForm({ productId }: Props) {
     is_eligible_checkout: false,
     availability: "in_stock" as string,
     target_countries: "" as string,
+    experience_tags: "" as string,
   });
   const [validation, setValidation] = useState<{
     acp?: { valid: boolean; errors: string[]; warnings: string[] };
@@ -77,6 +78,7 @@ export function ProductEditForm({ productId }: Props) {
           is_eligible_checkout: !!data.is_eligible_checkout,
           availability: data.availability ?? "in_stock",
           target_countries: Array.isArray(data.target_countries) ? data.target_countries.join(", ") : (data.target_countries ?? ""),
+          experience_tags: Array.isArray(data.experience_tags) ? data.experience_tags.join(", ") : (data.experience_tags ?? ""),
         });
       })
       .catch(() => setError("Product not found"))
@@ -119,6 +121,9 @@ export function ProductEditForm({ productId }: Props) {
           target_countries: form.target_countries
             ? form.target_countries.split(",").map((s) => s.trim()).filter(Boolean)
             : undefined,
+          experience_tags: form.experience_tags
+            ? form.experience_tags.split(",").map((s) => s.trim()).filter(Boolean)
+            : [],
         }),
       });
 
@@ -275,6 +280,19 @@ export function ProductEditForm({ productId }: Props) {
             className={inputClass}
             placeholder="https://..."
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Experience tags</label>
+          <input
+            value={form.experience_tags}
+            onChange={(e) => setForm((f) => ({ ...f, experience_tags: e.target.value }))}
+            type="text"
+            className={inputClass}
+            placeholder="e.g. luxury, night out, travel, celebration"
+          />
+          <p className="text-xs text-[rgb(var(--color-text-secondary))] mt-1">
+            Comma-separated thematic tags for discovery (e.g. limo → luxury, night out, travel, celebration). Used in search and recommendations alongside category/capability.
+          </p>
         </div>
         <div className="flex gap-4">
           <label className="flex items-center gap-2 cursor-pointer">
