@@ -46,6 +46,13 @@ CRITICAL rules:
 """
 
 
+# Applied to all engagement responses: model must respect user's stated wants/constraints from their message
+RESPONSE_USER_PREFERENCE_RULE = (
+    "Respect the user's stated preferences: from their message, infer what they want and what they reject or narrow. "
+    "Do not mention, assume, or frame the response around things they rejected or did not ask for; frame only around what they asked for."
+)
+
+
 def _build_context(result: Dict[str, Any]) -> str:
     """Build context string for the LLM from the orchestration result."""
     data = result.get("data") or {}
@@ -64,12 +71,22 @@ def _build_context(result: Dict[str, Any]) -> str:
     proposed_plan = intent.get("proposed_plan")
     if isinstance(proposed_plan, list) and proposed_plan:
         parts.append(f"Current plan — use ONLY these categories in your reply: {', '.join(str(p) for p in proposed_plan)}.")
-    # Bundle themes from intent (e.g. Romantic Date Night, Casual, Adventure) so first reply can mention style options
+    # Bundle themes from intent (e.g. Romantic Date Night, Casual, Adventure) — pass labels + descriptions so we can present them to the user
     bundle_opts = intent.get("bundle_options") or []
     if isinstance(bundle_opts, list) and bundle_opts and intent_type == "discover_composite":
-        labels = [str(o.get("label", "")).strip() for o in bundle_opts if isinstance(o, dict) and o.get("label")][:6]
-        if labels:
-            parts.append(f"Bundle themes (you may mention these): {', '.join(labels)}.")
+        theme_entries = []
+        for o in bundle_opts[:8]:
+            if not isinstance(o, dict) or not o.get("label"):
+                continue
+            label = str(o.get("label", "")).strip()
+            desc = (o.get("description") or "").strip() or "A curated experience for you."
+            theme_entries.append(f"• {label}: {desc[:120]}")
+        if theme_entries:
+            parts.append(
+                "Themed experience options (PRESENT these to the user — list each with its description so they can choose):\n"
+                + "\n".join(theme_entries)
+                + "\nAfter listing, invite them to pick one and share date/area so you can tailor it."
+            )
 
     last_suggestion = result.get("last_suggestion")
     if last_suggestion:
@@ -207,10 +224,17 @@ def _build_context(result: Dict[str, Any]) -> str:
                 f"Present as a curated bundle. ONLY mention products from Product data below—do NOT invent any. Product data (ONLY these): {'; '.join((all_items or [])[:10])}. Be warm and helpful."
             )
         else:
-            parts.append(
-                f"User asked for experience: {exp_name}. Categories they want: {', '.join(cat_names) or 'products'}. "
-                "You are a concierge — guide them through a structured flow to gather details for each category. Do NOT list products."
-            )
+            # No products yet: either present themed ideas (from bundle_options above) or gather details
+            if isinstance(bundle_opts, list) and bundle_opts:
+                parts.append(
+                    "User asked for themed ideas or suggestions. You MUST present the themed experience options listed above (each with its description). "
+                    "Then ask for date and area so you can tailor the chosen experience. Do NOT list individual products yet."
+                )
+            else:
+                parts.append(
+                    f"User asked for experience: {exp_name}. Categories they want: {', '.join(cat_names) or 'products'}. "
+                    "You are a concierge — guide them through a structured flow to gather details for each category. Do NOT list products."
+                )
     else:
         product_list = products.get("products") if isinstance(products, dict) else []
         if not product_list and isinstance(products, list):
@@ -366,6 +390,9 @@ async def generate_engagement_response(
         if RESPONSE_SYSTEM_MARKDOWN_REPLACE in system_prompt:
             system_prompt = system_prompt.replace(RESPONSE_SYSTEM_MARKDOWN_REPLACE, RESPONSE_SYSTEM_MARKDOWN_WITH)
         system_prompt = (system_prompt.rstrip() + "\n\n" + RESPONSE_SYSTEM_MARKDOWN_NOTE).strip()
+
+    # Apply robust user-preference rule so the model respects stated wants/rejections from the message
+    system_prompt = (system_prompt.rstrip() + "\n\n" + RESPONSE_USER_PREFERENCE_RULE).strip()
 
     context = _build_context(result)
     user_content = f"User said: {user_message[:300]}\n\nWhat we did: {context}\n\nWrite a brief friendly response:"
