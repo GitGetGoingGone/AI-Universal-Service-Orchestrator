@@ -57,8 +57,8 @@ def _get_planner_client_for_config(llm_config: Dict[str, Any]):
 
     if preferred == "gemini" and api_key:
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
+            import google.generativeai as genai  # type: ignore[reportPrivateImportUsage]
+            genai.configure(api_key=api_key)  # type: ignore[reportAttributeAccessIssue]
             return ("gemini", genai)
         except ImportError:
             logger.warning("google-generativeai not installed for Gemini support.")
@@ -171,10 +171,10 @@ async def plan_next_action(
             tools = [{"type": "function", "function": t} for t in TOOL_DEFS]
 
             response = await asyncio.to_thread(
-                lambda: client.chat.completions.create(
+                lambda: client.chat.completions.create(  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
                     model=model,
                     messages=messages,
-                    tools=tools,
+                    tools=tools,  # type: ignore[reportArgumentType]
                     tool_choice="auto",
                     temperature=temperature,
                     max_tokens=500,
@@ -185,9 +185,9 @@ async def plan_next_action(
 
             if msg.tool_calls:
                 tool_call = msg.tool_calls[0]
-                name = tool_call.function.name
+                name = tool_call.function.name  # type: ignore[reportAttributeAccessIssue]
                 try:
-                    args = json.loads(tool_call.function.arguments or "{}")
+                    args = json.loads(tool_call.function.arguments or "{}")  # type: ignore[reportAttributeAccessIssue]
                 except json.JSONDecodeError:
                     args = {}
                 return {
