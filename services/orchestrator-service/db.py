@@ -1,6 +1,6 @@
 """Supabase client for orchestrator (account_links, users). Used by Link Account API."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from supabase import create_client, Client
 
@@ -31,7 +31,8 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         r = client.table("users").select("*").eq("id", user_id).limit(1).execute()
-        return r.data[0] if r.data else None
+        row = r.data[0] if r.data else None
+        return cast(Optional[Dict[str, Any]], row)
     except Exception:
         return None
 
@@ -43,7 +44,8 @@ def get_user_by_clerk_id(clerk_user_id: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         r = client.table("users").select("*").eq("clerk_user_id", clerk_user_id).limit(1).execute()
-        return r.data[0] if r.data else None
+        row = r.data[0] if r.data else None
+        return cast(Optional[Dict[str, Any]], row)
     except Exception:
         return None
 
@@ -55,7 +57,8 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         r = client.table("users").select("*").eq("email", email).limit(1).execute()
-        return r.data[0] if r.data else None
+        row = r.data[0] if r.data else None
+        return cast(Optional[Dict[str, Any]], row)
     except Exception:
         return None
 
@@ -85,20 +88,23 @@ def upsert_user(
             if updates:
                 client.table("users").update(updates).eq("id", user_id).execute()
             r = client.table("users").select("*").eq("id", user_id).limit(1).execute()
-            return r.data[0] if r.data else None
+            row = r.data[0] if r.data else None
+            return cast(Optional[Dict[str, Any]], row)
         existing = None
         if clerk_user_id:
             existing = get_user_by_clerk_id(clerk_user_id)
         if not existing and email:
             existing = get_user_by_email(email)
         if existing:
+            existing = cast(Dict[str, Any], existing)
             updates = {}
             if clerk_user_id and not existing.get("clerk_user_id"):
                 updates["clerk_user_id"] = clerk_user_id
             if updates:
                 client.table("users").update(updates).eq("id", existing["id"]).execute()
                 r = client.table("users").select("*").eq("id", existing["id"]).limit(1).execute()
-                return r.data[0] if r.data else existing
+                row = r.data[0] if r.data else existing
+                return cast(Optional[Dict[str, Any]], row)
             return existing
         # Create new user
         import uuid
@@ -127,7 +133,7 @@ def get_account_links_by_user(user_id: str) -> List[Dict[str, Any]]:
             .eq("is_active", True)
             .execute()
         )
-        return r.data or []
+        return cast(List[Dict[str, Any]], r.data or [])
     except Exception:
         return []
 
@@ -148,7 +154,8 @@ def get_account_link(user_id: str, platform: str, platform_user_id: str) -> Opti
             .limit(1)
             .execute()
         )
-        return r.data[0] if r.data else None
+        row = r.data[0] if r.data else None
+        return cast(Optional[Dict[str, Any]], row)
     except Exception:
         return None
 
@@ -180,7 +187,8 @@ def upsert_account_link(
         if expires_at is not None:
             row["expires_at"] = expires_at
         r = client.table("account_links").upsert(row, on_conflict="user_id,platform,platform_user_id").execute()
-        return r.data[0] if r.data else None
+        out = r.data[0] if r.data else None
+        return cast(Optional[Dict[str, Any]], out)
     except Exception:
         return None
 
@@ -202,7 +210,8 @@ async def get_adaptive_cards_setting(
         platform_row = client.table("platform_config").select("adaptive_cards_enabled").limit(1).execute()
         use_cards = True
         if platform_row.data and platform_row.data[0] is not None:
-            val = platform_row.data[0].get("adaptive_cards_enabled")
+            p0 = platform_row.data[0]
+            val = p0.get("adaptive_cards_enabled") if isinstance(p0, dict) else None
             if val is not None:
                 use_cards = bool(val)
 
@@ -216,7 +225,8 @@ async def get_adaptive_cards_setting(
                 .execute()
             )
             if partner_row.data and partner_row.data[0] is not None:
-                val = partner_row.data[0].get("adaptive_cards_enabled")
+                p0 = partner_row.data[0]
+                val = p0.get("adaptive_cards_enabled") if isinstance(p0, dict) else None
                 if val is not None:
                     use_cards = bool(val)
 
@@ -230,7 +240,8 @@ async def get_adaptive_cards_setting(
                 .execute()
             )
             if user_row.data and user_row.data[0]:
-                meta = user_row.data[0].get("metadata") or {}
+                u0 = user_row.data[0]
+                meta = u0.get("metadata") or {} if isinstance(u0, dict) else {}
                 if isinstance(meta, dict) and "adaptive_cards_enabled" in meta:
                     use_cards = bool(meta["adaptive_cards_enabled"])
 
@@ -255,7 +266,8 @@ def get_user_id_by_platform_user(platform: str, platform_user_id: str) -> Option
             .execute()
         )
         if r.data and r.data[0]:
-            return r.data[0].get("user_id")
+            d = r.data[0]
+            return str(d.get("user_id")) if isinstance(d, dict) else None
         return None
     except Exception:
         return None
@@ -274,7 +286,7 @@ def get_admin_orchestration_settings() -> Optional[Dict[str, Any]]:
             .execute()
         )
         row = r.data[0] if r.data else None
-        return dict(row) if row else None
+        return cast(Optional[Dict[str, Any]], row) if row and isinstance(row, dict) else None
     except Exception:
         return None
 
@@ -289,7 +301,8 @@ def get_thread_refinement_context(thread_id: Optional[str]) -> Optional[Dict[str
     try:
         r = client.table("chat_threads").select("refinement_context").eq("id", thread_id).limit(1).execute()
         row = r.data[0] if r.data else None
-        ctx = (row or {}).get("refinement_context") if isinstance(row, dict) else None
+        row_dict = row if isinstance(row, dict) else {}
+        ctx = row_dict.get("refinement_context")
         if isinstance(ctx, dict) and (ctx.get("proposed_plan") or ctx.get("search_queries")):
             return ctx
         return None
@@ -353,7 +366,8 @@ def log_orchestration_trace(
             row["experience_name"] = experience_name
         r = client.table("orchestration_traces").insert(row).execute()
         if r.data and len(r.data) > 0:
-            return str(r.data[0].get("id", ""))
+            first = r.data[0]
+            return str(first.get("id", "")) if isinstance(first, dict) else None
         return None
     except Exception:
         return None
@@ -370,8 +384,9 @@ def get_partner_representation_rules() -> Dict[str, Dict[str, Any]]:
             .select("partner_id, admin_weight, preferred_protocol")
             .execute()
         )
-        out = {}
-        for row in (r.data or []):
+        out: Dict[str, Dict[str, Any]] = {}
+        for raw in (r.data or []):
+            row = cast(Dict[str, Any], raw) if isinstance(raw, dict) else {}
             pid = str(row.get("partner_id", ""))
             if pid:
                 out[pid] = {
