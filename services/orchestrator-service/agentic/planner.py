@@ -330,6 +330,10 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
             )
             plan_str = " and ".join(proposed_plan) if proposed_plan else "your experience"
             exp_name = intent_data.get("experience_name") or "date night"
+            # Avoid "plan a perfect baby" when category is Baby → use baby shower / baby products
+            exp_name_display = exp_name
+            if (exp_name or "").lower() == "baby" or (proposed_plan and len(proposed_plan) == 1 and (proposed_plan[0] or "").lower() == "baby"):
+                exp_name_display = "baby shower or baby products experience"
             loc_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() == "location"), None)
             time_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() in ("time", "date")), None)
             # When user said "more options" / "show me more" etc., skip date/area probe and fetch products
@@ -349,7 +353,7 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                     elif loc_val:
                         msg = f"I'm planning your {plan_str} for {loc_val}. What date are you thinking?"
                     else:
-                        msg = f"I'd love to help you plan a perfect {exp_name}! I'm thinking {plan_str}. What date are you planning for, and which area — e.g. downtown or a neighborhood?"
+                        msg = f"I'd love to help you plan a perfect {exp_name_display}! I'm thinking {plan_str}. What date are you planning for, and which area — e.g. downtown or a neighborhood?"
                     return {
                         "action": "complete",
                         "message": msg,

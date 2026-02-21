@@ -164,7 +164,8 @@ export async function POST(req: Request) {
     }
     if (bundle_id) payload.bundle_id = bundle_id;
     if (order_id) payload.order_id = order_id;
-    if (debugRequested === true) payload.debug = true;
+    if (debugRequested === true || (body as { debug?: unknown }).debug === true) payload.debug = true;
+    // Refinement context is persisted per thread at orchestrator (DB); no need to send from client
 
     const chatUrl = `${ORCHESTRATOR_URL}/api/v1/chat${streamRequested ? "?stream=true" : ""}`;
     const res = await fetch(chatUrl, {

@@ -501,6 +501,19 @@ async def run_agentic_loop(
         "order_id": order_id,
         "ucp_prioritized": bool(admin_settings and admin_settings.get("ucp_prioritized")),
     }
+    # Restore refinement from previous turn (service-level only: load from DB when thread_id present; no client dependency)
+    _refinement: Optional[Dict[str, Any]] = None
+    if thread_id:
+        try:
+            from db import get_thread_refinement_context
+            _refinement = get_thread_refinement_context(thread_id)
+        except Exception:
+            pass
+    if _refinement:
+        if _refinement.get("proposed_plan"):
+            state["purged_proposed_plan"] = _refinement["proposed_plan"]
+        if _refinement.get("search_queries"):
+            state["purged_search_queries"] = _refinement["search_queries"]
 
     intent_data = None
     products_data = None
@@ -1079,6 +1092,28 @@ async def run_agentic_loop(
         out["planner_complete_message"] = planner_msg
     if last_suggestion:
         out["last_suggestion"] = last_suggestion
+    # Persist refinement at service level (DB) so next turn keeps "no limo" etc. without client sending it
+    if state.get("purged_proposed_plan") or state.get("purged_search_queries"):
+        out["data"]["refinement_context"] = {
+            "proposed_plan": state.get("purged_proposed_plan"),
+            "search_queries": state.get("purged_search_queries"),
+        }
+        if thread_id:
+            try:
+                from db import set_thread_refinement_context
+                set_thread_refinement_context(
+                    thread_id,
+                    proposed_plan=state.get("purged_proposed_plan"),
+                    search_queries=state.get("purged_search_queries"),
+                )
+            except Exception:
+                pass
+    elif thread_id:
+        try:
+            from db import set_thread_refinement_context
+            set_thread_refinement_context(thread_id, proposed_plan=None, search_queries=None)
+        except Exception:
+            pass
     # Pass through so chat can use same LLM config for engagement (avoids "no LLM client" when config is valid for planner)
     if llm_config:
         out["llm_config"] = llm_config

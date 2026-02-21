@@ -279,6 +279,50 @@ def get_admin_orchestration_settings() -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_thread_refinement_context(thread_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Load refinement context (proposed_plan, search_queries) for a thread. Used so 'no limo' etc. persists without client sending it."""
+    if not thread_id:
+        return None
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        r = client.table("chat_threads").select("refinement_context").eq("id", thread_id).limit(1).execute()
+        row = r.data[0] if r.data else None
+        ctx = (row or {}).get("refinement_context") if isinstance(row, dict) else None
+        if isinstance(ctx, dict) and (ctx.get("proposed_plan") or ctx.get("search_queries")):
+            return ctx
+        return None
+    except Exception:
+        return None
+
+
+def set_thread_refinement_context(
+    thread_id: Optional[str],
+    proposed_plan: Optional[List[str]] = None,
+    search_queries: Optional[List[str]] = None,
+) -> None:
+    """Persist refinement context for a thread so the next turn restores it (service-level, no client dependency)."""
+    if not thread_id:
+        return
+    client = get_supabase()
+    if not client:
+        return
+    try:
+        from datetime import datetime, timezone
+        payload: Dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        if proposed_plan is not None or search_queries is not None:
+            payload["refinement_context"] = {
+                "proposed_plan": proposed_plan if proposed_plan else [],
+                "search_queries": search_queries if search_queries else [],
+            }
+        else:
+            payload["refinement_context"] = None
+        client.table("chat_threads").update(payload).eq("id", thread_id).execute()
+    except Exception:
+        pass
+
+
 def log_orchestration_trace(
     trace_type: str,
     *,

@@ -75,6 +75,8 @@ type ChatMessage = {
   };
   /** When Settings → Show prompt trace is on: full prompt and response for this turn */
   promptTrace?: PromptTrace;
+  /** From backend data.refinement_context (display only); refinement is persisted server-side per thread */
+  refinement_context?: { proposed_plan?: string[]; search_queries?: string[] };
 };
 
 function PromptTraceBlock({ trace }: { trace: PromptTrace; messageId: string }) {
@@ -696,6 +698,16 @@ export function ChatPage(props: ChatPageProps = {}) {
   const sendMessage = useCallback(
     async (userMessage: string, fromPrompt = false) => {
       if (!userMessage.trim() || loading) return;
+      // Decide trace once at send time so first message gets trace when setting is on
+      let wantTrace = promptTraceEnabled;
+      if (typeof window !== "undefined") {
+        try {
+          wantTrace = wantTrace || localStorage.getItem("chat_debug_show_prompt_trace") === "true";
+        } catch {
+          /* ignore */
+        }
+      }
+
       setInput("");
       addMessage({ role: "user", content: userMessage });
       setLoading(true);
@@ -721,16 +733,8 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (bundleId) payload.bundle_id = bundleId;
         if (latestOrder?.id) payload.order_id = latestOrder.id;
         payload.stream = true;
-        // Always read at send time so the first message gets trace when setting is on (don't rely on state alone)
-        let wantTrace = promptTraceEnabled;
-        if (typeof window !== "undefined") {
-          try {
-            wantTrace = wantTrace || localStorage.getItem("chat_debug_show_prompt_trace") === "true";
-          } catch {
-            /* localStorage may throw in private mode */
-          }
-        }
         if (wantTrace) payload.debug = true;
+        // Refinement (e.g. "no limo") is restored server-side from thread DB; no need to send from client
 
         setThinkingText(null);
         const res = await fetch("/api/chat", {
@@ -830,6 +834,7 @@ export function ChatPage(props: ChatPageProps = {}) {
           const suggestedCtas = Array.isArray((data as ChatResponse).suggested_ctas) ? (data as ChatResponse).suggested_ctas : undefined;
           const opts = (data as ChatResponse).data?.engagement?.suggested_bundle_options;
           const promptTrace = (data as ChatResponse).prompt_trace;
+          const refinementContext = (data as { data?: { refinement_context?: { proposed_plan?: string[]; search_queries?: string[] } } }).data?.refinement_context;
           addMessage({
             role: "assistant",
             content: assistantContent,
@@ -837,6 +842,7 @@ export function ChatPage(props: ChatPageProps = {}) {
             ...(suggestedCtas?.length && { suggestedCtas }),
             ...(suggestedCtas?.length && opts?.length && { ctaContext: { suggested_bundle_options: opts } }),
             ...(promptTrace && { promptTrace }),
+            ...(refinementContext && { refinement_context: refinementContext }),
           });
         } else {
           let data: ChatResponse;
@@ -878,6 +884,7 @@ export function ChatPage(props: ChatPageProps = {}) {
           const suggestedCtas = Array.isArray(data.suggested_ctas) ? data.suggested_ctas : undefined;
           const opts = data.data?.engagement?.suggested_bundle_options;
           const promptTraceNonStream = data.prompt_trace;
+          const refinementContextNs = (data as { data?: { refinement_context?: { proposed_plan?: string[]; search_queries?: string[] } } }).data?.refinement_context;
           addMessage({
             role: "assistant",
             content: assistantContent,
@@ -885,6 +892,7 @@ export function ChatPage(props: ChatPageProps = {}) {
             ...(suggestedCtas?.length && { suggestedCtas }),
             ...(suggestedCtas?.length && opts?.length && { ctaContext: { suggested_bundle_options: opts } }),
             ...(promptTraceNonStream && { promptTrace: promptTraceNonStream }),
+            ...(refinementContextNs && { refinement_context: refinementContextNs }),
           });
         }
       } catch (err) {

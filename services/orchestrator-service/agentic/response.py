@@ -64,6 +64,12 @@ def _build_context(result: Dict[str, Any]) -> str:
     proposed_plan = intent.get("proposed_plan")
     if isinstance(proposed_plan, list) and proposed_plan:
         parts.append(f"Current plan — use ONLY these categories in your reply: {', '.join(str(p) for p in proposed_plan)}.")
+    # Bundle themes from intent (e.g. Romantic Date Night, Casual, Adventure) so first reply can mention style options
+    bundle_opts = intent.get("bundle_options") or []
+    if isinstance(bundle_opts, list) and bundle_opts and intent_type == "discover_composite":
+        labels = [str(o.get("label", "")).strip() for o in bundle_opts if isinstance(o, dict) and o.get("label")][:6]
+        if labels:
+            parts.append(f"Bundle themes (you may mention these): {', '.join(labels)}.")
 
     last_suggestion = result.get("last_suggestion")
     if last_suggestion:

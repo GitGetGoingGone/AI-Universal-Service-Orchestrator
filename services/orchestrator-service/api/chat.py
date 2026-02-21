@@ -136,7 +136,10 @@ async def _stream_chat_events(
             suggested_ctas_stream.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
 
     # Use same LLM config as the loop (planner) so engagement gets a client when planner does
-    llm_config = result.pop("llm_config", None)
+    if isinstance(result, dict):
+        llm_config = result.pop("llm_config", None)  # remove so not logged/serialized (may contain api_key)
+    else:
+        llm_config = None
     # Always call the engagement LLM first so the model generates the reply. Use planner message only as fallback.
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
@@ -369,7 +372,10 @@ async def chat(
             suggested_ctas.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
 
     # Use same LLM config as the loop so engagement gets a client when planner does
-    llm_config_ns = result.pop("llm_config", None)
+    if isinstance(result, dict):
+        llm_config_ns = result.pop("llm_config", None)  # remove so not logged/serialized
+    else:
+        llm_config_ns = None
     # Always call the engagement LLM first; use planner message only as fallback when LLM fails or returns empty.
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
