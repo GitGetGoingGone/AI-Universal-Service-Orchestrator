@@ -303,8 +303,9 @@ async def generate_engagement_response(
             return (None, {"prompt_sent": "(skipped: no LLM config)", "response_received": ""})
         return None
 
-    from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
-    provider, client = _get_planner_client_for_config(llm_config)
+    # Use same client builder as admin test (platform_llm) so engagement works when admin config works
+    from packages.shared.platform_llm import get_llm_chat_client  # type: ignore[reportMissingImports]
+    provider, client = get_llm_chat_client(llm_config)
     if not client:
         if return_debug:
             return (None, {"prompt_sent": "(skipped: no LLM client)", "response_received": ""})
@@ -365,7 +366,7 @@ async def generate_engagement_response(
     prompt_sent = f"[System]\n{system_prompt}\n\n[User]\n{user_content}"
 
     try:
-        if provider in ("azure", "openrouter", "custom"):
+        if provider in ("azure", "openrouter", "custom", "openai"):
             def _call_openai_engagement():
                 return client.chat.completions.create(  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
                     model=model,

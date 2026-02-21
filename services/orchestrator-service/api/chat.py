@@ -135,18 +135,20 @@ async def _stream_chat_events(
         if body.order_id or res_engagement.get("order_status"):
             suggested_ctas_stream.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
 
+    # Use same LLM config as the loop (planner) so engagement gets a client when planner does
+    llm_config = result.pop("llm_config", None)
     # Always call the engagement LLM first so the model generates the reply. Use planner message only as fallback.
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
     engagement_debug: Optional[Dict[str, Any]] = None
     if body.debug:
         summary, engagement_debug = await generate_engagement_response(
-            body.text, result, allow_markdown=not use_adaptive_cards, return_debug=True
+            body.text, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards, return_debug=True
         )
         if summary is None:
             engagement_debug = (engagement_debug or {}) | {"response_received": ""}
     else:
-        summary = await generate_engagement_response(body.text, result, allow_markdown=not use_adaptive_cards)
+        summary = await generate_engagement_response(body.text, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards)
     if not summary:
         summary = planner_message if (planner_message and planner_message.lower() not in generic_messages) else _build_summary(result)
         if body.debug and not engagement_debug:
@@ -366,18 +368,20 @@ async def chat(
         if body.order_id or res_engagement.get("order_status"):
             suggested_ctas.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
 
+    # Use same LLM config as the loop so engagement gets a client when planner does
+    llm_config_ns = result.pop("llm_config", None)
     # Always call the engagement LLM first; use planner message only as fallback when LLM fails or returns empty.
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
     engagement_debug_ns: Optional[Dict[str, Any]] = None
     if body.debug:
         summary, engagement_debug_ns = await generate_engagement_response(
-            body.text, result, allow_markdown=not use_adaptive_cards, return_debug=True
+            body.text, result, llm_config=llm_config_ns, allow_markdown=not use_adaptive_cards, return_debug=True
         )
         if summary is None:
             engagement_debug_ns = (engagement_debug_ns or {}) | {"response_received": ""}
     else:
-        summary = await generate_engagement_response(body.text, result, allow_markdown=not use_adaptive_cards)
+        summary = await generate_engagement_response(body.text, result, llm_config=llm_config_ns, allow_markdown=not use_adaptive_cards)
     if not summary:
         summary = planner_message if (planner_message and planner_message.lower() not in generic_messages) else _build_summary(result)
         if body.debug and not engagement_debug_ns:

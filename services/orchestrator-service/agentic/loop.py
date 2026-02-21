@@ -1079,6 +1079,9 @@ async def run_agentic_loop(
         out["planner_complete_message"] = planner_msg
     if last_suggestion:
         out["last_suggestion"] = last_suggestion
+    # Pass through so chat can use same LLM config for engagement (avoids "no LLM client" when config is valid for planner)
+    if llm_config:
+        out["llm_config"] = llm_config
     return out
 
 
