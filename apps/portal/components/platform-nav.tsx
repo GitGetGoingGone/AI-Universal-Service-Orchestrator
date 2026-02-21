@@ -7,6 +7,7 @@ import { UserButton } from "@clerk/nextjs";
 const NAV_ITEMS = [
   { href: "/platform", label: "Dashboard", description: "Platform metrics and overview" },
   { href: "/platform/partners", label: "Partners", description: "Manage partner accounts and onboarding" },
+  { href: "/platform/orders", label: "Orders", description: "List of orders placed" },
   { href: "/platform/escalations", label: "Escalations", description: "Support escalations and assignments" },
   { href: "/platform/rfps", label: "RFPs", description: "Hub RFPs and bid management" },
   { href: "/platform/admins", label: "Admins", description: "Platform admin users" },

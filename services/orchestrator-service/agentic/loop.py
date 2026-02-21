@@ -2,7 +2,7 @@
 
 import logging
 import re
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -211,28 +211,37 @@ async def _discover_composite(
                 return v
         return []
 
+    # Narrow-theme keywords: if product name contains these but intent didn't ask for them, deprioritize
+    _NARROW_THEME_WORDS = frozenset({"baby", "wedding", "anniversary", "bridal", "newborn", "shower"})
+
     def _pick_best_product_for_theme(
         products: List[Dict[str, Any]],
         experience_tags: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Pick the product that best matches the option's experience_tags (most tag overlap)."""
+        """Pick the product that best matches the option's experience_tags. Prefer products that don't
+        introduce strong themes (e.g. baby, wedding) when the intent didn't ask for them."""
         if not products:
             return None
         tags = [str(t).strip().lower() for t in (experience_tags or []) if t]
+        intent_tag_set = set(tags)
         if not tags:
             return products[0]
-        best: Optional[Dict[str, Any]] = None
-        best_count = -1
-        for p in products:
+
+        def _score(p: Dict[str, Any]) -> Tuple[int, int, int]:
             p_tags = p.get("experience_tags")
             if not isinstance(p_tags, list):
                 p_tags = []
             p_set = {str(t).strip().lower() for t in p_tags if t}
             match_count = sum(1 for t in tags if t in p_set)
-            if match_count > best_count:
-                best_count = match_count
-                best = p
-        return best if best is not None else products[0]
+            extra_tags = len(p_set - intent_tag_set)  # fewer is better
+            name_lower = (p.get("name") or "").lower()
+            name_theme_penalty = 1 if any(
+                w in name_lower for w in _NARROW_THEME_WORDS if w not in intent_tag_set
+            ) else 0
+            return (match_count, -extra_tags, -name_theme_penalty)
+
+        best = max(products, key=_score)
+        return best
 
     if bundle_options and category_products:
         id_to_product: Dict[str, Dict[str, Any]] = {}
