@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from db import upsert_products_from_legacy
 from manifest_cache import cache_partner_manifest
-from semantic_search import backfill_product_embedding
+from semantic_search import backfill_product_embedding, backfill_all_product_embeddings
 
 from adapters.legacy_adapter import (
     parse_csv_to_products,
@@ -86,16 +86,19 @@ async def ingest_manifest(body: ManifestIngestBody):
 
 
 @router.post("/embeddings/backfill")
-async def backfill_embeddings(product_id: Optional[str] = Query(None)):
+async def backfill_embeddings(
+    product_id: Optional[str] = Query(None),
+    limit: int = Query(500, ge=1, le=2000, description="Max products to backfill when product_id omitted"),
+):
     """
-    Backfill embedding for a product (or all products when product_id omitted).
-    Requires Azure OpenAI embedding deployment.
+    Backfill embedding for a product (or all products missing embeddings when product_id omitted).
+    Requires embedding provider (OpenAI or Azure) to be configured (EMBEDDING_* / OPENAI_API_KEY).
     """
     if product_id:
         ok = await backfill_product_embedding(product_id)
         return {"product_id": product_id, "updated": ok}
-    # TODO: batch backfill when product_id omitted
-    return {"message": "Specify product_id for single backfill; batch coming soon"}
+    result = await backfill_all_product_embeddings(limit=limit)
+    return result
 
 
 # --- Module 2: Legacy Adapter Layer ---

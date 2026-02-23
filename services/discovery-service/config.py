@@ -44,6 +44,20 @@ class Settings:
     gateway_signature_required: bool = (get_env("GATEWAY_SIGNATURE_REQUIRED") or "false").strip().lower() == "true"
     gateway_internal_secret: str = get_env("GATEWAY_INTERNAL_SECRET") or ""
 
+    # Embedding provider for semantic search (pgvector). One of "openai" | "azure".
+    embedding_provider: str = (get_env("EMBEDDING_PROVIDER") or "azure").strip().lower()
+    embedding_model: str = get_env("EMBEDDING_MODEL") or get_env("EMBEDDING_DEPLOYMENT") or "text-embedding-3-small"
+    openai_api_key: str = get_env("OPENAI_API_KEY") or ""
+    azure_openai_endpoint: str = (get_env("AZURE_OPENAI_ENDPOINT") or "").rstrip("/")
+    azure_openai_api_key: str = get_env("AZURE_OPENAI_API_KEY") or ""
+
+    @property
+    def embedding_configured(self) -> bool:
+        """True if embedding API is configured (OpenAI or Azure)."""
+        if self.embedding_provider == "openai":
+            return bool(self.openai_api_key and self.embedding_model)
+        return bool(self.azure_openai_api_key and self.azure_openai_endpoint and self.embedding_model)
+
     @property
     def supabase_configured(self) -> bool:
         """Check if Supabase is configured."""

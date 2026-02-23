@@ -1,23 +1,82 @@
 """pgvector-based semantic product search (Module 1)."""
 
+import logging
 from typing import Any, Dict, List, Optional
 
+import httpx
+
+from config import settings
 from db import get_supabase
+
+logger = logging.getLogger(__name__)
+
+# pgvector schema expects 1536 dimensions (text-embedding-ada-002 / text-embedding-3-small)
+EMBEDDING_DIMENSION = 1536
 
 
 async def get_query_embedding(text: str) -> Optional[List[float]]:
     """
-    Generate embedding for search query.
-    Embedding config is in Platform Config (llm_providers). Returns None when not configured.
+    Generate embedding for search query via OpenAI or Azure OpenAI.
+    Returns None when not configured or on API error.
     """
-    return None
+    if not text or not text.strip():
+        return None
+    if not getattr(settings, "embedding_configured", False):
+        return None
+
+    provider = getattr(settings, "embedding_provider", "azure") or "azure"
+    model = getattr(settings, "embedding_model", "text-embedding-3-small") or "text-embedding-3-small"
+
+    try:
+        if provider == "openai":
+            api_key = getattr(settings, "openai_api_key", "") or ""
+            if not api_key:
+                return None
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.post(
+                    "https://api.openai.com/v1/embeddings",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": model, "input": text.strip()[:8192]},
+                )
+                r.raise_for_status()
+                data = r.json()
+        else:
+            endpoint = getattr(settings, "azure_openai_endpoint", "") or ""
+            api_key = getattr(settings, "azure_openai_api_key", "") or ""
+            if not endpoint or not api_key:
+                return None
+            url = f"{endpoint}/openai/deployments/{model}/embeddings?api-version=2024-02-15-preview"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.post(
+                    url,
+                    headers={"api-key": api_key, "Content-Type": "application/json"},
+                    json={"input": text.strip()[:8192]},
+                )
+                r.raise_for_status()
+                data = r.json()
+
+        items = data.get("data") if isinstance(data, dict) else None
+        if not items or not isinstance(items, list):
+            return None
+        emb = items[0].get("embedding") if isinstance(items[0], dict) else None
+        if not emb or not isinstance(emb, list):
+            return None
+        vec = [float(x) for x in emb]
+        if len(vec) < EMBEDDING_DIMENSION:
+            logger.warning("Embedding dimension %s < %s; check model", len(vec), EMBEDDING_DIMENSION)
+            return None
+        return vec[:EMBEDDING_DIMENSION]
+    except Exception as e:
+        logger.warning("Embedding API failed: %s", e)
+        return None
 
 
 def _get_product_embedding_input(product: Dict[str, Any]) -> str:
-    """Build text for product embedding from name, description, capabilities."""
+    """Build text for product embedding from name, description, description_kb, capabilities."""
     parts = [
         product.get("name") or "",
         product.get("description") or "",
+        product.get("description_kb") or "",
     ]
     caps = product.get("capabilities")
     if isinstance(caps, list):
@@ -40,7 +99,7 @@ async def backfill_product_embedding(product_id: str) -> bool:
 
     product = (
         client.table("products")
-        .select("id, name, description, capabilities")
+        .select("id, name, description, description_kb, capabilities")
         .eq("id", product_id)
         .is_("deleted_at", "null")
         .single()
@@ -62,6 +121,49 @@ async def backfill_product_embedding(product_id: str) -> bool:
         return True
     except Exception:
         return False
+
+
+async def backfill_all_product_embeddings(limit: int = 500) -> Dict[str, Any]:
+    """
+    Backfill embeddings for all products that have no embedding yet.
+    Returns dict with updated_count, failed_count, skipped_count, total_processed.
+    """
+    client = get_supabase()
+    if not client:
+        return {"updated_count": 0, "failed_count": 0, "skipped_count": 0, "total_processed": 0, "error": "no_db"}
+
+    try:
+        result = (
+            client.table("products")
+            .select("id")
+            .is_("deleted_at", "null")
+            .is_("embedding", "null")
+            .limit(limit)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        logger.warning("Failed to fetch products for backfill: %s", e)
+        return {"updated_count": 0, "failed_count": 0, "skipped_count": 0, "total_processed": 0, "error": str(e)}
+
+    updated = 0
+    failed = 0
+    for row in rows:
+        pid = row.get("id") if isinstance(row, dict) else None
+        if not pid:
+            continue
+        ok = await backfill_product_embedding(str(pid))
+        if ok:
+            updated += 1
+        else:
+            failed += 1
+
+    return {
+        "updated_count": updated,
+        "failed_count": failed,
+        "skipped_count": 0,
+        "total_processed": len(rows),
+    }
 
 
 async def semantic_search(
