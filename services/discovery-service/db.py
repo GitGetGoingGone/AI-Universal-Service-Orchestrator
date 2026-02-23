@@ -174,7 +174,7 @@ async def mask_product_id(
 def resolve_masked_id(masked_id: str) -> Optional[tuple]:
     """
     Resolve masked id to (internal_product_id, partner_id).
-    Returns None if not found or not a masked id.
+    Returns None if not found, not a masked id, or expired (expires_at in the past).
     """
     if not masked_id or not str(masked_id).startswith("uso_"):
         return None
@@ -184,7 +184,7 @@ def resolve_masked_id(masked_id: str) -> Optional[tuple]:
     try:
         result = (
             client.table("id_masking_map")
-            .select("internal_product_id, partner_id")
+            .select("internal_product_id, partner_id, expires_at")
             .eq("masked_id", str(masked_id))
             .limit(1)
             .execute()
@@ -192,6 +192,20 @@ def resolve_masked_id(masked_id: str) -> Optional[tuple]:
         if not result.data:
             return None
         row = result.data[0]
+        expires_at = row.get("expires_at")
+        if expires_at:
+            from datetime import datetime, timezone
+            if isinstance(expires_at, str):
+                try:
+                    exp_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                except Exception:
+                    exp_dt = None
+            else:
+                exp_dt = expires_at
+            if exp_dt and exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+            if exp_dt and exp_dt < datetime.now(timezone.utc):
+                return None
         return (str(row.get("internal_product_id", "")), row.get("partner_id"))
     except Exception:
         return None

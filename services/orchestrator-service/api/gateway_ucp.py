@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
 from config import settings
+from registry import get_capabilities
 
 router = APIRouter(tags=["Gateway UCP"])
 
@@ -12,11 +13,28 @@ router = APIRouter(tags=["Gateway UCP"])
 @router.get("/.well-known/ucp")
 async def well_known_ucp():
     """
-    Single USO UCP manifest. All endpoints point to the Gateway (orchestrator).
+    Single USO UCP manifest. Built from registry.get_capabilities(); all endpoints point to the Gateway.
     External clients discover and call only the Gateway; no internal agent URLs.
     """
     base = settings.gateway_public_url or settings.orchestrator_base_url
     base = base.rstrip("/")
+    caps = get_capabilities()
+    if not caps:
+        caps = ["discovery"]
+    if "checkout" not in caps:
+        caps = list(caps) + ["checkout"]
+    capabilities = [
+        {
+            "name": f"dev.ucp.shopping.{c}" if not c.startswith("dev.") else c,
+            "version": "2026-01-11",
+            "spec": "https://ucp.dev/specification/overview",
+            "schema": "https://ucp.dev/schemas/shopping/checkout.json" if c == "checkout" else None,
+        }
+        for c in caps
+    ]
+    for cap in capabilities:
+        if cap.get("schema") is None:
+            cap.pop("schema", None)
     body = {
         "ucp": {
             "version": "2026-01-11",
@@ -30,14 +48,7 @@ async def well_known_ucp():
                     },
                 },
             },
-            "capabilities": [
-                {
-                    "name": "dev.ucp.shopping.checkout",
-                    "version": "2026-01-11",
-                    "spec": "https://ucp.dev/specification/checkout",
-                    "schema": "https://ucp.dev/schemas/shopping/checkout.json",
-                },
-            ],
+            "capabilities": capabilities,
         },
     }
     return JSONResponse(
@@ -93,9 +104,10 @@ async def gateway_ucp_checkout(request: Request):
 @router.get("/api/v1/gateway/ucp/rest.openapi.json")
 async def gateway_ucp_rest_openapi(request: Request):
     """Proxy to Discovery UCP OpenAPI schema."""
-    url = _discovery_url("/api/v1/ucp/rest.openapi.json")
+    url = _discovery_url("/api/v1/gateway/ucp/rest.openapi.json")
+    headers = _gateway_headers("GET", "/api/v1/ucp/rest.openapi.json")
     async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(url)
+        r = await client.get(url, headers=headers)
     return Response(
         content=r.content,
         status_code=r.status_code,

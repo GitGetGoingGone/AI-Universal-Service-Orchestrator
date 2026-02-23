@@ -1,88 +1,86 @@
 # Implementation status: Distributed Business Agent (A2A refactor)
 
-Status relative to [.cursor/plans/distributed-business-agent-a2a-refactor.md](.cursor/plans/distributed-business-agent-a2a-refactor.md).  
+**Plan:** [.cursor/plans/distributed-business-agent-a2a-refactor.md](../.cursor/plans/distributed-business-agent-a2a-refactor.md).  
+**Status:** All planned A2A features below are implemented. Build and deploy: [HOW_TO_BUILD_AND_DEPLOY.md](HOW_TO_BUILD_AND_DEPLOY.md).  
 Last updated: 2025-01-28.
 
 ---
 
 ## Implemented
 
-### Multi-Agent Discovery (design + encapsulation)
+### 1. LLM abstraction (Orchestrator)
 
-- Internal Business Agent uses experience_tags and product_capability_mappings internally and returns a standardized UCP response. Planner visibility boundary is enforced: discover and get_product responses use `_product_for_public_response()` to strip `experience_tags` (and optionally `partner_id` when ID masking is on) so Planner/UCP clients never see internal fields.
+- **Location:** `packages/shared/llm_provider/` (config, provider protocol, OSS provider, OpenAI fallback, facade).
+- **Behavior:** Primary OSS endpoint + optional OpenAI fallback; `LLMProviderFacade.get_client()` for planner tool calls. Env: `LLM_PRIMARY`, `LLM_FALLBACK`, `OSS_ENDPOINT`, `OSS_API_KEY`, `OPENAI_API_KEY`, `LLM_TIMEOUT_SEC`, `LLM_MAX_RETRIES`.
+- **Orchestrator:** `planner.py` uses facade when OSS or OpenAI env is set.
 
-### Exclusive Gateway (Seller of Record)
+### 2. UCP-only signature middleware (Discovery)
 
-- **Private Registry:** Table `internal_agent_registry` (capability, base_url, display_name, enabled); `get_internal_agent_urls(capability?)` in discovery `db.py`. Scout uses registry to build UCPManifestDriver when URLs are present.
-- **ID masking:** Table `id_masking_map`; `mask_product_id` / `resolve_masked_id` / `mask_products()` in discovery `db.py`. Discover and get_product return masked ids when `ID_MASKING_ENABLED=true`; add-to-bundle, add-bulk, and UCP checkout resolve masked ids before DB.
-- **Single USO well-known:** Orchestrator exposes `GET /.well-known/ucp` and proxy routes `GET /api/v1/gateway/ucp/items`, `POST /api/v1/gateway/ucp/checkout`, `GET /api/v1/gateway/ucp/rest.openapi.json` that forward to Discovery. Config: `GATEWAY_PUBLIC_URL`.
-- **ScoutEngine + registry:** `_fetch_via_aggregator` calls `get_internal_agent_urls()` and, when non-empty, builds `UCPManifestDriver` so internal agents are queried in parallel with LocalDB; results merged and returned (masking applied at API layer when enabled).
-- **X-Gateway-Signature:** Shared `packages/shared/gateway_signature.py` (sign_request, verify_request). Discovery middleware `gateway_signature_middleware` requires `X-Gateway-Signature` and `X-Gateway-Timestamp` on `/api/*` when `GATEWAY_SIGNATURE_REQUIRED=true`. Orchestrator clients add these headers to all Discovery requests when `GATEWAY_INTERNAL_SECRET` is set.
+- **Location:** `services/discovery-service/middleware/gateway_signature.py`.
+- **Behavior:** Requests to `/api/v1/ucp/*` require `X-Gateway-Signature` when `GATEWAY_INTERNAL_SECRET` is set; POST/PUT/PATCH body verified and re-set for downstream; GET uses `verify_request_no_body`. Other `/api/*` unchanged (still behind optional `gateway_signature_required`).
 
-### Experience-tag discovery and theme bundles (checklist)
+### 3. match_products_v2 + semantic search
 
-| # | Area | Status |
-|---|------|--------|
-| 1 | Semantic search return `experience_tags` | Done – `semantic_search.py` includes `experience_tags` in returned dict |
-| 2 | DB filter by experience_tag | Done – `db.py` has `experience_tag` param; filter via `.contains("experience_tags", [tag])`; migration `20250128000037_match_products_experience_tag.sql` adds `filter_experience_tag` to RPC |
-| 3 | Semantic RPC | Done – migration adds `filter_experience_tag` to `match_products` |
-| 4 | Semantic call | Done – `semantic_search.py` passes `filter_experience_tag` when `experience_tag` provided |
-| 5 | Aggregator | Done – `LocalDBDriver.search()` and `DiscoveryAggregator.search()` accept `experience_tag` |
-| 6 | Scout | Done – `experience_tag` and `experience_tag_boost_amount` in `search()`, `_fetch_and_rank()`, `_fetch_via_aggregator()`; passed to ranking |
-| 7 | Ranking | Done – `sort_products_by_rank()` has `experience_tag_boost` and `experience_tag_boost_amount` |
-| 8 | Discover API | Done – GET `/api/v1/discover` has optional `experience_tag` and `experience_tags` (list, AND) query params; passed to scout `search()` |
-| 9 | Experience-categories API | Done – GET `/api/v1/experience-categories`; RPC `get_distinct_experience_tags` (migration `20250128000038_get_distinct_experience_tags.sql`); `db.get_distinct_experience_tags()` |
-| 10 | Orchestrator client | Done – `discover_products()` accepts `experience_tag` and `experience_tags`; `resolve_intent()` accepts `experience_categories`; `get_experience_categories()` for pre-fetch |
-| 11 | discover_composite | Done – `_pick_best_product_for_theme(products, experience_tags)`; suggested_bundle_options built by best match to option’s `experience_tags`; `experience_tags` on each option; `theme_experience_tag` param passed to `discover_products_fn` |
-| 12 | Intent prompt + API | Done – `ResolveRequest.experience_categories`; `resolve_intent(..., experience_categories=...)`; user message injects available categories; response includes `bundle_options` (with `experience_tags`) and `theme_experience_tag` for discover_composite/refine_composite |
-| 13 | Tools | Done – discover_composite: `experience_tags` in bundle_options; optional `theme_experience_tag` and `theme_experience_tags`; passed through to `discover_composite_fn` |
+- **Migration:** `supabase/migrations/20250128120000_match_products_v2.sql` defines `match_products_v2` (same signature as `match_products`).
+- **Discovery:** `semantic_search.py` calls `client.rpc("match_products_v2", kwargs)`.
 
-### Exclusive Gateway (Seller of Record)
+### 4. Data hygiene (public product shape)
 
-| Area | Status |
-|------|--------|
-| Private Registry | Done – table `internal_agent_registry` (migration `20250128100000_internal_agent_registry.sql`); `db.get_internal_agent_urls(capability?)` |
-| ID masking | Done – table `id_masking_map`; `mask_product_id` / `resolve_masked_id` / `mask_products`; discover and get_product return masked ids when `ID_MASKING_ENABLED=true`; add-to-bundle and UCP checkout resolve masked id |
-| Single USO well-known | Done – Orchestrator exposes `GET /.well-known/ucp` and proxy routes `GET/POST /api/v1/gateway/ucp/*` to Discovery; `GATEWAY_PUBLIC_URL` for manifest base |
-| Scout + registry | Done – `_fetch_via_aggregator` builds `UCPManifestDriver` from `get_internal_agent_urls()` when registry has URLs; parallel query and flatten unchanged |
-| X-Gateway-Signature | Done – `packages/shared/gateway_signature.py` (sign/verify); Discovery middleware requires header when `GATEWAY_SIGNATURE_REQUIRED=true`; Orchestrator clients add `X-Gateway-Signature` and `X-Gateway-Timestamp` to all Discovery calls when `GATEWAY_INTERNAL_SECRET` set |
+- **Location:** `packages/shared/ucp_public_product.py` — allow-list `PUBLIC_PRODUCT_ALLOWED_KEYS`, `STRIP_KEYS` (experience_tags, partner_id, internal_notes), `filter_product_for_public()`, `filter_products_for_public()`.
+- **Discovery:** `api/products.py` uses `filter_product_for_public` in `_product_for_public_response`; `api/ucp.py` uses it in `_product_to_ucp_item`; `api/ucp_rpc.py` filters discovery/search and discovery/getProduct results.
 
-### Multi-Agent Discovery (encapsulation)
+### 5. RegistryDriver (Orchestrator)
 
-- **Response shape:** Discover and get_product return only UCP-style fields; `_product_for_public_response` strips `experience_tags` from all public API responses. Planner/UCP clients do not see internal tags or schema.
+- **Location:** `services/orchestrator-service/registry.py` — `AgentEntry(base_url, display_name, slug)`, `get_agents(capability=None)`, `get_capabilities()`.
+- **Behavior:** Reads `internal_agent_registry` (Supabase), filters by capability and enabled; slug from `_display_name_to_slug(display_name)`. Fallback when DB empty: one entry from `settings.discovery_service_url` with slug `"discovery"`.
 
----
+### 6. JSON-RPC 2.0 Discovery + Orchestrator client (Task 3.1)
 
-## Not implemented / optional
+- **Discovery:** `api/ucp_rpc.py` — `POST /api/v1/ucp/rpc`; methods `discovery/search` (scout_engine.search + filter_products_for_public) and `discovery/getProduct` (get_product_by_id + filter_product_for_public). Router registered in `main.py`.
+- **Orchestrator:** `clients.py` — `discover_products_via_rpc(base_url, query, limit, ...)` POSTs JSON-RPC to `{base_url}/api/v1/ucp/rpc` with gateway signature when `GATEWAY_INTERNAL_SECRET` set.
 
-### Optional / follow-ups (experience-tag plan)
+### 7. Broadcast discovery with streaming (Task 2.2)
 
-- **Multi-tag filter (AND semantics):** **Implemented.** Discovery accepts `experience_tags` (list) in DB, semantic search (post-filter), scout, aggregator, and GET `/api/v1/discover`; orchestrator `discover_products(experience_tags=...)` and discover_composite `theme_experience_tags`; intent may return `theme_experience_tags` for e.g. "luxury travel-friendly night out."
-- **User input as theme to filter:** **Implemented.** User natural language (e.g. "romantic dinner", "luxury travel-friendly night out") is resolved by intent to `theme_experience_tag` or `theme_experience_tags`, which are passed to discover/discover_composite; Discovery filters and boosts by those tags. No separate "theme" field is required—the user’s words drive the theme filter.
-- **Frontend theme badge/picker UI:** **Out of scope** for this repo (backend/orchestrator only). The API supports `experience_tag` and `experience_tags` on discover, so a frontend can implement a theme selector (badge, dropdown, chips) that calls discover with the selected tag(s) if desired.
-- **Automatic category pre-fetch:** **Implemented.** Orchestrator `resolve_intent_with_fallback()` calls `get_experience_categories()` (GET Discovery `/api/v1/experience-categories`) and passes the list to `resolve_intent(..., experience_categories=...)` so the intent LLM always has available tags for theme bundles without caller wiring.
+- **Location:** `services/orchestrator-service/clients.py` — `discover_products_broadcast(...)`.
+- **Behavior:** Uses `get_agents(capability="discovery")`; fans out `discover_products_via_rpc` per agent with `asyncio.gather(return_exceptions=True)`; merges products (dedupe by id); returns same shape as `discover_products` (data, machine_readable, adaptive_card, metadata). Falls back to REST `discover_products` when no agents. Chat uses `discover_products_broadcast` as `discover_products_fn`.
 
----
+### 8. ID masking at Gateway + TTL (Task 2.3)
 
-## Deployment impact (rebuild / restart)
+- **Migration:** `supabase/migrations/20250128130000_id_masking_agent_slug_expires.sql` — `id_masking_map` gains `agent_slug TEXT`, `expires_at TIMESTAMPTZ`.
+- **Orchestrator:** `config.py` — `ID_MASKING_ENABLED`, `ID_MASKING_TTL_HOURS`. `db.py` — `store_masked_id(agent_slug, internal_product_id, partner_id, source)` inserts into `id_masking_map` with `expires_at = now + TTL`, returns `uso_{agent_slug}_{short_uid}`.
+- **Broadcast:** When `id_masking_enabled`, each product from each agent is masked via `store_masked_id(slug, id, partner_id, "rpc")` and `partner_id` stripped from response.
+- **Discovery:** `resolve_masked_id()` selects `expires_at` and returns `None` if expired (expires_at in the past). Add-to-bundle and UCP checkout already resolve masked ids before DB.
 
-For the experience-tag, multi-tag filter, and automatic category pre-fetch changes:
+### 9. Unified manifest from registry (Task 2.4)
 
-| Service | Affected? | Action |
-|--------|-----------|--------|
-| **Discovery** | Yes | Restart required. Code: `db.py`, `semantic_search.py`, `api/products.py`, `scout_engine.py`; uses `packages/shared` (discovery_aggregator, ranking). |
-| **Orchestrator** | Yes | Restart required. Code: `clients.py`, `api/chat.py`, `agentic/loop.py`, `agentic/tools.py`; uses `packages/shared` (e.g. gateway_signature). |
-| **Intent** | Yes | Restart required. Code: `api/resolve.py`, `llm.py`. |
-| **Shared package** (`packages/shared`) | Yes (library) | No standalone process. Picked up when Discovery or Orchestrator is restarted (they import from it). If you build Docker images per service, rebuild images that include `packages/shared` (typically Discovery and Orchestrator). |
-| **Database** | No | No new migrations for multi-tag or pre-fetch. Existing schema (`experience_tags` on products, `get_distinct_experience_tags`, `match_products` with `filter_experience_tag`) is unchanged. |
-| Other services (payment, proofing, webhook, etc.) | No | Not changed by this work. |
+- **Location:** `services/orchestrator-service/api/gateway_ucp.py`.
+- **Behavior:** `GET /.well-known/ucp` built from `registry.get_capabilities()`; single `rest.endpoint` and `rest.schema` point to Gateway (`GATEWAY_PUBLIC_URL`). Capabilities default to `["discovery"]` when registry empty. Proxy routes `GET /api/v1/gateway/ucp/items`, `POST /api/v1/gateway/ucp/checkout`, `GET /api/v1/gateway/ucp/rest.openapi.json` forward to Discovery with `X-Gateway-Signature` when `GATEWAY_INTERNAL_SECRET` set.
 
-**Summary:** Restart **Discovery**, **Orchestrator**, and **Intent** so they load the new code. Rebuild images only if your deploy builds service-specific images (e.g. Docker); then rebuild and redeploy those three services.
+### 10. Multi-Agent Discovery (encapsulation)
+
+- Internal Business Agent uses experience_tags and product_capability_mappings internally; responses are UCP-shaped. Planner visibility: discover and get_product use `filter_product_for_public`; no experience_tags or internal schema exposed.
+
+### 11. Experience-tag discovery and theme bundles
+
+- Semantic/DB filter and boost, discover API, experience-categories endpoint, discover_composite theme picking, intent and tools schema — as documented in the checklist in the plan. All implemented.
 
 ---
 
-## Summary
+## Optional / follow-ups
 
-- **Experience-tag discovery and theme bundles:** Implemented end-to-end (semantic/DB filter and boost, discover API, experience-categories endpoint, discover_composite theme picking, intent and tools schema).
-- **Exclusive Gateway:** Implemented (private registry, ID masking, single well-known on Orchestrator with proxy routes, Scout uses registry for UCP driver, X-Gateway-Signature middleware and client signing). Enable via `ID_MASKING_ENABLED`, `GATEWAY_SIGNATURE_REQUIRED`, and `GATEWAY_INTERNAL_SECRET` as needed.
-- **Multi-Agent Discovery:** Public discovery responses strip `experience_tags`; Planner sees only products and prices (UCP shape).
+- **Frontend theme badge/picker:** Out of scope (API supports `experience_tag` / `experience_tags` on discover).
+- **Cleanup job for expired id_masking_map rows:** Optional periodic delete where `expires_at < NOW()`.
+
+---
+
+## Deployment impact
+
+| Service        | Changes                                                                 | Action                    |
+|----------------|-------------------------------------------------------------------------|---------------------------|
+| Discovery      | ucp_rpc, gateway_signature (UCP-only), semantic_search (match_products_v2), products/ucp/ucp_rpc (filter_products), db (resolve_masked_id TTL) | Restart; run new migrations |
+| Orchestrator   | registry, clients (RPC + broadcast + masking), gateway_ucp (signing), config (id_masking, LLM), planner (facade), db (store_masked_id) | Restart; run new migrations |
+| Intent         | No A2A-specific code changes                                            | Restart if using shared   |
+| Supabase       | Migrations: match_products_v2, id_masking_map (agent_slug, expires_at)  | Apply migrations          |
+
+**Env (Orchestrator):** `ID_MASKING_ENABLED`, `ID_MASKING_TTL_HOURS`, `GATEWAY_INTERNAL_SECRET`, `GATEWAY_PUBLIC_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (for registry + id_masking_map).  
+**Env (Discovery):** `GATEWAY_INTERNAL_SECRET` (or `GATEWAY_SIGNATURE_REQUIRED` + secret) for UCP routes; `ID_MASKING_ENABLED` for local masking if used.

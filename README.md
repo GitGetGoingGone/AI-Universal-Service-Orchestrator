@@ -71,6 +71,8 @@ curl -X POST http://localhost:8002/api/v1/chat -H "Content-Type: application/jso
 
 **Full setup**: See [Development Environment](docs/DEVELOPMENT_ENVIRONMENT.md)
 
+**Build and deploy**: See [How to Build and Deploy](docs/HOW_TO_BUILD_AND_DEPLOY.md) (local run, env, A2A options, deploy).
+
 **Deploy to staging**: See [Render Deployment](docs/RENDER_DEPLOYMENT.md) or [Staging Setup](docs/STAGING_SETUP.md)
 
 **ChatGPT/Gemini demo**: See [ChatGPT & Gemini End-to-End Demo](docs/CHATGPT_GEMINI_DEMO.md)
@@ -96,6 +98,7 @@ curl -X POST http://localhost:8002/api/v1/chat -H "Content-Type: application/jso
 
 ## Documentation
 
+- **[docs/README.md](docs/README.md)** — Index of canonical docs and archived material (plans/docs cleanup).
 - [Development Environment](docs/DEVELOPMENT_ENVIRONMENT.md) - Tools, IDE, quick start
 - [Database Setup](docs/DATABASE_SETUP.md) - Migrations, seed data
 - [Environment Variables](docs/ENVIRONMENT_VARIABLES.md) - All required vars
@@ -110,3 +113,4 @@ curl -X POST http://localhost:8002/api/v1/chat -H "Content-Type: application/jso
 - Architecture: `.cursor/plans/02-architecture.md`
 - Modules: `.cursor/plans/03-modules-all.md`
 - Operations: `.cursor/plans/07-project-operations.md`
+- A2A refactor (implemented): `.cursor/plans/distributed-business-agent-a2a-refactor.md` — status: [docs/implementation-status-distributed-business-agent-a2a.md](docs/implementation-status-distributed-business-agent-a2a.md)

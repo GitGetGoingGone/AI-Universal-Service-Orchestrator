@@ -24,7 +24,52 @@ def _gateway_headers_for_discovery(method: str, path: str, body: bytes = b"") ->
 HTTP_TIMEOUT = 60.0
 
 
-async def get_experience_categories() -> List[str]:
+async def discover_products_via_rpc(
+    base_url: str,
+    query: str,
+    limit: int = 20,
+    partner_id: Optional[str] = None,
+    exclude_partner_id: Optional[str] = None,
+    experience_tag: Optional[str] = None,
+    experience_tags: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Call a Business Agent (Discovery) via JSON-RPC 2.0 discovery/search.
+    base_url: agent base URL (e.g. from RegistryDriver). Returns {"products": [...], "count": N} or raises.
+    """
+    path = "/api/v1/ucp/rpc"
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "discovery/search",
+        "params": {
+            "query": query,
+            "limit": limit,
+        },
+        "id": 1,
+    }
+    if partner_id:
+        payload["params"]["filter_partner_id"] = partner_id
+    if exclude_partner_id:
+        payload["params"]["exclude_partner_id"] = exclude_partner_id
+    if experience_tag:
+        payload["params"]["experience_tag"] = experience_tag
+    if experience_tags:
+        payload["params"]["experience_tags"] = experience_tags
+
+    import json
+    body_bytes = json.dumps(payload).encode("utf-8")
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = _gateway_headers_for_discovery("POST", path, body_bytes)
+    headers["Content-Type"] = "application/json"
+
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(url, json=payload, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+    if "error" in data:
+        raise RuntimeError(data["error"].get("message", "JSON-RPC error"))
+    result = data.get("result") or {}
+    return result
     """
     Fetch available experience categories from Discovery (GET /api/v1/experience-categories).
     Used to pre-fill intent resolve so the LLM knows available tags for theme bundles.
@@ -46,6 +91,89 @@ async def get_experience_categories() -> List[str]:
     except Exception as e:
         logger.debug("Could not fetch experience categories from Discovery: %s", e)
         return []
+
+
+async def discover_products_broadcast(
+    query: str,
+    limit: int = 20,
+    location: Optional[str] = None,
+    partner_id: Optional[str] = None,
+    exclude_partner_id: Optional[str] = None,
+    budget_max: Optional[int] = None,
+    experience_tag: Optional[str] = None,
+    experience_tags: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Broadcast discovery: fan out to all agents with discovery capability via JSON-RPC,
+    merge results (dedupe by id), return same shape as discover_products.
+    When ID_MASKING_ENABLED=true, product ids are masked as uso_{agent_slug}_{short_id} and stored in id_masking_map with TTL; resolve at checkout.
+    """
+    agents = get_agents(capability="discovery")
+    if not agents:
+        return await discover_products(
+            query=query,
+            limit=limit,
+            location=location,
+            partner_id=partner_id,
+            exclude_partner_id=exclude_partner_id,
+            budget_max=budget_max,
+            experience_tag=experience_tag,
+            experience_tags=experience_tags,
+        )
+
+    async def one_agent(entry: AgentEntry) -> tuple:
+        """Return (agent_slug, products) for merging and optional masking."""
+        try:
+            r = await discover_products_via_rpc(
+                entry.base_url,
+                query=query,
+                limit=limit,
+                partner_id=partner_id,
+                exclude_partner_id=exclude_partner_id,
+                experience_tag=experience_tag,
+                experience_tags=experience_tags,
+            )
+            products = (r.get("products") or [])[:limit]
+            return (entry.slug, products)
+        except Exception as e:
+            logger.warning("Discovery RPC failed for %s: %s", entry.base_url, e)
+            return (entry.slug, [])
+
+    tasks = [one_agent(a) for a in agents]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    merged: List[Dict[str, Any]] = []
+    seen_ids: set = set()
+    id_masking_enabled = getattr(settings, "id_masking_enabled", False)
+    for raw in results:
+        if isinstance(raw, Exception):
+            continue
+        slug, product_list = raw if isinstance(raw, tuple) and len(raw) == 2 else ("agent", [])
+        for p in product_list:
+            if not isinstance(p, dict):
+                continue
+            p = dict(p)
+            pid = p.get("id")
+            if id_masking_enabled and pid and slug:
+                masked = store_masked_id(slug, str(pid), p.get("partner_id"), "rpc")
+                if masked:
+                    p["id"] = masked
+                p.pop("partner_id", None)
+            if pid is not None and str(p.get("id")) not in seen_ids:
+                seen_ids.add(str(p.get("id")))
+                merged.append(p)
+            elif pid is None:
+                merged.append(p)
+    merged = merged[:limit]
+    if budget_max is not None:
+        filtered = [p for p in merged if p.get("price") is None or int(round(float(p["price"]) * 100)) <= budget_max]
+        merged = filtered[:limit]
+    item_list_ld = product_list_ld(merged, count=len(merged))
+    return {
+        "data": {"products": merged, "count": len(merged)},
+        "machine_readable": item_list_ld,
+        "adaptive_card": generate_product_card(merged[:5]),
+        "metadata": {"api_version": "v1", "timestamp": datetime.utcnow().isoformat() + "Z"},
+    }
 
 
 async def resolve_intent_with_fallback(

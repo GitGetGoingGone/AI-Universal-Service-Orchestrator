@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from db import get_partner_by_id
 from packages.shared.discovery import derive_search_query, is_browse_query
+from packages.shared.ucp_public_product import filter_product_for_public
 from protocols.ucp_compliance import _normalize_for_ucp
 from scout_engine import search as scout_search
 
@@ -37,8 +38,8 @@ async def ucp_rest_openapi():
 
 
 def _product_to_ucp_item(product: Dict[str, Any], partner: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Map internal product to UCP Item: id, title, price (integer cents), optional image_url, seller_name."""
-    p = _normalize_for_ucp(product)
+    """Map internal product to UCP Item: id, title, price (integer cents), optional image_url, seller_name. Uses public allow-list to strip internal fields."""
+    p = _normalize_for_ucp(filter_product_for_public(product))
     price = p.get("price")
     if price is None:
         price_cents = 0

@@ -36,7 +36,19 @@ Additional rules:
 
 
 def _get_planner_client_for_config(llm_config: Dict[str, Any]):
-    """Get planner client from platform config (llm_providers). No env fallback."""
+    """Get planner client: prefer new LLM provider (OSS + OpenAI fallback) when env set, else platform config."""
+    try:
+        from packages.shared.llm_provider import get_llm_provider_config, get_llm_provider
+        cfg = get_llm_provider_config()
+        if cfg.get("OSS_ENDPOINT") or cfg.get("OPENAI_API_KEY"):
+            facade = get_llm_provider(cfg)
+            client = facade.get_client()
+            model = cfg.get("OSS_MODEL") or cfg.get("OPENAI_MODEL") or "gpt-4o"
+            return ("facade", client, model)
+    except Exception as e:
+        logger.debug("New LLM provider not used: %s", e)
+
+    # Legacy: platform config (llm_providers)
     from openai import OpenAI
 
     cfg = llm_config or {}
@@ -95,12 +107,18 @@ async def plan_next_action(
         from api.admin import get_llm_config
         llm_config = get_llm_config()
 
-    provider, client = _get_planner_client_for_config(llm_config)
+    result = _get_planner_client_for_config(llm_config)
+    if len(result) == 3:
+        provider, client, model_from_facade = result
+    else:
+        provider, client = result
+        model_from_facade = None
+
     if not client:
         logger.info("Planner: No LLM client (provider=%s), using fallback", provider)
         return _fallback_plan(user_message, state)
 
-    model = llm_config.get("model") or "gpt-4o"
+    model = model_from_facade or llm_config.get("model") or "gpt-4o"
     temperature = float(llm_config.get("temperature", 0.1))
     temperature = max(0.0, min(1.0, temperature))
 
@@ -163,7 +181,7 @@ async def plan_next_action(
         pass
 
     try:
-        if provider in ("azure", "openrouter", "custom"):
+        if provider in ("azure", "openrouter", "custom", "facade"):
             messages = [
                 {"role": "system", "content": planner_prompt},
                 {"role": "user", "content": user_content},

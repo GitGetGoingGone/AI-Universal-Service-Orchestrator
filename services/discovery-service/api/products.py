@@ -28,14 +28,14 @@ from protocols.acp_compliance import validate_product_acp
 from protocols.ucp_compliance import validate_product_ucp
 from packages.shared.adaptive_cards import generate_product_card, generate_bundle_card, generate_checkout_card
 from packages.shared.adaptive_cards.base import create_card, text_block
+from packages.shared.ucp_public_product import filter_product_for_public
 
 router = APIRouter(prefix="/api/v1", tags=["Discover"])
 
 
 def _product_for_public_response(product: dict) -> dict:
-    """Strip internal-only fields (experience_tags) so Planner/UCP clients never see them."""
-    out = {k: v for k, v in product.items() if k != "experience_tags"}
-    return out
+    """Strip internal-only fields (experience_tags, partner_id, internal_notes) per shared allow-list."""
+    return filter_product_for_public(product)
 
 
 @router.get("/experience-categories")

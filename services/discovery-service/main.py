@@ -27,6 +27,7 @@ from api.products import router as products_router
 from api.partners import router as partners_router
 from api.admin import router as admin_router
 from api.ucp import router as ucp_router
+from api.ucp_rpc import router as ucp_rpc_router
 from api.ucp_checkout import router as ucp_checkout_router
 from api.feeds import router as feeds_router
 from api.manifest import router as manifest_router, _build_manifest
@@ -60,6 +61,7 @@ app.include_router(products_router)
 app.include_router(partners_router)
 app.include_router(admin_router)
 app.include_router(ucp_router)
+app.include_router(ucp_rpc_router)
 app.include_router(ucp_checkout_router)
 app.include_router(feeds_router)
 app.include_router(manifest_router)

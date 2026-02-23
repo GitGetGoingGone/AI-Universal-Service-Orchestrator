@@ -71,6 +71,10 @@ class Settings:
     # Shared secret with Discovery for X-Gateway-Signature (when Discovery has GATEWAY_SIGNATURE_REQUIRED=true)
     gateway_internal_secret: str = get_env("GATEWAY_INTERNAL_SECRET") or ""
 
+    # ID masking at Gateway: when True, broadcast discovery returns uso_{agent_slug}_{short_id}; mapping stored in id_masking_map with TTL
+    id_masking_enabled: bool = (get_env("ID_MASKING_ENABLED") or "false").strip().lower() == "true"
+    id_masking_ttl_hours: int = max(1, min(168, int(get_env("ID_MASKING_TTL_HOURS") or "24")))
+
     # Agentic handoff (Clerk SSO 2.0 - optional)
     clerk_publishable_key: str = get_env("CLERK_PUBLISHABLE_KEY") or ""
     clerk_secret_key: str = get_env("CLERK_SECRET_KEY") or ""

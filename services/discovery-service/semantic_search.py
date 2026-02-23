@@ -209,7 +209,7 @@ async def semantic_search(
         if tags_list:
             kwargs["filter_experience_tag"] = tags_list[0]
 
-        result = client.rpc("match_products", kwargs).execute()
+        result = client.rpc("match_products_v2", kwargs).execute()
         rows = result.data or []
 
         # Normalize to dict with expected keys (created_at for ranking, sold_count for product_mix, experience_tags for discovery)

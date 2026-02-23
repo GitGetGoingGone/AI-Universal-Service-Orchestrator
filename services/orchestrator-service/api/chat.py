@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from clients import (
     resolve_intent_with_fallback,
     discover_products,
+    discover_products_broadcast,
     start_orchestration,
     create_standing_intent_via_api,
     register_thread_mapping,
@@ -267,7 +268,7 @@ async def chat(
         )
 
     async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None, exclude_partner_id: Optional[str] = None, budget_max: Optional[int] = None, experience_tag: Optional[str] = None, experience_tags: Optional[List[str]] = None):
-        return await discover_products(
+        return await discover_products_broadcast(
             query=query,
             limit=limit,
             location=location,

@@ -1,5 +1,7 @@
-"""Supabase client for orchestrator (account_links, users). Used by Link Account API."""
+"""Supabase client for orchestrator (account_links, users, id_masking_map)."""
 
+import uuid as uuid_module
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, cast
 
 from supabase import create_client, Client
@@ -22,6 +24,38 @@ def get_supabase() -> Optional[Client]:
 
 def _supabase_configured() -> bool:
     return bool(getattr(settings, "supabase_url", None) and getattr(settings, "supabase_key", None))
+
+
+def store_masked_id(
+    agent_slug: str,
+    internal_product_id: str,
+    partner_id: Optional[str] = None,
+    source: str = "rpc",
+) -> Optional[str]:
+    """
+    Store a masked id mapping for Gateway ID masking (uso_{agent_slug}_{short_id}).
+    Used when merging broadcast discovery results so clients only see USO-owned ids.
+    Returns masked_id or None if DB unavailable. TTL from settings.id_masking_ttl_hours.
+    """
+    client = get_supabase()
+    if not client:
+        return None
+    short_uid = str(uuid_module.uuid4()).replace("-", "")[:16]
+    masked_id = f"uso_{agent_slug}_{short_uid}"
+    ttl_hours = getattr(settings, "id_masking_ttl_hours", 24)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=ttl_hours)).isoformat()
+    try:
+        client.table("id_masking_map").insert({
+            "masked_id": masked_id,
+            "internal_product_id": str(internal_product_id),
+            "partner_id": str(partner_id) if partner_id else None,
+            "source": source,
+            "agent_slug": agent_slug,
+            "expires_at": expires_at,
+        }).execute()
+        return masked_id
+    except Exception:
+        return None
 
 
 def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
