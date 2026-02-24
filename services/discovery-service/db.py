@@ -84,6 +84,12 @@ async def search_products(
         for row in data:
             if "sold_count" not in row:
                 row["sold_count"] = 0
+        # Fallback: when name/description search returns nothing, match by capability (e.g. "flowers", "chocolates")
+        if not data and query and not is_browse_query(query) and query.strip():
+            data = await _search_products_by_capability(
+                client, query.strip(), limit, select_cols,
+                partner_id, exclude_partner_id, tags_to_apply,
+            )
         return data
     except Exception:
         try:
@@ -105,9 +111,48 @@ async def search_products(
             data = result.data or []
             for row in data:
                 row["sold_count"] = 0
+            if not data and query and not is_browse_query(query) and query.strip():
+                data = await _search_products_by_capability(
+                    client, query.strip(), limit, select_cols,
+                    partner_id, exclude_partner_id, tags_to_apply,
+                )
             return data
         except Exception:
             return []
+
+
+async def _search_products_by_capability(
+    client: Client,
+    capability: str,
+    limit: int,
+    select_cols: str,
+    partner_id: Optional[str] = None,
+    exclude_partner_id: Optional[str] = None,
+    experience_tags_filter: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Return products whose capabilities JSONB array contains the given capability (e.g. 'flowers')."""
+    try:
+        q = (
+            client.table("products")
+            .select(f"{select_cols}, sold_count")
+            .is_("deleted_at", "null")
+            .contains("capabilities", [capability.lower()])
+        )
+        if partner_id:
+            q = q.eq("partner_id", partner_id)
+        if exclude_partner_id:
+            q = q.neq("partner_id", exclude_partner_id)
+        if experience_tags_filter:
+            for tag in experience_tags_filter:
+                q = q.contains("experience_tags", [tag])
+        result = q.order("created_at", desc=True).limit(limit).execute()
+        data = result.data or []
+        for row in data:
+            if "sold_count" not in row:
+                row["sold_count"] = 0
+        return data
+    except Exception:
+        return []
 
 
 async def get_distinct_experience_tags() -> List[str]:
