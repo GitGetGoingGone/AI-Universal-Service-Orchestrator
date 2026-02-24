@@ -315,18 +315,22 @@ def get_admin_orchestration_settings() -> Optional[Dict[str, Any]]:
     try:
         r = (
             client.table("admin_orchestration_settings")
-            .select("global_tone, model_temperature, autonomy_level, discovery_timeout_ms, ucp_prioritized")
+            .select("*")
             .limit(1)
             .execute()
         )
         row = r.data[0] if r.data else None
+        if row and isinstance(row, dict):
+            row.setdefault("planner_always_decides", False)
+            row.setdefault("opening_instructions", None)
+            row.setdefault("narrowing_instructions", None)
         return cast(Optional[Dict[str, Any]], row) if row and isinstance(row, dict) else None
     except Exception:
         return None
 
 
 def get_thread_refinement_context(thread_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Load refinement context (proposed_plan, search_queries) for a thread. Used so 'no limo' etc. persists without client sending it."""
+    """Load refinement context (proposed_plan, search_queries, fulfillment_context) for a thread."""
     if not thread_id:
         return None
     client = get_supabase()
@@ -337,7 +341,11 @@ def get_thread_refinement_context(thread_id: Optional[str]) -> Optional[Dict[str
         row = r.data[0] if r.data else None
         row_dict = row if isinstance(row, dict) else {}
         ctx = row_dict.get("refinement_context")
-        if isinstance(ctx, dict) and (ctx.get("proposed_plan") or ctx.get("search_queries")):
+        if isinstance(ctx, dict) and (
+            ctx.get("proposed_plan") or ctx.get("search_queries") or ctx.get("fulfillment_context")
+        ):
+            return ctx
+        if isinstance(ctx, dict):
             return ctx
         return None
     except Exception:
@@ -348,8 +356,9 @@ def set_thread_refinement_context(
     thread_id: Optional[str],
     proposed_plan: Optional[List[str]] = None,
     search_queries: Optional[List[str]] = None,
+    fulfillment_context: Optional[Dict[str, str]] = None,
 ) -> None:
-    """Persist refinement context for a thread so the next turn restores it (service-level, no client dependency)."""
+    """Persist refinement context for a thread. Merges with existing; None means do not change that key."""
     if not thread_id:
         return
     client = get_supabase()
@@ -357,14 +366,21 @@ def set_thread_refinement_context(
         return
     try:
         from datetime import datetime, timezone
-        payload: Dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
-        if proposed_plan is not None or search_queries is not None:
-            payload["refinement_context"] = {
-                "proposed_plan": proposed_plan if proposed_plan else [],
-                "search_queries": search_queries if search_queries else [],
-            }
-        else:
-            payload["refinement_context"] = None
+        # Load existing so we merge rather than overwrite
+        r = client.table("chat_threads").select("refinement_context").eq("id", thread_id).limit(1).execute()
+        existing = {}
+        if r.data and isinstance(r.data[0], dict) and isinstance(r.data[0].get("refinement_context"), dict):
+            existing = dict(r.data[0]["refinement_context"])
+        if proposed_plan is not None:
+            existing["proposed_plan"] = proposed_plan
+        if search_queries is not None:
+            existing["search_queries"] = search_queries
+        if fulfillment_context is not None:
+            existing["fulfillment_context"] = {k: v for k, v in fulfillment_context.items() if v}
+        payload: Dict[str, Any] = {
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "refinement_context": existing if existing else None,
+        }
         client.table("chat_threads").update(payload).eq("id", thread_id).execute()
     except Exception:
         pass

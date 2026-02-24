@@ -491,6 +491,13 @@ async def run_agentic_loop(
     if order_id:
         thread_context["order_id"] = order_id
 
+    # Interaction stage: opening = first touch (no prior assistant reply); narrowing = follow-up
+    has_prior_assistant = any(
+        isinstance(m, dict) and m.get("role") == "assistant"
+        for m in (messages or [])
+    )
+    interaction_stage = "narrowing" if has_prior_assistant else "opening"
+
     # Admin config for planner (ucp_prioritized → call fetch_ucp_manifest first)
     admin_settings = None
     try:
@@ -509,7 +516,11 @@ async def run_agentic_loop(
         "bundle_id": bundle_id,
         "order_id": order_id,
         "ucp_prioritized": bool(admin_settings and admin_settings.get("ucp_prioritized")),
+        "interaction_stage": interaction_stage,
     }
+    if admin_settings:
+        state["opening_instructions"] = admin_settings.get("opening_instructions")
+        state["narrowing_instructions"] = admin_settings.get("narrowing_instructions")
     # Restore refinement from previous turn (service-level only: load from DB when thread_id present; no client dependency)
     _refinement: Optional[Dict[str, Any]] = None
     if thread_id:
@@ -523,6 +534,13 @@ async def run_agentic_loop(
             state["purged_proposed_plan"] = _refinement["proposed_plan"]
         if _refinement.get("search_queries"):
             state["purged_search_queries"] = _refinement["search_queries"]
+        fc = _refinement.get("fulfillment_context")
+        if isinstance(fc, dict):
+            state["fulfillment_context"] = dict(fc)
+        else:
+            state["fulfillment_context"] = {}
+    else:
+        state["fulfillment_context"] = {}
 
     intent_data = None
     products_data = None
@@ -579,88 +597,107 @@ async def run_agentic_loop(
             except Exception as e:
                 logger.debug("Rules layer skipped: %s", e)
 
-        # Use recommended_next_action when present (iteration 0 only) to decide next step.
-        # Skip bypass when discover_products is recommended but query is generic—engage first.
-        rec = (intent_data or {}).get("recommended_next_action") if iteration == 0 else None
-        sq = (intent_data or {}).get("search_query") or ""
-        generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "")
-        skip_discover_bypass = rec == "discover_products" and sq.lower().strip() in generic_queries
-        # When we would skip discovery because query is generic, derive from user message so we still run discovery when they said something concrete
-        if skip_discover_bypass and iteration == 0:
-            from packages.shared.discovery import fallback_search_query
-            derived = (fallback_search_query(user_message) or "").strip()
-            if derived and derived.lower() not in generic_queries:
-                intent_data["search_query"] = derived
-                sq = derived
-                skip_discover_bypass = False
-        # When Intent says browse or probe, derive a search query from the user message (shared utility); if non-generic, run discovery instead of probing
-        if iteration == 0 and (rec == "complete_with_probing" or intent_data.get("intent_type") == "browse"):
-            from packages.shared.discovery import fallback_search_query
-            derived = (fallback_search_query(user_message) or "").strip()
-            if derived and derived.lower() not in generic_queries:
+            # Merge fulfillment hints from this turn (delivery_address, pickup_address, pickup_time) into state for checkout gate
+            hints = _extract_fulfillment_hints(intent_data, user_message)
+            if hints:
+                for k, v in hints.items():
+                    if v and isinstance(v, str) and v.strip():
+                        state.setdefault("fulfillment_context", {})[k] = v.strip()
+
+        # Next step: either from intent rules (hardcoded) or always from planner (model decides).
+        from config import settings as orchestrator_settings
+        planner_always_decides = getattr(orchestrator_settings, "planner_always_decides", False) or (admin_settings or {}).get("planner_always_decides", False)
+
+        plan = None
+        rec = None
+        if not planner_always_decides:
+            # Use recommended_next_action when present (iteration 0 only) to decide next step.
+            # Skip bypass when discover_products is recommended but query is generic—engage first.
+            rec = (intent_data or {}).get("recommended_next_action") if iteration == 0 else None
+            sq = (intent_data or {}).get("search_query") or ""
+            generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "find products", "find items", "find options", "")
+            skip_discover_bypass = rec == "discover_products" and sq.lower().strip() in generic_queries
+            # When we would skip discovery because query is generic, derive from user message so we still run discovery when they said something concrete
+            if skip_discover_bypass and iteration == 0:
+                from packages.shared.discovery import fallback_search_query
+                derived = (fallback_search_query(user_message) or "").strip()
+                if derived and derived.lower() not in generic_queries:
+                    intent_data["search_query"] = derived
+                    sq = derived
+                    skip_discover_bypass = False
+            # When Intent says browse or probe, derive a search query from the user message (shared utility); if non-generic, run discovery instead of probing
+            if iteration == 0 and (rec == "complete_with_probing" or intent_data.get("intent_type") == "browse"):
+                from packages.shared.discovery import fallback_search_query
+                derived = (fallback_search_query(user_message) or "").strip()
+                if derived and derived.lower() not in generic_queries:
+                    rec = "discover_products"
+                    intent_data["intent_type"] = "discover"
+                    intent_data["search_query"] = derived
+                    sq = derived
+            # For clear discover intents (Intent already gave search_query), run discovery even if Intent said probe
+            elif rec == "complete_with_probing" and intent_data.get("intent_type") == "discover" and sq.strip() and sq.lower().strip() not in generic_queries:
                 rec = "discover_products"
-                intent_data["intent_type"] = "discover"
-                intent_data["search_query"] = derived
-                sq = derived
-        # For clear discover intents (Intent already gave search_query), run discovery even if Intent said probe
-        elif rec == "complete_with_probing" and intent_data.get("intent_type") == "discover" and sq.strip() and sq.lower().strip() not in generic_queries:
-            rec = "discover_products"
-        if rec and rec in ("discover_composite", "discover_products", "refine_bundle_category") and intent_data and not skip_discover_bypass:
-            if rec == "refine_bundle_category" and intent_data.get("intent_type") == "refine_composite":
-                bid = (thread_context or {}).get("bundle_id") or state.get("bundle_id")
-                cat = intent_data.get("category_to_change", "").strip()
-                if bid and cat:
+            if rec and rec in ("discover_composite", "discover_products", "refine_bundle_category") and intent_data and not skip_discover_bypass:
+                if rec == "refine_bundle_category" and intent_data.get("intent_type") == "refine_composite":
+                    bid = (thread_context or {}).get("bundle_id") or state.get("bundle_id")
+                    cat = intent_data.get("category_to_change", "").strip()
+                    if bid and cat:
+                        plan = {
+                            "action": "tool",
+                            "tool_name": "refine_bundle_category",
+                            "tool_args": {"bundle_id": bid, "category": cat},
+                            "reasoning": "Intent recommended refine_bundle_category.",
+                        }
+                        rec = None
+                    else:
+                        plan = None
+                elif rec == "discover_composite" and intent_data.get("intent_type") in ("discover_composite", "refine_composite"):
+                    # Refinement leak: use purged search_queries/proposed_plan from state if present
+                    sq = state.get("purged_search_queries") or intent_data.get("search_queries") or ["flowers", "restaurant", "movies"]
+                    # Run discover_composite: on first turn (probe_count 0) show options without requiring location; after that probe if location/time missing
+                    if not _has_location_or_time(intent_data, user_message) and state.get("probe_count", 0) >= 1:
+                        state["orchestrator_state"] = ORCHESTRATOR_STATE_AWAITING_PROBE
+                        plan = None  # Let planner run → complete with probing for location/time
+                    else:
+                        plan = {
+                            "action": "tool",
+                            "tool_name": "discover_composite",
+                            "tool_args": {
+                                "bundle_options": intent_data.get("bundle_options") or [],
+                                "search_queries": sq,
+                                "experience_name": intent_data.get("experience_name") or "experience",
+                                "location": _extract_location(intent_data),
+                                "budget_max": _extract_budget(intent_data),
+                            },
+                            "reasoning": "Intent recommended discover_composite (or refine_composite with purged categories).",
+                        }
+                elif rec == "discover_products" and intent_data.get("intent_type") in ("discover", "browse"):
+                    sq = (intent_data.get("search_query") or "").strip()
+                    # Prefer derived query from user message so we don't send generic phrases like "Find products" to discovery
+                    from packages.shared.discovery import fallback_search_query
+                    derived = (fallback_search_query(user_message) or "").strip()
+                    if derived and derived.lower() not in generic_queries:
+                        sq = derived
+                        intent_data["search_query"] = derived
+                    elif not sq:
+                        sq = derived or fallback_search_query(user_message)
+                        if sq:
+                            intent_data["search_query"] = sq
                     plan = {
                         "action": "tool",
-                        "tool_name": "refine_bundle_category",
-                        "tool_args": {"bundle_id": bid, "category": cat},
-                        "reasoning": "Intent recommended refine_bundle_category.",
-                    }
-                    rec = None
-                else:
-                    plan = None
-            elif rec == "discover_composite" and intent_data.get("intent_type") in ("discover_composite", "refine_composite"):
-                # Refinement leak: use purged search_queries/proposed_plan from state if present
-                sq = state.get("purged_search_queries") or intent_data.get("search_queries") or ["flowers", "restaurant", "movies"]
-                # Run discover_composite: on first turn (probe_count 0) show options without requiring location; after that probe if location/time missing
-                if not _has_location_or_time(intent_data, user_message) and state.get("probe_count", 0) >= 1:
-                    state["orchestrator_state"] = ORCHESTRATOR_STATE_AWAITING_PROBE
-                    plan = None  # Let planner run → complete with probing for location/time
-                else:
-                    plan = {
-                        "action": "tool",
-                        "tool_name": "discover_composite",
+                        "tool_name": "discover_products",
                         "tool_args": {
-                            "bundle_options": intent_data.get("bundle_options") or [],
-                            "search_queries": sq,
-                            "experience_name": intent_data.get("experience_name") or "experience",
+                            "query": sq,
+                            "limit": limit,
                             "location": _extract_location(intent_data),
                             "budget_max": _extract_budget(intent_data),
                         },
-                        "reasoning": "Intent recommended discover_composite (or refine_composite with purged categories).",
+                        "reasoning": "Intent recommended discover_products.",
                     }
-            elif rec == "discover_products" and intent_data.get("intent_type") in ("discover", "browse"):
-                sq = (intent_data.get("search_query") or "").strip()
-                if not sq:
-                    from packages.shared.discovery import fallback_search_query
-                    sq = fallback_search_query(user_message)
-                plan = {
-                    "action": "tool",
-                    "tool_name": "discover_products",
-                    "tool_args": {
-                        "query": sq,
-                        "limit": limit,
-                        "location": _extract_location(intent_data),
-                        "budget_max": _extract_budget(intent_data),
-                    },
-                    "reasoning": "Intent recommended discover_products.",
-                }
-            else:
-                plan = None
-            if plan:
-                rec = None  # Consume so we don't skip planner again
-        else:
-            plan = None
+                else:
+                    plan = None
+                if plan:
+                    rec = None  # Consume so we don't skip planner again
 
         if plan is None:
             ctx = intent_data or {}
@@ -735,9 +772,10 @@ async def run_agentic_loop(
             if tool_name == "discover_products":
                 tool_args = dict(tool_args)
                 tool_args.setdefault("limit", limit)
-                # Never call discover with empty query: derive from user message if intent left it blank
-                if not (tool_args.get("query") or "").strip():
-                    from packages.shared.discovery import fallback_search_query
+                from packages.shared.discovery import fallback_search_query
+                current_q = (tool_args.get("query") or "").strip()
+                generic_for_discover = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "find products", "find items", "find options", "")
+                if not current_q or current_q.lower() in generic_for_discover:
                     tool_args["query"] = fallback_search_query(user_message)
                 if intent_data:
                     loc = _extract_location(intent_data)
@@ -1098,6 +1136,17 @@ async def run_agentic_loop(
 
     await _emit_thinking(on_thinking, "before_response", intent_data or {}, thinking_messages or {})
 
+    # Pass interaction stage to engagement so response layer can tune tone (opening vs narrowing)
+    engagement_data["interaction_stage"] = state.get("interaction_stage", "narrowing")
+
+    # Pass fulfillment context and missing required fields so frontend can block checkout until provided
+    REQUIRED_FULFILLMENT_FIELDS = ("delivery_address", "pickup_address", "pickup_time")
+    fc = state.get("fulfillment_context") or {}
+    engagement_data["fulfillment_context"] = fc
+    engagement_data["missing_fulfillment_fields"] = [
+        f for f in REQUIRED_FULFILLMENT_FIELDS if not (fc.get(f) or "").strip()
+    ]
+
     # Build final response
     out = _build_response(
         intent_data=intent_data,
@@ -1122,10 +1171,11 @@ async def run_agentic_loop(
     if last_suggestion:
         out["last_suggestion"] = last_suggestion
     # Persist refinement at service level (DB) so next turn keeps "no limo" etc. without client sending it
-    if state.get("purged_proposed_plan") or state.get("purged_search_queries"):
+    if state.get("purged_proposed_plan") or state.get("purged_search_queries") or state.get("fulfillment_context"):
         out["data"]["refinement_context"] = {
             "proposed_plan": state.get("purged_proposed_plan"),
             "search_queries": state.get("purged_search_queries"),
+            "fulfillment_context": state.get("fulfillment_context"),
         }
         if thread_id:
             try:
@@ -1134,6 +1184,7 @@ async def run_agentic_loop(
                     thread_id,
                     proposed_plan=state.get("purged_proposed_plan"),
                     search_queries=state.get("purged_search_queries"),
+                    fulfillment_context=state.get("fulfillment_context"),
                 )
             except Exception:
                 pass

@@ -184,13 +184,21 @@ def _build_context(result: Dict[str, Any]) -> str:
                 feats_str = ", ".join(str(f) for f in feats[:15]) if feats else "(no features listed)"
                 product_entries.append(f"{name} ({price_str}) — features: {feats_str}")
             product_data_str = "; ".join(product_entries) if product_entries else ", ".join(product_names)
+            missing_ff = engagement.get("missing_fulfillment_fields") or []
+            field_labels_ff = {"pickup_time": "pickup time", "pickup_address": "pickup address", "delivery_address": "delivery address"}
+            need_ff_str = ", ".join(field_labels_ff.get(f, f) for f in missing_ff)
+            req_cta_line = (
+                f"REQUIRED before CTA: 'To place this order I'll need {need_ff_str} — you can share them in the chat now or when you tap Add this bundle.' "
+                if need_ff_str
+                else "Fulfillment details are set; invite them to Add this bundle and proceed to checkout. "
+            )
             parts.append(
                 f"User asked for {exp_name}. Curated bundle ready. "
                 f"Product data (use ONLY these names and features; do NOT invent amenities): {product_data_str}. "
                 f"Total Cost of Ownership (TCO) for the entire bundle: {total_str}. "
                 "Write ONE flowing narrative (e.g. 'Your evening in Dallas begins at 6 PM...'). Do NOT list products with prices in the body. "
-                "REQUIRED before CTA: 'To place this order I'll need pickup time, pickup address, and delivery address — you can share them in the chat now or when you tap Add this bundle.' "
-                "End with the single TCO and 'Add this bundle' CTA."
+                + req_cta_line
+                + "End with the single TCO and 'Add this bundle' CTA."
             )
         elif product_list or categories:
             # Fallback: no bundle yet, present as curated options
@@ -388,6 +396,28 @@ async def generate_engagement_response(
         system_prompt = default_prompt
         max_tokens = default_max_tokens
 
+    # Inject interaction-stage instructions (Opening: excited, suggest experiences; Narrowing: engage to refine)
+    engagement = data.get("engagement") or {}
+    stage = engagement.get("interaction_stage", "narrowing")
+    try:
+        from db import get_admin_orchestration_settings as _get_admin
+        admin = _get_admin()
+        opening_instructions = (admin or {}).get("opening_instructions") or ""
+        narrowing_instructions = (admin or {}).get("narrowing_instructions") or ""
+    except Exception:
+        opening_instructions = narrowing_instructions = ""
+    default_opening = (
+        "This is the opening. Be excited about the possibilities; suggest experiences we can offer (e.g. date night, gifts, celebrations). "
+        "Invite them to pick an experience or describe what they're looking for. Warm and inviting."
+    )
+    default_narrowing = (
+        "We are narrowing down the plan. Engage to refine; accommodate any changes they suggest. Keep the tone warm and collaborative."
+    )
+    if stage == "opening" and (opening_instructions.strip() or default_opening):
+        system_prompt = (system_prompt.rstrip() + "\n\nStage (opening): " + (opening_instructions.strip() or default_opening)).strip()
+    elif stage == "narrowing" and (narrowing_instructions.strip() or default_narrowing):
+        system_prompt = (system_prompt.rstrip() + "\n\nStage (narrowing): " + (narrowing_instructions.strip() or default_narrowing)).strip()
+
     if allow_markdown:
         if RESPONSE_SYSTEM_MARKDOWN_REPLACE in system_prompt:
             system_prompt = system_prompt.replace(RESPONSE_SYSTEM_MARKDOWN_REPLACE, RESPONSE_SYSTEM_MARKDOWN_WITH)
@@ -506,6 +536,23 @@ async def stream_engagement_response(
     except Exception:
         system_prompt = default_prompt
         max_tokens = default_max_tokens
+
+    # Inject interaction-stage instructions (same as generate_engagement_response)
+    engagement = data.get("engagement") or {}
+    stage = engagement.get("interaction_stage", "narrowing")
+    try:
+        from db import get_admin_orchestration_settings as _get_admin_stream
+        admin = _get_admin_stream()
+        opening_instructions = (admin or {}).get("opening_instructions") or ""
+        narrowing_instructions = (admin or {}).get("narrowing_instructions") or ""
+    except Exception:
+        opening_instructions = narrowing_instructions = ""
+    default_opening_s = "This is the opening. Be excited about the possibilities; suggest experiences we can offer. Invite them to pick or describe. Warm and inviting."
+    default_narrowing_s = "We are narrowing down the plan. Engage to refine; accommodate changes. Warm and collaborative."
+    if stage == "opening" and (opening_instructions.strip() or default_opening_s):
+        system_prompt = (system_prompt.rstrip() + "\n\nStage (opening): " + (opening_instructions.strip() or default_opening_s)).strip()
+    elif stage == "narrowing" and (narrowing_instructions.strip() or default_narrowing_s):
+        system_prompt = (system_prompt.rstrip() + "\n\nStage (narrowing): " + (narrowing_instructions.strip() or default_narrowing_s)).strip()
 
     if allow_markdown:
         if RESPONSE_SYSTEM_MARKDOWN_REPLACE in system_prompt:

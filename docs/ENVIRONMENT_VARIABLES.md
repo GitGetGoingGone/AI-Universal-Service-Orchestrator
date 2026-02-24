@@ -95,6 +95,12 @@ Used by the **Discovery service** for semantic product search (pgvector). If not
 
 After setting these, run the [embedding backfill](MODULE1_SCOUT_ENGINE.md#how-to-enable-semantic-search-fix-no-results-from-semantic) so products get vectors and semantic search returns results.
 
+### Orchestrator (agentic loop)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PLANNER_ALWAYS_DECIDES` | No | When `true`, every user turn is decided by the planner LLM; intent is only context. When `false` (default), intent's `recommended_next_action` can directly set the next step (current hardcoded-rules behavior). Can also be set in Admin Orchestration settings as `planner_always_decides`. |
+
 ## Local vs Production
 
 | Aspect | Local | Production |

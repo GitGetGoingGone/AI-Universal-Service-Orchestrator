@@ -85,6 +85,10 @@ class Settings:
     environment: str = get_env("ENVIRONMENT", "development")
     log_level: str = get_env("LOG_LEVEL", "INFO")
 
+    # When True, every user turn goes to the planner LLM to decide next action; intent is only context.
+    # When False (default), intent's recommended_next_action can directly set the next step (current behavior).
+    planner_always_decides: bool = (get_env("PLANNER_ALWAYS_DECIDES") or "false").strip().lower() == "true"
+
     @property
     def agentic_handoff_configured(self) -> bool:
         return bool(self.clerk_publishable_key and self.clerk_secret_key)

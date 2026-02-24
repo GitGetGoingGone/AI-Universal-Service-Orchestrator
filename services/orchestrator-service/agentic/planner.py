@@ -32,6 +32,8 @@ Additional rules:
 - Metadata: The intent's proposed_plan is passed to the frontend as the Draft Itinerary; ensure your complete message references it (e.g. "your Flowers and Dinner") so the user sees we're building that plan.
 - Refinement leak: When intent is refine_composite with removed_categories, use the intent's already-purged search_queries and proposed_plan for discover_composite; do not re-add removed categories.
 - Variety leak: When the user asks for "other options" or "show me something else", the intent sets request_variety; the loop will set rotate_tier so the Partner Balancer shows a different tier first. Proceed with discover_composite (or complete with options) as normal.
+
+Rule 6 (Fulfillment gate — no checkout/payment until required info): Do NOT complete with a message that invites checkout or payment (e.g. "Ready to checkout", "Add this bundle to pay", "Proceed to payment") unless state.fulfillment_context has all required fields: delivery_address, pickup_address, pickup_time (each non-empty). If intent is checkout or user wants to pay and any of these are missing, you MUST call complete with ONE short message asking for the missing ones by name (e.g. "To place your order I'll need your delivery address, pickup address, and pickup time—please share them here and then we can proceed to checkout."). Do NOT suggest they can proceed to checkout or payment until required fulfillment info is provided.
 """
 
 
@@ -163,6 +165,8 @@ async def plan_next_action(
         "search_queries": i.get("search_queries"),
         "bundle_option_labels": bundle_labels if bundle_labels else None,
         "entities": i.get("entities") or [],
+        "interaction_stage": state.get("interaction_stage", "narrowing"),
+        "fulfillment_context": state.get("fulfillment_context") or {},
     }
     user_content = f"User message: {user_message}\n\nCurrent state: {json.dumps(state_summary, default=str)[:2200]}"
 
@@ -179,6 +183,24 @@ async def plan_next_action(
                 planner_prompt = db_prompt
     except Exception:
         pass
+
+    # Inject interaction-stage instructions (Opening vs Narrowing)
+    stage = state.get("interaction_stage", "narrowing")
+    opening_instructions = (state.get("opening_instructions") or "").strip()
+    narrowing_instructions = (state.get("narrowing_instructions") or "").strip()
+    default_opening = (
+        "This is the opening of the conversation. Be excited about the possibilities! "
+        "Suggest the kinds of experiences we can help with—e.g. date night, gifts, celebrations, something special. "
+        "Invite them to pick an experience or describe what they're looking for. Keep it warm and inviting, not a form."
+    )
+    default_narrowing = (
+        "We are narrowing down the plan with the user. Engage to refine the plan; "
+        "accommodate any changes they suggest (different date, no flowers, add a movie, etc.). Keep the tone warm and collaborative."
+    )
+    if stage == "opening" and (opening_instructions or default_opening):
+        planner_prompt = planner_prompt + "\n\nStage (opening): " + (opening_instructions or default_opening)
+    elif stage == "narrowing" and (narrowing_instructions or default_narrowing):
+        planner_prompt = planner_prompt + "\n\nStage (narrowing): " + (narrowing_instructions or default_narrowing)
 
     try:
         if provider in ("azure", "openrouter", "custom", "facade"):
