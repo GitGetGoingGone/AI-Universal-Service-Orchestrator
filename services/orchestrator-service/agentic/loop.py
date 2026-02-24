@@ -585,6 +585,14 @@ async def run_agentic_loop(
         sq = (intent_data or {}).get("search_query") or ""
         generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "")
         skip_discover_bypass = rec == "discover_products" and sq.lower().strip() in generic_queries
+        # When we would skip discovery because query is generic, derive from user message so we still run discovery when they said something concrete
+        if skip_discover_bypass and iteration == 0:
+            from packages.shared.discovery import fallback_search_query
+            derived = (fallback_search_query(user_message) or "").strip()
+            if derived and derived.lower() not in generic_queries:
+                intent_data["search_query"] = derived
+                sq = derived
+                skip_discover_bypass = False
         # When Intent says browse or probe, derive a search query from the user message (shared utility); if non-generic, run discovery instead of probing
         if iteration == 0 and (rec == "complete_with_probing" or intent_data.get("intent_type") == "browse"):
             from packages.shared.discovery import fallback_search_query
