@@ -1,7 +1,9 @@
 -- Seed data for local development
+-- Compliant with current schema: users, capability_tags, partners, products (experience_tags, capabilities),
+-- partner_kb_articles (KB-based discovery), bundles, bundle_legs, orders, order_legs.
+-- Optional columns (description_kb, sold_count, etc.) are left default/NULL.
 -- 7 test partners with synthetic products (flowers, chocolates, limos, movies, events, restaurant, baby)
--- Each partner has ~15 products across categories, approved for testing.
--- Tots Trunk: baby/newborn items + pre-bundled products for bundle-in-bundle flows.
+-- Tots Trunk: baby/newborn + pre-bundled products; plus KB entries for custom bundle and personalized letter (not products).
 -- Run after migrations. Safe to run multiple times (ON CONFLICT).
 
 BEGIN;
@@ -202,5 +204,138 @@ INSERT INTO products (id, partner_id, name, description, price, currency, capabi
   ('a1000007-0001-4001-8001-00000000000e', 'a1000007-9c0b-4ef8-bb6d-6bb9bd380a07', 'Welcome Home Baby Bundle', 'Pre-bundled: full newborn kit + gift wrap - welcome baby home', 199.99, 'USD', '["baby","newborn","gifts","bundle"]'::jsonb, '["baby", "gift", "celebration"]'::jsonb, true, true, 'in_stock', NOW(), NOW()),
   ('a1000007-0001-4001-8001-00000000000f', 'a1000007-9c0b-4ef8-bb6d-6bb9bd380a07', 'Baby Care Combo', 'Pre-bundled: wipes, diapers, lotion, shampoo - daily care essentials', 59.99, 'USD', '["baby","bundle"]'::jsonb, '["baby", "gift"]'::jsonb, true, true, 'in_stock', NOW(), NOW())
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, price = EXCLUDED.price, capabilities = EXCLUDED.capabilities, experience_tags = EXCLUDED.experience_tags, updated_at = NOW();
+
+-- =============================================================================
+-- Phase 2 scenario: Task Queue, Hub/Negotiator, Hybrid Response test data
+-- Second vendor (Chocolate Co.), Hub partner, sample bundle + order for real-life flow.
+-- See docs/archive/REAL_LIFE_TEST_SCENARIO.md for the test flow (if present).
+-- =============================================================================
+
+-- Flower Co. Demo (referenced by bundle_legs)
+INSERT INTO partners (id, user_id, business_name, business_type, contact_email, verification_status, trust_score, is_active, created_at, updated_at)
+VALUES (
+  'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
+  'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+  'Flower Co. Demo',
+  'retail',
+  'flowers@example.com',
+  'approved',
+  90,
+  true,
+  NOW(),
+  NOW()
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Chocolate Co. Demo
+INSERT INTO partners (id, user_id, business_name, business_type, contact_email, verification_status, trust_score, is_active, created_at, updated_at)
+VALUES (
+  'b2eebc99-9c0b-4ef8-bb6d-6bb9bd380a23',
+  'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+  'Chocolate Co. Demo',
+  'retail',
+  'chocolate@example.com',
+  'approved',
+  88,
+  true,
+  NOW(),
+  NOW()
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Hub partner (assembly/delivery)
+INSERT INTO partners (id, user_id, business_name, business_type, contact_email, verification_status, trust_score, is_active, created_at, updated_at)
+VALUES (
+  'b3eebc99-9c0b-4ef8-bb6d-6bb9bd380a24',
+  'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+  'FastHub Assembly',
+  'fulfillment',
+  'hub@example.com',
+  'approved',
+  90,
+  true,
+  NOW(),
+  NOW()
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Flower product (for Phase 2 bundle)
+INSERT INTO products (id, partner_id, name, description, price, currency, capabilities, experience_tags, is_eligible_search, is_eligible_checkout, availability, created_at, updated_at)
+VALUES (
+  'c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33',
+  'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
+  'Demo Rose Bouquet',
+  'Classic roses for scenario testing',
+  49.99,
+  'USD',
+  '["flowers"]'::jsonb,
+  '["gift", "celebration", "romantic"]'::jsonb,
+  true,
+  true,
+  'in_stock',
+  NOW(),
+  NOW()
+)
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, price = EXCLUDED.price, capabilities = EXCLUDED.capabilities, experience_tags = EXCLUDED.experience_tags, updated_at = NOW();
+
+-- Chocolate product (Phase 2)
+INSERT INTO products (id, partner_id, name, description, price, currency, capabilities, experience_tags, is_eligible_search, is_eligible_checkout, availability, created_at, updated_at)
+VALUES (
+  'c3eebc99-9c0b-4ef8-bb6d-6bb9bd380a34',
+  'b2eebc99-9c0b-4ef8-bb6d-6bb9bd380a23',
+  'Premium Chocolates',
+  'Assorted gourmet chocolates',
+  29.99,
+  'USD',
+  '["chocolates"]'::jsonb,
+  '["gift", "celebration", "luxury", "romantic"]'::jsonb,
+  true,
+  true,
+  'in_stock',
+  NOW(),
+  NOW()
+)
+ON CONFLICT (id) DO UPDATE SET description = EXCLUDED.description, experience_tags = EXCLUDED.experience_tags, updated_at = NOW();
+
+-- Bundle (flowers + chocolates)
+INSERT INTO bundles (id, user_id, bundle_name, total_price, currency, status, created_at)
+VALUES (
+  'd1eebc99-9c0b-4ef8-bb6d-6bb9bd380a40',
+  'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+  'Gift Bundle',
+  79.98,
+  'USD',
+  'draft',
+  NOW()
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Bundle legs (flowers first, chocolates second)
+INSERT INTO bundle_legs (id, bundle_id, product_id, partner_id, leg_sequence, leg_type, price, created_at)
+VALUES
+  ('d2eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'd1eebc99-9c0b-4ef8-bb6d-6bb9bd380a40', 'c2eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 1, 'product', 49.99, NOW()),
+  ('d3eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'd1eebc99-9c0b-4ef8-bb6d-6bb9bd380a40', 'c3eebc99-9c0b-4ef8-bb6d-6bb9bd380a34', 'b2eebc99-9c0b-4ef8-bb6d-6bb9bd380a23', 2, 'product', 29.99, NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- Order (Phase 2 scenario)
+INSERT INTO orders (id, user_id, bundle_id, total_amount, currency, status, payment_status, created_at)
+VALUES (
+  'e1eebc99-9c0b-4ef8-bb6d-6bb9bd380a50',
+  'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+  'd1eebc99-9c0b-4ef8-bb6d-6bb9bd380a40',
+  79.98,
+  'USD',
+  'pending',
+  'pending',
+  NOW()
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Order legs (one per vendor)
+INSERT INTO order_legs (id, order_id, bundle_leg_id, partner_id, status, created_at)
+VALUES
+  ('e2eebc99-9c0b-4ef8-bb6d-6bb9bd380a51', 'e1eebc99-9c0b-4ef8-bb6d-6bb9bd380a50', 'd2eebc99-9c0b-4ef8-bb6d-6bb9bd380a41', 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'pending', NOW()),
+  ('e3eebc99-9c0b-4ef8-bb6d-6bb9bd380a52', 'e1eebc99-9c0b-4ef8-bb6d-6bb9bd380a50', 'd3eebc99-9c0b-4ef8-bb6d-6bb9bd380a42', 'b2eebc99-9c0b-4ef8-bb6d-6bb9bd380a23', 'pending', NOW())
+ON CONFLICT (id) DO NOTHING;
 
 COMMIT;

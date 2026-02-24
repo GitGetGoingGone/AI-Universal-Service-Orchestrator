@@ -28,6 +28,10 @@ AI Universal Service Orchestrator/
 │   └── webhook-service/         # Webhook push (ChatGPT, Gemini)
 ├── functions/
 │   └── durable-orchestrator/    # Azure Durable Functions (optional)
+├── apps/
+│   ├── uso-unified-chat/        # Next.js chat (custom UI, adaptive cards)
+│   ├── assistant-ui-chat/       # Next.js chat on assistant-ui (stream + custom parts)
+│   └── portal/                  # Partner portal
 └── supabase/
     └── migrations/              # DB schema (run via Supabase CLI or Dashboard)
 ```
@@ -202,6 +206,15 @@ Summary:
 3. Set **service-specific** env vars (e.g. `DISCOVERY_PUBLIC_URL`, `INTENT_SERVICE_URL`, `DISCOVERY_SERVICE_URL`, `GATEWAY_PUBLIC_URL`, `GATEWAY_INTERNAL_SECRET`).
 4. Apply **migrations** to your Supabase project (same as local).
 5. For **A2A**, ensure Orchestrator has `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` for registry and `id_masking_map`; set `GATEWAY_PUBLIC_URL` to the public Orchestrator URL.
+
+---
+
+## 7a. Chat UIs (optional)
+
+Two chat frontends talk to the Orchestrator (Gateway):
+
+- **`apps/uso-unified-chat`** — Custom Next.js chat with adaptive cards; deploy on Vercel (see [RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md) Step 6g).
+- **`apps/assistant-ui-chat`** — Chat built on **assistant-ui** (npm); stream + custom part renderers (product list, thematic options, engagement choice). **Run Gateway and Discovery first**, then from repo root: `cd apps/assistant-ui-chat && pnpm install && pnpm dev` (app on port 3012). See **[apps/assistant-ui-chat/README.md](../apps/assistant-ui-chat/README.md)** for install, env (`NEXT_PUBLIC_GATEWAY_URL`), and Vercel deploy.
 
 ---
 

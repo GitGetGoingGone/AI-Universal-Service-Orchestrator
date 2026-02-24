@@ -108,18 +108,17 @@ supabase db reset  # Applies migrations + seed
 
 ## Seed Data
 
-`supabase/seed.sql` contains minimal data for local development:
+A single file `supabase/seed.sql` provides all development seed data (safe to run after migrations; uses ON CONFLICT):
 
-- Test user
-- Capability tags
-- Sample partner
-- Sample product
+- Test user, capability tags
+- 7 test partners with ~15 products each (flowers, chocolates, limo, movies, events, restaurant, baby) including experience_tags
+- Phase 2 scenario: Flower Co. + Chocolate Co. + Hub partners, sample bundle and order for Task Queue / Hub / Hybrid Response testing
 
 Run after migrations:
 
 ```bash
 # Local
-supabase db reset  # Includes seed
+supabase db reset  # Applies migrations and runs seed.sql
 
 # Cloud: Run seed.sql in SQL Editor after migrations
 ```
