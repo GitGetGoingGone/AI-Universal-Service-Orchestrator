@@ -70,6 +70,9 @@ async def discover_products_via_rpc(
         raise RuntimeError(data["error"].get("message", "JSON-RPC error"))
     result = data.get("result") or {}
     return result
+
+
+async def get_experience_categories() -> List[str]:
     """
     Fetch available experience categories from Discovery (GET /api/v1/experience-categories).
     Used to pre-fill intent resolve so the LLM knows available tags for theme bundles.
