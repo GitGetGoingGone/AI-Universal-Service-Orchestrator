@@ -206,6 +206,15 @@ export function GatewayMessageParts() {
     (part) => typeof part === "object" && part !== null && (part as { name?: string }).name === "thinking"
   );
 
+  // Only show the latest thinking part so status messages don't stack
+  const lastThinkingIndex = content.reduce<number>(
+    (last, part, i) =>
+      typeof part === "object" && part !== null && (part as { type?: string; name?: string }).type === "data" && (part as { name?: string }).name === "thinking"
+        ? i
+        : last,
+    -1
+  );
+
   return (
     <div className="space-y-1">
       {showThinking && !hasThinkingParts && (
@@ -227,6 +236,8 @@ export function GatewayMessageParts() {
         if (p.type === "data" && p.name) {
           if (p.name === "thinking") {
             if (!showThinking) return null;
+            // Only render the latest thinking part so status messages don't stack
+            if (index !== lastThinkingIndex) return null;
             const Renderer = DATA_RENDERERS_BY_NAME.thinking;
             return <Renderer key={index} name={p.name} data={p.data ?? {}} isLive />;
           }

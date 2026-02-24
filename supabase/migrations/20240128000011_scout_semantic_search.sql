@@ -30,6 +30,6 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION match_products IS 'Module 1: Semantic product search via pgvector cosine similarity';
+COMMENT ON FUNCTION match_products(vector(1536), int, float, uuid, uuid) IS 'Module 1: Semantic product search via pgvector cosine similarity';
 
 COMMIT;

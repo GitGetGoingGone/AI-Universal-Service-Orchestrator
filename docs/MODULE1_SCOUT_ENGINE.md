@@ -77,8 +77,23 @@ GET /api/v1/discover?intent=flowers
 
 ### Configuration
 
-- **Discovery service** embedding config is in Platform Config (llm_providers).
-- Migration **`20240128000011_scout_semantic_search.sql`** must be applied so the `match_products` RPC exists.
+- **Discovery service** reads embedding config from environment variables (see [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md#discovery-service-embeddings)).
+- Migration **`20240128000011_scout_semantic_search.sql`** (and `match_products_v2` if used) must be applied so the RPC exists.
+- Scout engine **tries semantic search first** when embeddings are configured; if it returns no results (e.g. no product embeddings yet), it falls back to aggregator/text search.
+
+### How to enable semantic search (fix “no results” from semantic)
+
+1. **Configure the embedding API** (Discovery service env):
+   - **OpenAI**: `EMBEDDING_PROVIDER=openai`, `OPENAI_API_KEY=sk-...`, `EMBEDDING_MODEL=text-embedding-3-small`
+   - **Azure**: `EMBEDDING_PROVIDER=azure`, `AZURE_OPENAI_ENDPOINT=https://...`, `AZURE_OPENAI_API_KEY=...`, `EMBEDDING_MODEL` or `EMBEDDING_DEPLOYMENT=text-embedding-3-small`
+2. **Backfill product embeddings** so the `products.embedding` column is populated:
+   ```bash
+   # All products (up to 500 by default)
+   curl -X POST "http://localhost:8001/api/v1/admin/embeddings/backfill?limit=500"
+   # Single product
+   curl -X POST "http://localhost:8001/api/v1/admin/embeddings/backfill?product_id=<uuid>"
+   ```
+   Replace `8001` with your Discovery service port. After backfill, queries like “Find flowers for delivery” can return results via vector similarity as well as text/capability fallback.
 
 ---
 

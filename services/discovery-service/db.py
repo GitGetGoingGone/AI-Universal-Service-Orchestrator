@@ -1,7 +1,8 @@
 """Supabase database client for discovery service."""
 
 import uuid as uuid_module
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, cast
 
 from supabase import create_client, Client
 
@@ -12,12 +13,34 @@ from packages.shared.discovery import is_browse_query
 _client: Optional[Client] = None
 
 
+def _table_data(data: Any) -> List[Dict[str, Any]]:
+    """Cast Supabase result.data to list of dicts for type safety."""
+    if data is None:
+        return []
+    if isinstance(data, dict):
+        return [dict(data)]
+    if not isinstance(data, list):
+        return []
+    return [dict(r) for r in data if isinstance(r, dict)]
+
+
+def _table_row(data: Any) -> Optional[Dict[str, Any]]:
+    """First row of result.data as dict or None. Handles .single() returning a dict."""
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        return dict(data)
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        return dict(data[0])
+    return None
+
+
 def get_supabase() -> Optional[Client]:
     """Get Supabase client. Returns None if not configured."""
     global _client
     if _client is not None:
         return _client
-    if not settings.supabase_configured:
+    if not getattr(settings, "supabase_configured", bool(settings.supabase_url and settings.supabase_key)):
         return None
     _client = create_client(settings.supabase_url, settings.supabase_key)
     return _client
@@ -80,7 +103,7 @@ async def search_products(
         for tag in tags_to_apply:
             q = q.contains("experience_tags", [tag])
         result = q.order("created_at", desc=True).limit(limit).execute()
-        data = result.data or []
+        data = _table_data(result.data)
         for row in data:
             if "sold_count" not in row:
                 row["sold_count"] = 0
@@ -108,9 +131,10 @@ async def search_products(
             for tag in tags_to_apply:
                 q = q.contains("experience_tags", [tag])
             result = q.order("created_at", desc=True).limit(limit).execute()
-            data = result.data or []
+            data = _table_data(result.data)
             for row in data:
-                row["sold_count"] = 0
+                if "sold_count" not in row:
+                    row["sold_count"] = 0
             if not data and query and not is_browse_query(query) and query.strip():
                 data = await _search_products_by_capability(
                     client, query.strip(), limit, select_cols,
@@ -146,7 +170,7 @@ async def _search_products_by_capability(
             for tag in experience_tags_filter:
                 q = q.contains("experience_tags", [tag])
         result = q.order("created_at", desc=True).limit(limit).execute()
-        data = result.data or []
+        data = _table_data(result.data)
         for row in data:
             if "sold_count" not in row:
                 row["sold_count"] = 0
@@ -162,7 +186,7 @@ async def get_distinct_experience_tags() -> List[str]:
         return []
     try:
         result = client.rpc("get_distinct_experience_tags").execute()
-        data = result.data or []
+        data = _table_data(result.data)
         return [str(row.get("tag", "")).strip() for row in data if row.get("tag")]
     except Exception:
         return []
@@ -182,7 +206,7 @@ async def get_internal_agent_urls(capability: Optional[str] = None) -> List[str]
         if capability and str(capability).strip():
             q = q.eq("capability", str(capability).strip())
         result = q.execute()
-        data = result.data or []
+        data = _table_data(result.data)
         urls = [str(r.get("base_url", "")).strip() for r in data if r.get("base_url")]
         return [u for u in urls if u]
     except Exception:
@@ -234,22 +258,22 @@ def resolve_masked_id(masked_id: str) -> Optional[tuple]:
             .limit(1)
             .execute()
         )
-        if not result.data:
+        row = _table_row(result.data)
+        if not row:
             return None
-        row = result.data[0]
         expires_at = row.get("expires_at")
         if expires_at:
-            from datetime import datetime, timezone
+            exp_dt: Optional[datetime] = None
             if isinstance(expires_at, str):
                 try:
                     exp_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
                 except Exception:
-                    exp_dt = None
-            else:
-                exp_dt = expires_at
-            if exp_dt and exp_dt.tzinfo is None:
+                    pass
+            elif hasattr(expires_at, "tzinfo"):
+                exp_dt = expires_at  # type: ignore[assignment]
+            if exp_dt is not None and exp_dt.tzinfo is None:
                 exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-            if exp_dt and exp_dt < datetime.now(timezone.utc):
+            if exp_dt is not None and exp_dt < datetime.now(timezone.utc):
                 return None
         return (str(row.get("internal_product_id", "")), row.get("partner_id"))
     except Exception:
@@ -303,7 +327,7 @@ async def get_product_by_id(product_id: str) -> Optional[Dict[str, Any]]:
             .limit(1)
             .execute()
         )
-        return result.data[0] if result.data else None
+        return _table_row(result.data)
     except Exception:
         return None
 
@@ -324,7 +348,7 @@ async def get_partner_by_id(partner_id: str) -> Optional[Dict[str, Any]]:
             .limit(1)
             .execute()
         )
-        return result.data[0] if result.data else None
+        return _table_row(result.data)
     except Exception:
         return None
 
@@ -343,7 +367,7 @@ async def get_partners_by_ids(partner_ids: List[str]) -> Dict[str, Dict[str, Any
             .in_("id", partner_ids)
             .execute()
         )
-        return {str(r["id"]): r for r in (result.data or [])}
+        return {str(r["id"]): r for r in _table_data(result.data)}
     except Exception:
         return {}
 
@@ -360,7 +384,7 @@ async def get_platform_config_ranking() -> Optional[Dict[str, Any]]:
             .limit(1)
             .execute()
         )
-        row = result.data[0] if result.data else None
+        row = _table_row(result.data)
         if not row:
             return {"ranking_enabled": True}
         return dict(row)
@@ -380,7 +404,7 @@ async def get_admin_orchestration_settings() -> Optional[Dict[str, Any]]:
             .limit(1)
             .execute()
         )
-        row = result.data[0] if result.data else None
+        row = _table_row(result.data)
         return dict(row) if row else None
     except Exception:
         return None
@@ -398,7 +422,7 @@ async def get_composite_discovery_config() -> Optional[Dict[str, Any]]:
             .limit(1)
             .execute()
         )
-        row = result.data[0] if result.data else None
+        row = _table_row(result.data)
         cdc = (row or {}).get("composite_discovery_config")
         return cdc if isinstance(cdc, dict) else None
     except Exception:
@@ -419,7 +443,8 @@ async def get_partner_ratings_map(partner_ids: List[str]) -> Dict[str, float]:
             .in_("partner_id", partner_ids)
             .execute()
         )
-        return {str(r["partner_id"]): float(r["avg_rating"]) for r in (result.data or [])}
+        data = _table_data(result.data)
+        return {str(r["partner_id"]): float(r.get("avg_rating") or 0) for r in data}
     except Exception:
         return {}
 
@@ -443,7 +468,7 @@ async def get_active_sponsorships(product_ids: List[str]) -> set:
             .gte("end_at", now)
             .execute()
         )
-        return {str(r["product_id"]) for r in (result.data or [])}
+        return {str(r.get("product_id", "")) for r in _table_data(result.data) if r.get("product_id")}
     except Exception:
         return set()
 
@@ -513,7 +538,7 @@ async def get_products_for_acp_export(
         elif product_ids:
             q = q.in_("id", product_ids)
         result = q.execute()
-        products = result.data or []
+        products = _table_data(result.data)
         if not products:
             return []
         partner_ids = list({str(p["partner_id"]) for p in products if p.get("partner_id")})
@@ -582,7 +607,8 @@ async def add_product_to_bundle(
                 .limit(1)
                 .execute()
             )
-            next_seq = (seq_result.data[0]["leg_sequence"] + 1) if seq_result.data else 1
+            seq_row = _table_row(seq_result.data)
+            next_seq = (int(seq_row.get("leg_sequence", 0)) + 1) if seq_row else 1
 
             bundle = (
                 client.table("bundles")
@@ -591,10 +617,10 @@ async def add_product_to_bundle(
                 .single()
                 .execute()
             )
-            if not bundle.data:
+            bundle_row = _table_row(bundle.data)
+            if not bundle_row:
                 return None
-            bundle_row = bundle.data
-            total = float(bundle_row.get("total_price", 0)) + price
+            total = float(bundle_row.get("total_price") or 0) + price
 
             client.table("bundle_legs").insert({
                 "bundle_id": bundle_id,
@@ -611,7 +637,7 @@ async def add_product_to_bundle(
                 "bundle_id": bundle_id,
                 "product_added": product.get("name"),
                 "total_price": total,
-                "currency": bundle_row.get("currency", "USD"),
+                "currency": bundle_row.get("currency") or "USD",
             }
         else:
             # Create new draft bundle
@@ -632,9 +658,10 @@ async def add_product_to_bundle(
             if bundle_user_id:
                 bundle_row["user_id"] = bundle_user_id
             bundle_result = client.table("bundles").insert(bundle_row).execute()
-            if not bundle_result.data:
+            first_row = _table_row(bundle_result.data)
+            if not first_row:
                 return None
-            new_bundle_id = bundle_result.data[0]["id"]
+            new_bundle_id = first_row.get("id")
 
             client.table("bundle_legs").insert({
                 "bundle_id": new_bundle_id,
@@ -720,9 +747,10 @@ async def get_bundle_by_id(bundle_id: str) -> Optional[Dict[str, Any]]:
             .single()
             .execute()
         )
-        if not bundle_result.data:
+        bundle = _table_row(bundle_result.data)
+        if not bundle:
             return None
-        bundle = dict(bundle_result.data)
+        bundle = dict(bundle)
 
         legs_result = (
             client.table("bundle_legs")
@@ -731,10 +759,10 @@ async def get_bundle_by_id(bundle_id: str) -> Optional[Dict[str, Any]]:
             .order("leg_sequence")
             .execute()
         )
-        legs = legs_result.data or []
+        legs = _table_data(legs_result.data)
 
-        product_ids = [leg["product_id"] for leg in legs if leg.get("product_id")]
-        product_names = {}
+        product_ids = [leg.get("product_id") for leg in legs if leg.get("product_id")]
+        product_names: Dict[str, Dict[str, Any]] = {}
         if product_ids:
             products_result = (
                 client.table("products")
@@ -742,8 +770,8 @@ async def get_bundle_by_id(bundle_id: str) -> Optional[Dict[str, Any]]:
                 .in_("id", product_ids)
                 .execute()
             )
-            for p in products_result.data or []:
-                product_names[str(p["id"])] = p
+            for p in _table_data(products_result.data):
+                product_names[str(p.get("id", ""))] = p
 
         currency = bundle.get("currency", "USD")
         items = []
@@ -805,9 +833,9 @@ async def create_order_from_bundle(bundle_id: str) -> Optional[Dict[str, Any]]:
             "status": "pending",
             "payment_status": "pending",
         }).execute()
-        if not order_result.data:
+        order_row = _table_row(order_result.data)
+        if not order_row:
             return None
-        order_row = order_result.data[0]
         order_id = str(order_row["id"])
 
         legs_result = (
@@ -817,9 +845,9 @@ async def create_order_from_bundle(bundle_id: str) -> Optional[Dict[str, Any]]:
             .order("leg_sequence")
             .execute()
         )
-        legs = legs_result.data or []
-        product_ids = [leg["product_id"] for leg in legs if leg.get("product_id")]
-        product_names = {}
+        legs = _table_data(legs_result.data)
+        product_ids = [leg.get("product_id") for leg in legs if leg.get("product_id")]
+        product_names: Dict[str, Any] = {}
         if product_ids:
             products_result = (
                 client.table("products")
@@ -827,8 +855,8 @@ async def create_order_from_bundle(bundle_id: str) -> Optional[Dict[str, Any]]:
                 .in_("id", product_ids)
                 .execute()
             )
-            for p in products_result.data or []:
-                product_names[str(p["id"])] = p.get("name", "Unknown")
+            for p in _table_data(products_result.data):
+                product_names[str(p.get("id", ""))] = p.get("name", "Unknown")
 
         for leg in legs:
             product_id = leg.get("product_id")
@@ -866,10 +894,11 @@ async def create_order_from_bundle(bundle_id: str) -> Optional[Dict[str, Any]]:
                         "bundle_id": bundle_id,
                         "title": f"Order {order_id[:8]}...",
                         "status": "active",
-                    }).select("id").execute()
-                    if conv_r.data and user_id:
+                    }).select("id").execute()  # type: ignore[union-attr]
+                    conv_row = _table_row(conv_r.data)
+                    if conv_row and user_id:
                         client.table("participants").insert({
-                            "conversation_id": conv_r.data[0]["id"],
+                            "conversation_id": conv_row.get("id"),
                             "user_id": user_id,
                             "participant_type": "customer",
                         }).execute()
@@ -912,9 +941,10 @@ async def create_bundle_from_ucp_items(
             "currency": currency,
             "status": "draft",
         }).execute()
-        if not bundle_result.data:
+        first = _table_row(bundle_result.data)
+        if not first:
             return None
-        bundle_id = str(bundle_result.data[0]["id"])
+        bundle_id = str(first.get("id", ""))
         total = 0.0
         seq = 1
         for li in line_items:
@@ -965,16 +995,17 @@ async def get_order_by_id(order_id: str) -> Optional[Dict[str, Any]]:
             .single()
             .execute()
         )
-        if not order_result.data:
+        order = _table_row(order_result.data)
+        if not order:
             return None
-        order = dict(order_result.data)
+        order = dict(order)
         items_result = (
             client.table("order_items")
             .select("id, product_id, partner_id, item_name, quantity, unit_price, total_price")
             .eq("order_id", order_id)
             .execute()
         )
-        order["items"] = items_result.data or []
+        order["items"] = _table_data(items_result.data)
         return order
     except Exception:
         return None
@@ -1011,9 +1042,9 @@ async def remove_from_bundle(item_id: str) -> Optional[Dict[str, Any]]:
             .single()
             .execute()
         )
-        if not leg_result.data:
+        leg = _table_row(leg_result.data)
+        if not leg:
             return None
-        leg = leg_result.data
         bundle_id = leg.get("bundle_id")
         price = float(leg.get("price", 0))
 
@@ -1024,9 +1055,10 @@ async def remove_from_bundle(item_id: str) -> Optional[Dict[str, Any]]:
             .single()
             .execute()
         )
-        if not bundle_result.data:
+        bundle_row = _table_row(bundle_result.data)
+        if not bundle_row:
             return None
-        total = float(bundle_result.data.get("total_price", 0)) - price
+        total = float(bundle_row.get("total_price", 0)) - price
         total = max(0, total)
 
         client.table("bundle_legs").delete().eq("id", item_id).execute()
@@ -1036,7 +1068,7 @@ async def remove_from_bundle(item_id: str) -> Optional[Dict[str, Any]]:
             "bundle_id": bundle_id,
             "item_removed_id": item_id,
             "total_price": total,
-            "currency": bundle_result.data.get("currency", "USD"),
+            "currency": bundle_row.get("currency", "USD"),
         }
     except Exception:
         return None
@@ -1089,7 +1121,7 @@ async def get_agent_action_models() -> List[Dict[str, Any]]:
             .order("action_name")
             .execute()
         )
-        return result.data or []
+        return _table_data(result.data)
     except Exception:
         return []
 
@@ -1123,7 +1155,7 @@ async def upsert_products_from_legacy(
                 .is_("deleted_at", "null")
                 .execute()
             )
-            for row in all_rows.data or []:
+            for row in _table_data(all_rows.data):
                 meta = row.get("metadata") or {}
                 if isinstance(meta, dict) and meta.get("source") == "legacy_adapter":
                     client.table("products").update({
@@ -1172,6 +1204,6 @@ async def get_platform_manifest_config() -> Optional[Dict[str, Any]]:
             .limit(1)
             .execute()
         )
-        return result.data[0] if result.data else None
+        return _table_row(result.data)
     except Exception:
         return None

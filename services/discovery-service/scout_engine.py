@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
+from config import settings
 from packages.shared.discovery import derive_search_query, is_browse_query
 from packages.shared.discovery_aggregator import (
     DiscoveryAggregator,
@@ -210,14 +211,29 @@ async def _fetch_and_rank(
         else:
             products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
     else:
-        if use_semantic and not use_aggregator:
-            products = await semantic_search(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
-            if not products:
-                products = await search_products(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
-        elif use_aggregator:
-            products = await _fetch_via_aggregator(query, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
-        else:
-            products = await search_products(query=query, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
+        # Try semantic search first when embedding is configured (then fall back to aggregator/text)
+        products = []
+        if use_semantic and getattr(settings, "embedding_configured", False):
+            products = await semantic_search(
+                query=query,
+                limit=fetch_limit,
+                partner_id=partner_id,
+                exclude_partner_id=exclude_partner_id,
+                experience_tag=experience_tag,
+                experience_tags=experience_tags,
+            )
+        if not products:
+            if use_aggregator:
+                products = await _fetch_via_aggregator(query, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
+            else:
+                products = await search_products(
+                    query=query,
+                    limit=fetch_limit,
+                    partner_id=partner_id,
+                    exclude_partner_id=exclude_partner_id,
+                    experience_tag=experience_tag,
+                    experience_tags=experience_tags,
+                )
         if not products and query.lower() in ("gifts", "gift"):
             for fallback in ("gift", "birthday", "present"):
                 if fallback != query.lower():

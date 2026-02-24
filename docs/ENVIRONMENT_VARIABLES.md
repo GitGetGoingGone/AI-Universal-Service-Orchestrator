@@ -81,6 +81,20 @@ LLM providers (Azure, Gemini, OpenRouter, Custom) are configured via Platform Co
 | `DISCOVERY_SERVICE_URL` | For server tests, orchestrator | Discovery service URL (default: `http://localhost:8000`) |
 | `INTENT_SERVICE_URL` | For orchestrator | Intent service URL (default: `http://localhost:8001`) |
 
+### Discovery service (embeddings)
+
+Used by the **Discovery service** for semantic product search (pgvector). If not set, semantic search is skipped and only text/capability search is used.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `EMBEDDING_PROVIDER` | For semantic | `openai` or `azure` (default: `azure`) |
+| `EMBEDDING_MODEL` | For semantic | Model name, e.g. `text-embedding-3-small` |
+| `OPENAI_API_KEY` | For semantic (OpenAI) | OpenAI API key when `EMBEDDING_PROVIDER=openai` |
+| `AZURE_OPENAI_ENDPOINT` | For semantic (Azure) | Azure OpenAI endpoint URL |
+| `AZURE_OPENAI_API_KEY` | For semantic (Azure) | Azure OpenAI API key |
+
+After setting these, run the [embedding backfill](MODULE1_SCOUT_ENGINE.md#how-to-enable-semantic-search-fix-no-results-from-semantic) so products get vectors and semantic search returns results.
+
 ## Local vs Production
 
 | Aspect | Local | Production |
