@@ -127,7 +127,10 @@ export default function ChatPage() {
                         key={i}
                         type="button"
                         onClick={() =>
-                          runtime.thread.append({ role: "user", content: label })
+                          runtime.thread.append({
+                            role: "user",
+                            content: [{ type: "text" as const, text: label }],
+                          })
                         }
                         className="rounded-full border border-gray-300 bg-gray-50 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                       >
