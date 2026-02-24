@@ -44,6 +44,12 @@ export default function ChatPage() {
   const bundleIdRef = useRef<string | null>(null);
 
   const handleAction = async (payload: ActionPayload) => {
+    const appendAssistant = (text: string) => {
+      runtime.thread.append({
+        role: "assistant",
+        content: [{ type: "text" as const, text }],
+      });
+    };
     try {
       if (payload.action === "add_to_bundle" && payload.product_id) {
         const body: Record<string, string> = { product_id: payload.product_id };
@@ -57,8 +63,7 @@ export default function ChatPage() {
         if (!res.ok) throw new Error(json.error || "Add to bundle failed");
         const bid = json.bundle_id ?? json.data?.bundle_id;
         if (bid) bundleIdRef.current = bid;
-        const summary = json.summary ?? json.message ?? "Added to bundle.";
-        runtime.thread.append({ role: "assistant", content: summary });
+        appendAssistant(json.summary ?? json.message ?? "Added to bundle.");
       } else if (payload.action === "add_bundle_bulk" && payload.product_ids?.length) {
         const body: Record<string, unknown> = {
           product_ids: payload.product_ids,
@@ -74,8 +79,7 @@ export default function ChatPage() {
         if (!res.ok) throw new Error(json.error || "Bulk add failed");
         const bid = json.bundle_id ?? json.data?.bundle_id;
         if (bid) bundleIdRef.current = bid;
-        const summary = json.summary ?? json.message ?? "Added bundle.";
-        runtime.thread.append({ role: "assistant", content: summary });
+        appendAssistant(json.summary ?? json.message ?? "Added bundle.");
       } else if (payload.action === "checkout" && payload.bundle_id) {
         const res = await fetch("/api/checkout", {
           method: "POST",
@@ -84,17 +88,15 @@ export default function ChatPage() {
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error || "Checkout failed");
-        const summary = json.summary ?? json.message ?? "Proceeding to checkout.";
-        runtime.thread.append({ role: "assistant", content: summary });
+        appendAssistant(json.summary ?? json.message ?? "Proceeding to checkout.");
       } else if (payload.action === "proceed_to_payment" && payload.order_id) {
-        runtime.thread.append({
-          role: "assistant",
-          content: `Order ${payload.order_id} is ready. Proceed to payment when the flow is integrated.`,
-        });
+        appendAssistant(
+          `Order ${payload.order_id} is ready. Proceed to payment when the flow is integrated.`
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Action failed";
-      runtime.thread.append({ role: "assistant", content: `Error: ${msg}` });
+      appendAssistant(`Error: ${msg}`);
     }
   };
 
