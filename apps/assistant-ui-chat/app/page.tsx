@@ -142,7 +142,7 @@ export default function ChatPage() {
             <div className="flex-1 overflow-y-auto p-2">
               <button
                 type="button"
-                onClick={() => runtime.thread.clear?.() ?? window.location.reload()}
+                onClick={() => window.location.reload()}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-white/10"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
