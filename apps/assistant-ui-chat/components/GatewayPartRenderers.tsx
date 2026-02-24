@@ -169,14 +169,11 @@ export const gatewayDataComponents = {
   ),
 };
 
-/** Single Parts component: Text + Gateway data parts for MessagePrimitive.Parts */
+/** Single Parts component: Gateway data parts; text uses default renderer. */
 export function GatewayMessageParts() {
   return (
     <MessagePrimitive.Parts
       components={{
-        Text: () => (
-          <MessagePartPrimitive.Text className="whitespace-pre-wrap text-gray-800 dark:text-gray-200" />
-        ),
         data: gatewayDataComponents,
       }}
     />
