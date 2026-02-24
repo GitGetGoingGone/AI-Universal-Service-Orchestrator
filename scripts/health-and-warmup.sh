@@ -189,4 +189,6 @@ if [ -n "$every_minutes" ] && [ "$every_minutes" -gt 0 ] 2>/dev/null; then
 fi
 
 do_cycle
-echo "=== Done ==="
+ret=$?
+[ "$ret" -eq 0 ] && echo "=== Done ==="
+exit "$ret"

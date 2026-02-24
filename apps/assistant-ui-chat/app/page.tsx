@@ -180,13 +180,14 @@ export default function ChatPage() {
                       </div>
                     </div>
                   </AuiIf>
-                  <ThreadPrimitive.Messages
-                    components={{
-                      UserMessage,
-                      AssistantMessage,
-                    }}
-                    className="flex flex-col gap-4 pt-6"
-                  />
+                  <div className="flex flex-col gap-4 pt-6">
+                    <ThreadPrimitive.Messages
+                      components={{
+                        UserMessage,
+                        AssistantMessage,
+                      }}
+                    />
+                  </div>
                   <div className="h-4 shrink-0" />
                 </div>
                 <ThreadPrimitive.ScrollToBottom
