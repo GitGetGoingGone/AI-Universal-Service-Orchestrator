@@ -80,6 +80,7 @@ export async function POST(req: Request) {
       stream: createUIMessageStream({
         async execute({ writer }) {
           let doneData: Record<string, unknown> | null = null;
+          let textStarted = false;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -109,6 +110,18 @@ export async function POST(req: Request) {
                     data: { text: "Thinking..." },
                   });
                 }
+              } else if (eventType === "summary_delta" && eventData) {
+                try {
+                  const data = JSON.parse(eventData) as { delta?: string };
+                  const delta = data.delta ?? "";
+                  if (!textStarted) {
+                    writer.write({ type: "text-start", id: "summary" });
+                    textStarted = true;
+                  }
+                  if (delta) writer.write({ type: "text-delta", id: "summary", delta });
+                } catch {
+                  // skip malformed delta
+                }
               } else if (eventType === "error" && eventData) {
                 try {
                   const err = JSON.parse(eventData) as { error?: string };
@@ -128,11 +141,11 @@ export async function POST(req: Request) {
           }
 
           if (!doneData) {
-            writer.write({
-              type: "text-delta",
-              id: "summary",
-              delta: "No response from the gateway.",
-            });
+            if (!textStarted) {
+              writer.write({ type: "text-start", id: "summary" });
+              writer.write({ type: "text-delta", id: "summary", delta: "No response from the gateway." });
+              writer.write({ type: "text-end", id: "summary" });
+            }
             return;
           }
 
@@ -147,8 +160,10 @@ export async function POST(req: Request) {
           const suggestedOptions = engagement?.suggested_bundle_options as unknown[] | undefined;
           const suggestedCtas = doneData.suggested_ctas as { label?: string; action?: string }[] | undefined;
 
-          writer.write({ type: "text-start", id: "summary" });
-          writer.write({ type: "text-delta", id: "summary", delta: summary });
+          if (!textStarted) {
+            writer.write({ type: "text-start", id: "summary" });
+            writer.write({ type: "text-delta", id: "summary", delta: summary });
+          }
           writer.write({ type: "text-end", id: "summary" });
 
           if (Array.isArray(productList) && productList.length > 0) {

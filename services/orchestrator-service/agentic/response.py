@@ -2,7 +2,9 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+import queue
+import threading
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -434,6 +436,145 @@ async def generate_engagement_response(
     if return_debug:
         return (None, {"prompt_sent": prompt_sent, "response_received": ""})
     return None
+
+
+async def stream_engagement_response(
+    user_message: str,
+    result: Dict[str, Any],
+    llm_config: Optional[Dict[str, Any]] = None,
+    allow_markdown: bool = False,
+) -> AsyncIterator[str]:
+    """
+    Stream engagement response tokens/chunks. Yields each delta; caller can accumulate for full summary.
+    If LLM is unavailable or errors, yields nothing (caller should use planner fallback).
+    """
+    if result.get("error"):
+        return
+    if llm_config is None:
+        try:
+            from api.admin import get_llm_config  # type: ignore[reportMissingImports]
+            llm_config = get_llm_config()
+        except Exception:
+            return
+    if not llm_config:
+        return
+    try:
+        from packages.shared.platform_llm import get_llm_chat_client  # type: ignore[reportMissingImports]
+        provider, client = get_llm_chat_client(llm_config)
+    except Exception:
+        return
+    if not client:
+        return
+
+    cfg = llm_config
+    model = cfg.get("model") or "gpt-4o"
+    try:
+        from db import get_admin_orchestration_settings
+        admin = get_admin_orchestration_settings()
+        if admin and admin.get("model_temperature") is not None:
+            temperature = max(0.0, min(2.0, float(admin["model_temperature"])))
+        else:
+            temperature = min(0.7, float(cfg.get("temperature", 0.1)) + 0.3)
+    except Exception:
+        temperature = min(0.7, float(cfg.get("temperature", 0.1)) + 0.3)
+
+    data = result.get("data") or {}
+    intent = data.get("intent") or {}
+    intent_type = intent.get("intent_type", "unknown")
+    default_prompt, default_max_tokens = _get_system_prompt_and_max_tokens(intent_type)
+    try:
+        from db import get_supabase, get_admin_orchestration_settings
+        from packages.shared.platform_llm import get_model_interaction_prompt
+        supabase_client = get_supabase()
+        interaction_type = _intent_to_interaction_type(intent_type)
+        prompt_cfg = get_model_interaction_prompt(supabase_client, interaction_type) if supabase_client else None
+        if prompt_cfg and (prompt_cfg or {}).get("enabled", True):
+            db_prompt = (prompt_cfg or {}).get("system_prompt")
+            db_max = (prompt_cfg or {}).get("max_tokens")
+            system_prompt = (db_prompt or "").strip() or default_prompt
+            max_tokens = db_max if db_max is not None else default_max_tokens
+        else:
+            system_prompt = default_prompt
+            max_tokens = default_max_tokens
+        if intent_type == "discover_composite":
+            admin = get_admin_orchestration_settings()
+            tone = (admin or {}).get("global_tone", "warm, elegant, memorable")
+            system_prompt = system_prompt.replace(
+                "[INJECT ADMIN_CONFIG.GLOBAL_TONE AND LANGUAGE]",
+                tone,
+            )
+    except Exception:
+        system_prompt = default_prompt
+        max_tokens = default_max_tokens
+
+    if allow_markdown:
+        if RESPONSE_SYSTEM_MARKDOWN_REPLACE in system_prompt:
+            system_prompt = system_prompt.replace(RESPONSE_SYSTEM_MARKDOWN_REPLACE, RESPONSE_SYSTEM_MARKDOWN_WITH)
+        system_prompt = (system_prompt.rstrip() + "\n\n" + RESPONSE_SYSTEM_MARKDOWN_NOTE).strip()
+    system_prompt = (system_prompt.rstrip() + "\n\n" + RESPONSE_USER_PREFERENCE_RULE).strip()
+
+    context = _build_context(result)
+    user_content = f"User said: {user_message[:300]}\n\nWhat we did: {context}\n\nWrite a brief friendly response:"
+
+    try:
+        if provider in ("azure", "openrouter", "custom", "openai"):
+            thread_safe_q: queue.Queue = queue.Queue()
+
+            def _openai_stream() -> None:
+                try:
+                    stream = client.chat.completions.create(  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_content},
+                        ],
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        stream=True,
+                    )
+                    for chunk in stream:
+                        if chunk.choices and len(chunk.choices) > 0:
+                            delta = getattr(chunk.choices[0].delta, "content", None)
+                            if delta:
+                                thread_safe_q.put(delta)
+                except Exception as e:
+                    thread_safe_q.put(e)
+                finally:
+                    thread_safe_q.put(None)
+
+            thread = threading.Thread(target=_openai_stream)
+            thread.start()
+            loop = asyncio.get_event_loop()
+            while True:
+                item = await loop.run_in_executor(None, thread_safe_q.get)
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    logger.warning("Engagement stream LLM failed: %s", item)
+                    return
+                yield item
+            return
+
+        if provider == "gemini":
+            gen_model = client.GenerativeModel(model)  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
+
+            def _gemini_generate() -> Optional[str]:
+                try:
+                    resp = gen_model.generate_content(
+                        f"{system_prompt}\n\n{user_content}",
+                        generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
+                    )
+                    if resp and resp.candidates:
+                        return (getattr(resp, "text", None) or "").strip()
+                except Exception as e:
+                    logger.warning("Gemini engagement failed: %s", e)
+                return None
+
+            text = await asyncio.to_thread(_gemini_generate)
+            if text:
+                yield text
+    except Exception as e:
+        logger.warning("Engagement stream failed: %s", e)
 
 
 SUGGEST_BUNDLE_SYSTEM = """You are a bundle curator. Given categories with products for a composite experience (e.g. date night: flowers, dinner, movies), pick exactly ONE product per category that best fits the experience.

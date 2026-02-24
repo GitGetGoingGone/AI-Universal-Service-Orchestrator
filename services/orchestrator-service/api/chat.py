@@ -17,7 +17,7 @@ from clients import (
     register_thread_mapping,
 )
 from agentic.loop import run_agentic_loop
-from agentic.response import generate_engagement_response
+from agentic.response import generate_engagement_response, stream_engagement_response
 from packages.shared.utils.api_response import chat_first_response, request_id_from_request
 from packages.shared.json_ld.error import error_ld
 
@@ -141,18 +141,26 @@ async def _stream_chat_events(
         llm_config = result.pop("llm_config", None)  # remove so not logged/serialized (may contain api_key)
     else:
         llm_config = None
-    # Always call the engagement LLM first so the model generates the reply. Use planner message only as fallback.
+    # Stream engagement LLM response (summary_delta events), then send done with full payload
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
     engagement_debug: Optional[Dict[str, Any]] = None
+    summary_chunks: List[str] = []
     if body.debug:
-        summary, engagement_debug = await generate_engagement_response(
+        summary_sync, engagement_debug = await generate_engagement_response(
             body.text, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards, return_debug=True
         )
-        if summary is None:
+        if summary_sync is not None:
+            summary_chunks = [summary_sync]
+        if engagement_debug and summary_sync is None:
             engagement_debug = (engagement_debug or {}) | {"response_received": ""}
     else:
-        summary = await generate_engagement_response(body.text, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards)
+        async for delta in stream_engagement_response(
+            body.text, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards
+        ):
+            summary_chunks.append(delta)
+            yield f"event: summary_delta\ndata: {json.dumps({'delta': delta})}\n\n"
+    summary = "".join(summary_chunks).strip() if summary_chunks else None
     if not summary:
         summary = planner_message if (planner_message and planner_message.lower() not in generic_messages) else _build_summary(result)
         if body.debug and not engagement_debug:

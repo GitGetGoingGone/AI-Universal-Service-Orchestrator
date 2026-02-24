@@ -585,25 +585,18 @@ async def run_agentic_loop(
         sq = (intent_data or {}).get("search_query") or ""
         generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "")
         skip_discover_bypass = rec == "discover_products" and sq.lower().strip() in generic_queries
-        # For clear discover intents (e.g. "flowers for delivery", "baby"), run discovery even if Intent said probe
-        if rec == "complete_with_probing" and intent_data.get("intent_type") == "discover" and sq.strip() and sq.lower().strip() not in generic_queries:
+        # When Intent says browse or probe, derive a search query from the user message (shared utility); if non-generic, run discovery instead of probing
+        if iteration == 0 and (rec == "complete_with_probing" or intent_data.get("intent_type") == "browse"):
+            from packages.shared.discovery import fallback_search_query
+            derived = (fallback_search_query(user_message) or "").strip()
+            if derived and derived.lower() not in generic_queries:
+                rec = "discover_products"
+                intent_data["intent_type"] = "discover"
+                intent_data["search_query"] = derived
+                sq = derived
+        # For clear discover intents (Intent already gave search_query), run discovery even if Intent said probe
+        elif rec == "complete_with_probing" and intent_data.get("intent_type") == "discover" and sq.strip() and sq.lower().strip() not in generic_queries:
             rec = "discover_products"
-        # When user replies with a short concrete keyword (e.g. "flowers", "baby") after we asked for experience type, run discovery
-        if rec == "complete_with_probing" and intent_data.get("intent_type") in ("discover", "browse"):
-            user_sq = (user_message or "").strip()[:50]
-            if user_sq and user_sq.lower() not in generic_queries and "?" not in user_sq and len(user_sq) < 60:
-                if not sq or sq.lower().strip() in generic_queries:
-                    rec = "discover_products"
-                    intent_data["search_query"] = user_sq
-                    sq = user_sq
-        # When user asks for a composite experience (e.g. "Plan a date night") but Intent returned browse, run discover_composite
-        if rec == "complete_with_probing" and intent_data.get("intent_type") == "browse":
-            um = (user_message or "").lower()
-            if "date night" in um or "plan a date" in um or "romantic" in um or "evening" in um:
-                rec = "discover_composite"
-                intent_data["intent_type"] = "discover_composite"
-                intent_data.setdefault("search_queries", ["flowers", "restaurant", "movies"])
-                intent_data.setdefault("experience_name", "date night")
         if rec and rec in ("discover_composite", "discover_products", "refine_bundle_category") and intent_data and not skip_discover_bypass:
             if rec == "refine_bundle_category" and intent_data.get("intent_type") == "refine_composite":
                 bid = (thread_context or {}).get("bundle_id") or state.get("bundle_id")
