@@ -588,6 +588,22 @@ async def run_agentic_loop(
         # For clear discover intents (e.g. "flowers for delivery", "baby"), run discovery even if Intent said probe
         if rec == "complete_with_probing" and intent_data.get("intent_type") == "discover" and sq.strip() and sq.lower().strip() not in generic_queries:
             rec = "discover_products"
+        # When user replies with a short concrete keyword (e.g. "flowers", "baby") after we asked for experience type, run discovery
+        if rec == "complete_with_probing" and intent_data.get("intent_type") in ("discover", "browse"):
+            user_sq = (user_message or "").strip()[:50]
+            if user_sq and user_sq.lower() not in generic_queries and "?" not in user_sq and len(user_sq) < 60:
+                if not sq or sq.lower().strip() in generic_queries:
+                    rec = "discover_products"
+                    intent_data["search_query"] = user_sq
+                    sq = user_sq
+        # When user asks for a composite experience (e.g. "Plan a date night") but Intent returned browse, run discover_composite
+        if rec == "complete_with_probing" and intent_data.get("intent_type") == "browse":
+            um = (user_message or "").lower()
+            if "date night" in um or "plan a date" in um or "romantic" in um or "evening" in um:
+                rec = "discover_composite"
+                intent_data["intent_type"] = "discover_composite"
+                intent_data.setdefault("search_queries", ["flowers", "restaurant", "movies"])
+                intent_data.setdefault("experience_name", "date night")
         if rec and rec in ("discover_composite", "discover_products", "refine_bundle_category") and intent_data and not skip_discover_bypass:
             if rec == "refine_bundle_category" and intent_data.get("intent_type") == "refine_composite":
                 bid = (thread_context or {}).get("bundle_id") or state.get("bundle_id")
@@ -605,8 +621,8 @@ async def run_agentic_loop(
             elif rec == "discover_composite" and intent_data.get("intent_type") in ("discover_composite", "refine_composite"):
                 # Refinement leak: use purged search_queries/proposed_plan from state if present
                 sq = state.get("purged_search_queries") or intent_data.get("search_queries") or ["flowers", "restaurant", "movies"]
-                # AWAITING_PROBE: Do not execute discovery if location or time is missing
-                if not _has_location_or_time(intent_data, user_message) and state.get("probe_count", 0) < 2:
+                # Run discover_composite: on first turn (probe_count 0) show options without requiring location; after that probe if location/time missing
+                if not _has_location_or_time(intent_data, user_message) and state.get("probe_count", 0) >= 1:
                     state["orchestrator_state"] = ORCHESTRATOR_STATE_AWAITING_PROBE
                     plan = None  # Let planner run → complete with probing for location/time
                 else:
