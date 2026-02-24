@@ -585,6 +585,9 @@ async def run_agentic_loop(
         sq = (intent_data or {}).get("search_query") or ""
         generic_queries = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "")
         skip_discover_bypass = rec == "discover_products" and sq.lower().strip() in generic_queries
+        # For clear discover intents (e.g. "flowers for delivery", "baby"), run discovery even if Intent said probe
+        if rec == "complete_with_probing" and intent_data.get("intent_type") == "discover" and sq.strip() and sq.lower().strip() not in generic_queries:
+            rec = "discover_products"
         if rec and rec in ("discover_composite", "discover_products", "refine_bundle_category") and intent_data and not skip_discover_bypass:
             if rec == "refine_bundle_category" and intent_data.get("intent_type") == "refine_composite":
                 bid = (thread_context or {}).get("bundle_id") or state.get("bundle_id")

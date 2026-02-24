@@ -2,13 +2,16 @@
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
 
 from config import settings
+from packages.shared.adaptive_cards import generate_product_card
 from packages.shared.discovery import fallback_search_query
 from packages.shared.gateway_signature import sign_request
+from packages.shared.json_ld import product_list_ld
 from registry import AgentEntry, get_agents
 
 logger = logging.getLogger(__name__)

@@ -147,23 +147,30 @@ function ExperienceSessionRenderer({ data }: { data: Record<string, unknown> }) 
   );
 }
 
-function ThinkingRenderer({ data }: { data: { text?: string } }) {
+function ThinkingRenderer({ data, isLive }: { data: { text?: string }; isLive?: boolean }) {
   return (
-    <div className="my-2 text-sm italic text-gray-500 dark:text-gray-400">
+    <div
+      className={
+        isLive
+          ? "my-2 flex items-center gap-2 rounded-lg bg-[var(--muted)]/30 px-3 py-2 text-sm text-[var(--foreground)]"
+          : "my-2 text-sm italic text-gray-500 dark:text-gray-400"
+      }
+    >
+      {isLive && (
+        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--primary)]" aria-hidden />
+      )}
       {data.text ?? "Thinking..."}
     </div>
   );
 }
 
-const DATA_RENDERERS_BY_NAME: Record<
-  string,
-  React.ComponentType<{ name?: string; data?: unknown }>
-> = {
-  product_list: ProductListRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
-  thematic_options: ThematicOptionsRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
-  engagement_choice: EngagementChoiceRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
-  experience_session: ExperienceSessionRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
-  thinking: ThinkingRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
+type DataPartProps = { name?: string; data?: unknown; isLive?: boolean };
+const DATA_RENDERERS_BY_NAME: Record<string, React.ComponentType<DataPartProps>> = {
+  product_list: ProductListRenderer as React.ComponentType<DataPartProps>,
+  thematic_options: ThematicOptionsRenderer as React.ComponentType<DataPartProps>,
+  engagement_choice: EngagementChoiceRenderer as React.ComponentType<DataPartProps>,
+  experience_session: ExperienceSessionRenderer as React.ComponentType<DataPartProps>,
+  thinking: ThinkingRenderer as React.ComponentType<DataPartProps>,
 };
 
 function DataPartFallback({ name, data }: { name: string; data: unknown }) {
@@ -174,12 +181,39 @@ function DataPartFallback({ name, data }: { name: string; data: unknown }) {
   );
 }
 
-/** Render assistant message parts manually to avoid scope.dataRenderers (not set by AI SDK runtime). */
+/** Render assistant message parts manually to avoid scope.dataRenderers (not set by AI SDK runtime).
+ * Thinking parts are shown only while this message is streaming (progress visible); hidden when complete.
+ */
 export function GatewayMessageParts() {
   const content = useAuiState((s) => s.message.content);
-  if (!Array.isArray(content)) return null;
+  const isRunning = useAuiState((s) => s.thread.isRunning);
+  const isLastMessage = useAuiState((s) => s.message.isLast ?? true);
+  const showThinking = Boolean(isRunning && isLastMessage);
+
+  if (!Array.isArray(content)) {
+    if (showThinking) {
+      return (
+        <div className="flex items-center gap-2 rounded-lg bg-[var(--muted)]/30 px-3 py-2 text-sm text-[var(--foreground)]">
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--primary)]" aria-hidden />
+          Thinking...
+        </div>
+      );
+    }
+    return null;
+  }
+
+  const hasThinkingParts = content.some(
+    (part) => typeof part === "object" && part !== null && (part as { name?: string }).name === "thinking"
+  );
+
   return (
     <div className="space-y-1">
+      {showThinking && !hasThinkingParts && (
+        <div className="flex items-center gap-2 rounded-lg bg-[var(--muted)]/30 px-3 py-2 text-sm text-[var(--foreground)]">
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--primary)]" aria-hidden />
+          Understanding what you&apos;re looking for...
+        </div>
+      )}
       {content.map((part, index) => {
         if (!part || typeof part !== "object") return null;
         const p = part as { type?: string; text?: string; name?: string; data?: unknown };
@@ -191,6 +225,11 @@ export function GatewayMessageParts() {
           );
         }
         if (p.type === "data" && p.name) {
+          if (p.name === "thinking") {
+            if (!showThinking) return null;
+            const Renderer = DATA_RENDERERS_BY_NAME.thinking;
+            return <Renderer key={index} name={p.name} data={p.data ?? {}} isLive />;
+          }
           const Renderer = DATA_RENDERERS_BY_NAME[p.name] ?? DataPartFallback;
           return <Renderer key={index} name={p.name} data={p.data ?? {}} />;
         }
