@@ -163,6 +163,7 @@ export async function POST(req: Request) {
             });
           }
           if (Array.isArray(suggestedCtas) && suggestedCtas.length > 0) {
+            const orderId = (doneData.order_id as string) ?? (doneData.data as Record<string, unknown>)?.order_id as string | undefined;
             writer.write({
               type: "data-engagement_choice",
               data: {

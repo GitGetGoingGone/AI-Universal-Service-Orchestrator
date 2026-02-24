@@ -29,7 +29,7 @@ function AssistantMessage() {
 function UserMessage() {
   return (
     <MessagePrimitive.Root>
-      <MessagePrimitive.Text className="whitespace-pre-wrap text-gray-800 dark:text-gray-200" />
+      <MessagePrimitive.Parts />
     </MessagePrimitive.Root>
   );
 }

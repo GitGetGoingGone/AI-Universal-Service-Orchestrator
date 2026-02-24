@@ -175,7 +175,7 @@ export function GatewayMessageParts() {
     <MessagePrimitive.Parts
       components={{
         Text: () => (
-          <MessagePrimitive.Text className="whitespace-pre-wrap text-gray-800 dark:text-gray-200" />
+          <MessagePartPrimitive.Text className="whitespace-pre-wrap text-gray-800 dark:text-gray-200" />
         ),
         data: gatewayDataComponents,
       }}
