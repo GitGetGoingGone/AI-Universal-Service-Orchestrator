@@ -54,6 +54,7 @@ export async function POST(req: Request) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(95000), // 95s to allow Render cold start (Vercel maxDuration 60 may still apply)
     });
 
     if (!res.ok) {
@@ -197,4 +198,4 @@ export async function POST(req: Request) {
   }
 }
 
-export const maxDuration = 60;
+export const maxDuration = 90;

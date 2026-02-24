@@ -78,3 +78,13 @@ All changes are in this app; we do **not** fork or copy assistant-ui source.
 - **Next.js** 15
 - **@assistant-ui/react** + **@assistant-ui/react-ai-sdk** (Vercel AI SDK integration)
 - **ai** (Vercel AI SDK) — adapter uses `createUIMessageStream` / `createUIMessageStreamResponse` to turn Gateway SSE into the stream format assistant-ui expects
+
+## Troubleshooting: No response
+
+If you get no assistant reply (e.g. for "Find flowers for delivery"):
+
+1. **Gateway URL** — Set `NEXT_PUBLIC_GATEWAY_URL` to your orchestrator (e.g. `https://uso-orchestrator.onrender.com`). On Vercel: Project → Settings → Environment Variables.
+
+2. **Cold starts** — Render free tier spins down services. Warm them before testing: run `./scripts/health-and-warmup.sh --every=10` from repo root and leave it running; then try the chat again.
+
+3. **Network** — In DevTools → Network, check the `/api/chat` request; if it hangs or times out, the Gateway or Discovery/Intent are likely cold. Use the warmup script and retry.

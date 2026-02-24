@@ -7,6 +7,7 @@
 #   ./scripts/health-and-warmup.sh              # health + warmup only
 #   ./scripts/health-and-warmup.sh --e2e         # also run chat E2E
 #   ./scripts/health-and-warmup.sh --e2e --webhook  # also test webhook push
+#   ./scripts/health-and-warmup.sh --every=10    # run every 10 minutes until terminated (keep services active)
 #
 # Override URLs via env:
 #   DISCOVERY_URL=... INTENT_URL=... CHATGPT_APP_URL=... ./scripts/health-and-warmup.sh
@@ -58,6 +59,7 @@ echo "  Hybrid Response:     $HYBRID_RESPONSE"
 echo "  ChatGPT App (MCP):   $CHATGPT_APP"
 echo ""
 
+do_cycle() {
 # --- Warmup first (wake services from cold sleep before health checks) ---
 echo "--- Warmup (avoid cold-start timeouts) ---"
 echo "  Warming Discovery..."
@@ -172,4 +174,19 @@ if [ "$run_webhook" = true ]; then
   echo ""
 fi
 
+}
+
+if [ -n "$every_minutes" ] && [ "$every_minutes" -gt 0 ] 2>/dev/null; then
+  echo ">>> Running every ${every_minutes} minute(s) until you press Ctrl+C."
+  echo ""
+  trap 'echo ""; echo "Stopped."; exit 0' INT TERM
+  while true; do
+    do_cycle || true
+    echo "=== Done at $(date). Next run in ${every_minutes} minute(s). ==="
+    echo ""
+    sleep "$((every_minutes * 60))"
+  done
+fi
+
+do_cycle
 echo "=== Done ==="
