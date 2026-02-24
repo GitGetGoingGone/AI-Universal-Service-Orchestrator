@@ -223,7 +223,15 @@ export function ConfigEditor() {
   const [compositeDiscoveryExpanded, setCompositeDiscoveryExpanded] = useState(true);
   const [upsellSurgeExpanded, setUpsellSurgeExpanded] = useState(false);
   const [thinkingProgressExpanded, setThinkingProgressExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState<"general" | "llm" | "discovery" | "integrations">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "llm" | "discovery" | "integrations" | "embeddings">("general");
+  const [embeddingStatus, setEmbeddingStatus] = useState<{
+    embedding_configured?: boolean;
+    products?: { total: number; with_embedding: number; without_embedding: number };
+    kb_articles?: { total: number; with_embedding: number; without_embedding: number };
+    error?: string;
+  } | null>(null);
+  const [embeddingStatusLoading, setEmbeddingStatusLoading] = useState(false);
+  const [backfillLoading, setBackfillLoading] = useState<"products" | "kb_articles" | null>(null);
   const [orchestrationExpanded, setOrchestrationExpanded] = useState(true);
   const [partnerRulesExpanded, setPartnerRulesExpanded] = useState(false);
   const [adminOrchestration, setAdminOrchestration] = useState<{
@@ -330,6 +338,24 @@ export function ConfigEditor() {
       setPartners([]);
     }
   }, []);
+
+  const fetchEmbeddingStatus = useCallback(async () => {
+    setEmbeddingStatusLoading(true);
+    try {
+      const res = await fetch("/api/platform/embeddings/status");
+      const data = await res.json();
+      if (data.detail) setEmbeddingStatus({ error: data.detail });
+      else setEmbeddingStatus(data);
+    } catch {
+      setEmbeddingStatus({ error: "Failed to load embedding status" });
+    } finally {
+      setEmbeddingStatusLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "embeddings") fetchEmbeddingStatus();
+  }, [activeTab, fetchEmbeddingStatus]);
 
   useEffect(() => {
     fetch("/api/platform/config")
@@ -535,6 +561,7 @@ export function ConfigEditor() {
     { id: "llm" as const, label: "LLM & AI", description: "Providers, image generation, model interactions" },
     { id: "discovery" as const, label: "Discovery & Ranking", description: "Partner ranking, sponsorship, composite discovery" },
     { id: "integrations" as const, label: "Integrations", description: "External APIs for events, weather, web search" },
+    { id: "embeddings" as const, label: "Embeddings", description: "Semantic search: product and KB article embedding status and backfill" },
   ];
 
   return (
@@ -1319,6 +1346,83 @@ export function ConfigEditor() {
           </div>
         )}
       </div>
+        </div>
+      )}
+
+      {activeTab === "embeddings" && (
+        <div className="space-y-6">
+          <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+            Semantic search uses embeddings (vectors) for products and partner KB articles. Configure the embedding API in the Discovery service (EMBEDDING_* / OPENAI_API_KEY), then run backfill so records have vectors. This tab shows status and lets you trigger backfill.
+          </p>
+          {embeddingStatusLoading ? (
+            <p className="text-sm text-[rgb(var(--color-text-secondary))]">Loading embedding status…</p>
+          ) : embeddingStatus?.error ? (
+            <p className="text-sm text-amber-600">{embeddingStatus.error}</p>
+          ) : embeddingStatus ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">Embedding API:</span>
+                <span className={embeddingStatus.embedding_configured ? "text-green-600" : "text-amber-600"}>
+                  {embeddingStatus.embedding_configured ? "Configured" : "Not configured (set EMBEDDING_* or OPENAI_API_KEY on Discovery service)"}
+                </span>
+              </div>
+              <div className="border border-[rgb(var(--color-border))] rounded-md p-4 space-y-2">
+                <div className="font-medium">Products</div>
+                <div className="text-sm text-[rgb(var(--color-text-secondary))]">
+                  Total: {embeddingStatus.products?.total ?? 0} · With embedding: {embeddingStatus.products?.with_embedding ?? 0} · Missing: {embeddingStatus.products?.without_embedding ?? 0}
+                </div>
+                <button
+                  type="button"
+                  disabled={!embeddingStatus.embedding_configured || (embeddingStatus.products?.without_embedding ?? 0) === 0 || backfillLoading !== null}
+                  className="rounded bg-[rgb(var(--color-primary))] px-3 py-1.5 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={async () => {
+                    setBackfillLoading("products");
+                    try {
+                      const res = await fetch("/api/platform/embeddings/backfill?type=products&limit=500", { method: "POST" });
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok) alert(data.detail ?? "Backfill failed");
+                      else fetchEmbeddingStatus();
+                    } finally {
+                      setBackfillLoading(null);
+                    }
+                  }}
+                >
+                  {backfillLoading === "products" ? "Running…" : "Backfill products (up to 500)"}
+                </button>
+              </div>
+              <div className="border border-[rgb(var(--color-border))] rounded-md p-4 space-y-2">
+                <div className="font-medium">KB articles</div>
+                <div className="text-sm text-[rgb(var(--color-text-secondary))]">
+                  Total: {embeddingStatus.kb_articles?.total ?? 0} · With embedding: {embeddingStatus.kb_articles?.with_embedding ?? 0} · Missing: {embeddingStatus.kb_articles?.without_embedding ?? 0}
+                </div>
+                <button
+                  type="button"
+                  disabled={!embeddingStatus.embedding_configured || (embeddingStatus.kb_articles?.without_embedding ?? 0) === 0 || backfillLoading !== null}
+                  className="rounded bg-[rgb(var(--color-primary))] px-3 py-1.5 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={async () => {
+                    setBackfillLoading("kb_articles");
+                    try {
+                      const res = await fetch("/api/platform/embeddings/backfill?type=kb_articles&limit=500", { method: "POST" });
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok) alert(data.detail ?? "Backfill failed");
+                      else fetchEmbeddingStatus();
+                    } finally {
+                      setBackfillLoading(null);
+                    }
+                  }}
+                >
+                  {backfillLoading === "kb_articles" ? "Running…" : "Backfill KB articles (up to 500)"}
+                </button>
+              </div>
+              <button
+                type="button"
+                className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                onClick={() => fetchEmbeddingStatus()}
+              >
+                Refresh status
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 

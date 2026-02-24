@@ -5,9 +5,15 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from db import upsert_products_from_legacy
+from config import settings
+from db import get_supabase, upsert_products_from_legacy  # type: ignore[reportAttributeAccessIssue]
 from manifest_cache import cache_partner_manifest
-from semantic_search import backfill_product_embedding, backfill_all_product_embeddings
+from semantic_search import (
+    backfill_product_embedding,
+    backfill_all_product_embeddings,
+    backfill_kb_article_embedding,
+    backfill_all_kb_article_embeddings,
+)
 
 from adapters.legacy_adapter import (
     parse_csv_to_products,
@@ -46,7 +52,8 @@ async def ingest_manifest(body: ManifestIngestBody):
     if body.validate_acp and body.manifest_type.lower() == "acp":
         from protocols.acp_compliance import filter_acp_compliant_products
 
-        compliant, non_compliant = filter_acp_compliant_products(products, strict=True)
+        products_list: List[Dict[str, Any]] = products if isinstance(products, list) else []
+        compliant, non_compliant = filter_acp_compliant_products(products_list, strict=True)
         # Re-cache only compliant products (override manifest_data with compliant list)
         if compliant != products:
             from db import get_supabase
@@ -71,8 +78,14 @@ async def ingest_manifest(body: ManifestIngestBody):
                     .eq("manifest_url", body.manifest_url)
                     .execute()
                 )
-                if existing.data:
-                    client.table("partner_manifests").update(payload).eq("id", existing.data[0]["id"]).execute()
+                existing_data = existing.data
+                first_id = (
+                    existing_data[0]["id"]
+                    if isinstance(existing_data, list) and len(existing_data) > 0 and isinstance(existing_data[0], dict)
+                    else None
+                )
+                if first_id is not None:
+                    client.table("partner_manifests").update(payload).eq("id", first_id).execute()
                 else:
                     client.table("partner_manifests").insert(payload).execute()
             return {
@@ -85,15 +98,60 @@ async def ingest_manifest(body: ManifestIngestBody):
     return {"products_count": len(products), "manifest_type": body.manifest_type, "acp_validated": False}
 
 
+@router.get("/embeddings/status")
+async def get_embeddings_status() -> Dict[str, Any]:
+    """
+    Return embedding status for products and KB articles: counts with/without embedding,
+    and whether the embedding API is configured. Used by admin UI to show status and trigger backfill.
+    """
+    embedding_configured = getattr(settings, "embedding_configured", False)
+    client = get_supabase()
+    products_total = products_with = products_without = 0
+    kb_total = kb_with = kb_without = 0
+    if client:
+        try:
+            r = client.table("products").select("id").is_("deleted_at", "null").limit(10000).execute()
+            r_yes = client.table("products").select("id").is_("deleted_at", "null").not_.is_("embedding", "null").limit(10000).execute()
+            products_total = len(r.data or [])
+            products_with = len(r_yes.data or [])
+            products_without = max(0, products_total - products_with)
+        except Exception:
+            pass
+        try:
+            r = client.table("partner_kb_articles").select("id").eq("is_active", True).limit(10000).execute()
+            r_yes = client.table("partner_kb_articles").select("id").eq("is_active", True).not_.is_("embedding", "null").limit(10000).execute()
+            kb_total = len(r.data or [])
+            kb_with = len(r_yes.data or [])
+            kb_without = max(0, kb_total - kb_with)
+        except Exception:
+            pass
+    return {
+        "embedding_configured": embedding_configured,
+        "products": {"total": products_total, "with_embedding": products_with, "without_embedding": products_without},
+        "kb_articles": {"total": kb_total, "with_embedding": kb_with, "without_embedding": kb_without},
+    }
+
+
 @router.post("/embeddings/backfill")
 async def backfill_embeddings(
-    product_id: Optional[str] = Query(None),
-    limit: int = Query(500, ge=1, le=2000, description="Max products to backfill when product_id omitted"),
+    product_id: Optional[str] = Query(None, description="Single product ID (products only)"),
+    article_id: Optional[str] = Query(None, description="Single KB article ID (kb_articles only)"),
+    limit: int = Query(500, ge=1, le=2000, description="Max records to backfill when no single id given"),
+    type: str = Query("products", description="Backfill target: 'products' or 'kb_articles'"),
 ):
     """
-    Backfill embedding for a product (or all products missing embeddings when product_id omitted).
+    Backfill embeddings for products or partner KB articles.
+    - type=products (default): product_id for one product, else all products missing embeddings (up to limit).
+    - type=kb_articles: article_id for one article, else all KB articles missing embeddings (up to limit).
     Requires embedding provider (OpenAI or Azure) to be configured (EMBEDDING_* / OPENAI_API_KEY).
     """
+    if type == "kb_articles":
+        if article_id:
+            ok = await backfill_kb_article_embedding(article_id)
+            return {"article_id": article_id, "updated": ok}
+        result = await backfill_all_kb_article_embeddings(limit=limit)
+        return result
+    # default: products
     if product_id:
         ok = await backfill_product_embedding(product_id)
         return {"product_id": product_id, "updated": ok}

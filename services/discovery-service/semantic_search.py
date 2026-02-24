@@ -86,6 +86,146 @@ def _get_product_embedding_input(product: Dict[str, Any]) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
+def _get_kb_article_embedding_input(article: Dict[str, Any]) -> str:
+    """Build text for KB article embedding from title and content."""
+    title = (article.get("title") or "").strip()
+    content = (article.get("content") or "").strip()
+    return f"{title} {content}".strip()
+
+
+async def backfill_kb_article_embedding(article_id: str) -> bool:
+    """
+    Generate and store embedding for a partner KB article if missing.
+    Returns True if embedding was stored.
+    """
+    client = get_supabase()
+    if not client:
+        return False
+
+    try:
+        result = (
+            client.table("partner_kb_articles")
+            .select("id, title, content")
+            .eq("id", article_id)
+            .eq("is_active", True)
+            .single()
+            .execute()
+        )
+        row = result.data if isinstance(result.data, dict) else (result.data[0] if result.data and isinstance(result.data, list) else None)
+    except Exception:
+        return False
+    if not row or not isinstance(row, dict):
+        return False
+
+    inp = _get_kb_article_embedding_input(row)
+    if not inp:
+        return False
+
+    embedding = await get_query_embedding(inp)
+    if not embedding:
+        return False
+
+    try:
+        client.table("partner_kb_articles").update({"embedding": embedding}).eq("id", article_id).execute()
+        return True
+    except Exception:
+        return False
+
+
+async def backfill_all_kb_article_embeddings(limit: int = 500) -> Dict[str, Any]:
+    """
+    Backfill embeddings for partner KB articles that have no embedding yet.
+    Returns dict with updated_count, failed_count, total_processed.
+    """
+    client = get_supabase()
+    if not client:
+        return {"updated_count": 0, "failed_count": 0, "total_processed": 0, "error": "no_db"}
+
+    try:
+        result = (
+            client.table("partner_kb_articles")
+            .select("id")
+            .eq("is_active", True)
+            .is_("embedding", "null")
+            .limit(limit)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        logger.warning("Failed to fetch KB articles for backfill: %s", e)
+        return {"updated_count": 0, "failed_count": 0, "total_processed": 0, "error": str(e)}
+
+    updated = 0
+    failed = 0
+    for row in rows:
+        aid = row.get("id") if isinstance(row, dict) else None
+        if not aid:
+            continue
+        ok = await backfill_kb_article_embedding(str(aid))
+        if ok:
+            updated += 1
+        else:
+            failed += 1
+
+    return {
+        "updated_count": updated,
+        "failed_count": failed,
+        "total_processed": len(rows),
+    }
+
+
+async def semantic_search_kb_articles(
+    query: str,
+    limit: int = 20,
+    partner_id: Optional[str] = None,
+    exclude_partner_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Search partner KB articles by semantic similarity (pgvector).
+    Returns list of dicts with id, partner_id, title, content, sort_order, created_at.
+    Falls back to empty list if embeddings not configured or query embedding fails.
+    """
+    client = get_supabase()
+    if not client:
+        return []
+
+    embedding = await get_query_embedding(query)
+    if not embedding:
+        return []
+
+    try:
+        embedding_str = "[" + ",".join(str(float(x)) for x in embedding) + "]"
+        kwargs: Dict[str, Any] = {
+            "query_embedding": embedding_str,
+            "match_count": limit,
+            "match_threshold": 0.0,
+        }
+        if partner_id:
+            kwargs["filter_partner_id"] = partner_id
+        if exclude_partner_id:
+            kwargs["exclude_partner_id"] = exclude_partner_id
+
+        result = client.rpc("match_kb_articles", kwargs).execute()
+        rows = result.data or []
+
+        out = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            out.append({
+                "id": r.get("id"),
+                "partner_id": r.get("partner_id"),
+                "title": r.get("title"),
+                "content": r.get("content"),
+                "sort_order": r.get("sort_order"),
+                "created_at": r.get("created_at"),
+            })
+        return out[:limit]
+    except Exception as e:
+        logger.warning("KB articles semantic search failed: %s", e)
+        return []
+
+
 async def backfill_product_embedding(product_id: str) -> bool:
     """
     Generate and store embedding for a product if missing.

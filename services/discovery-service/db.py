@@ -9,6 +9,39 @@ from supabase import create_client, Client
 from config import settings
 from packages.shared.discovery import is_browse_query
 
+__all__ = [
+    "get_supabase",
+    "check_connection",
+    "search_products",
+    "get_distinct_experience_tags",
+    "get_internal_agent_urls",
+    "resolve_masked_id",
+    "mask_product_id",
+    "mask_products",
+    "get_product_by_id",
+    "get_partner_by_id",
+    "get_partners_by_ids",
+    "get_platform_config_ranking",
+    "get_admin_orchestration_settings",
+    "get_composite_discovery_config",
+    "get_partner_ratings_map",
+    "get_active_sponsorships",
+    "update_partner_last_acp_push",
+    "update_products_last_acp_push",
+    "get_products_for_acp_export",
+    "add_product_to_bundle",
+    "add_products_to_bundle_bulk",
+    "get_bundle_by_id",
+    "create_order_from_bundle",
+    "create_bundle_from_ucp_items",
+    "get_order_by_id",
+    "update_order_status",
+    "remove_from_bundle",
+    "replace_product_in_bundle",
+    "get_agent_action_models",
+    "upsert_products_from_legacy",
+    "get_platform_manifest_config",
+]
 
 _client: Optional[Client] = None
 

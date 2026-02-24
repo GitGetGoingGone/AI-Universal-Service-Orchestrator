@@ -95,6 +95,24 @@ GET /api/v1/discover?intent=flowers
    ```
    Replace `8001` with your Discovery service port. After backfill, queries like “Find flowers for delivery” can return results via vector similarity as well as text/capability fallback.
 
+### Semantic search over partner KB articles
+
+Partner knowledge-base articles (`partner_kb_articles`) can be searched by semantic similarity so queries like "custom bundles", "personalized letter", or "what do you offer for baby" match article title+content by meaning.
+
+1. **Schema**: Migration **`20250128160000_partner_kb_articles_embedding.sql`** adds `embedding vector(1536)` to `partner_kb_articles` and the RPC **`match_kb_articles`**.
+2. **Backfill KB embeddings** (same embedding API as products):
+   ```bash
+   curl -X POST "http://localhost:8001/api/v1/admin/embeddings/backfill?type=kb_articles&limit=500"
+   curl -X POST "http://localhost:8001/api/v1/admin/embeddings/backfill?type=kb_articles&article_id=<uuid>"
+   ```
+3. **Search**: `GET /api/v1/discover/kb?intent=<query>&limit=20` returns matched KB articles. Use `GET /api/v1/discover?intent=<query>&include_kb_articles=true` to get both products and KB articles in one response.
+
+### Why embedding is “outside” and when to run it
+
+- **Why outside?** Embedding is a separate step (backfill) rather than automatic on every insert so that: (1) the embedding API (OpenAI/Azure) is optional and not required for ingest; (2) bulk ingest (manifest, legacy CSV) stays fast and does not block on external API calls; (3) you can run backfill once embeddings are configured or when you want to refresh vectors.
+- **Should it be periodic?** Yes, if you add or update products or KB articles regularly. Options: (1) **On-demand** — use the admin Embeddings tab or `POST .../embeddings/backfill` after ingest; (2) **Scheduled** — run the same backfill (e.g. `limit=500`) on a cron or workflow (e.g. nightly); (3) **Event-driven** (future) — call backfill for a single product/article on create/update so new content gets an embedding immediately.
+- **Admin tab value:** The **Embeddings** tab in Platform Config (Algorithms & Config) lets you see **status** (how many products/KB articles have embeddings vs missing), **test** that the Discovery service and embedding API are reachable, and **run backfill** (products and/or KB articles) without using curl or scripts. Use it to verify semantic search readiness and to backfill after bulk ingest.
+
 ---
 
 ## 3. Scout Engine in Detail

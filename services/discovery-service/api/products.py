@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from pydantic import BaseModel
@@ -11,19 +11,20 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from config import settings
 from db import (
-    get_distinct_experience_tags,
-    get_product_by_id,
-    get_products_for_acp_export,
-    add_product_to_bundle,
-    add_products_to_bundle_bulk,
-    get_bundle_by_id,
-    remove_from_bundle,
-    replace_product_in_bundle,
-    create_order_from_bundle,
-    mask_products,
-    resolve_masked_id,
+    get_distinct_experience_tags,  # type: ignore[reportAttributeAccessIssue]
+    get_product_by_id,  # type: ignore[reportAttributeAccessIssue]
+    get_products_for_acp_export,  # type: ignore[reportAttributeAccessIssue]
+    add_product_to_bundle,  # type: ignore[reportAttributeAccessIssue]
+    add_products_to_bundle_bulk,  # type: ignore[reportAttributeAccessIssue]
+    get_bundle_by_id,  # type: ignore[reportAttributeAccessIssue]
+    remove_from_bundle,  # type: ignore[reportAttributeAccessIssue]
+    replace_product_in_bundle,  # type: ignore[reportAttributeAccessIssue]
+    create_order_from_bundle,  # type: ignore[reportAttributeAccessIssue]
+    mask_products,  # type: ignore[reportAttributeAccessIssue]
+    resolve_masked_id,  # type: ignore[reportAttributeAccessIssue]
 )
 from scout_engine import search
+from semantic_search import semantic_search_kb_articles
 from protocols.acp_compliance import validate_product_acp
 from protocols.ucp_compliance import validate_product_ucp
 from packages.shared.adaptive_cards import generate_product_card, generate_bundle_card, generate_checkout_card
@@ -93,6 +94,39 @@ class ReplaceInBundleBody(BaseModel):
     new_product_id: str
 
 
+@router.get("/discover/kb")
+async def discover_kb_articles(
+    request: Request,
+    intent: str = Query(..., description="Search query for KB articles (e.g. 'custom bundles', 'personalized letter')"),
+    partner_id: Optional[str] = Query(None, description="Filter by partner"),
+    exclude_partner_id: Optional[str] = Query(None, description="Exclude partner"),
+    limit: int = Query(20, ge=1, le=50),
+):
+    """
+    Discover partner KB articles by semantic similarity.
+    Returns articles whose title+content embedding matches the query (e.g. offerings, policies).
+    Run embedding backfill with type=kb_articles first so articles have embeddings.
+    """
+    articles = await semantic_search_kb_articles(
+        query=intent,
+        limit=limit,
+        partner_id=partner_id,
+        exclude_partner_id=exclude_partner_id,
+    )
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    return {
+        "data": {
+            "kb_articles": articles,
+            "count": len(articles),
+        },
+        "metadata": {
+            "api_version": "v1",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "request_id": request_id,
+        },
+    }
+
+
 @router.get("/discover")
 async def discover_products(
     request: Request,
@@ -104,10 +138,12 @@ async def discover_products(
     budget_max: Optional[int] = Query(None, ge=0, description="Max price in cents (e.g. 5000 for $50)"),
     experience_tag: Optional[str] = Query(None, description="Filter/boost by experience category (e.g. baby, celebration)"),
     experience_tags: Optional[List[str]] = Query(None, description="Filter by multiple experience categories (AND semantics; e.g. luxury, travel-friendly)"),
+    include_kb_articles: bool = Query(False, description="When true, also return semantically matched partner KB articles"),
 ):
     """
     Discover products by intent/query.
     Chat-First: Returns JSON-LD and Adaptive Card for AI agents.
+    Optionally include partner KB articles (semantic match) via include_kb_articles=true.
     """
     products = await search(
         query=intent, limit=limit * 2 if budget_max else limit,
@@ -154,7 +190,7 @@ async def discover_products(
 
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
 
-    return {
+    out: Dict[str, Any] = {
         "data": {
             "products": products_public,
             "count": len(products_public),
@@ -172,6 +208,15 @@ async def discover_products(
             "request_id": request_id,
         },
     }
+    if include_kb_articles:
+        kb_articles = await semantic_search_kb_articles(
+            query=intent,
+            limit=10,
+            partner_id=partner_id,
+            exclude_partner_id=exclude_partner_id,
+        )
+        out["data"]["kb_articles"] = kb_articles
+    return out
 
 
 def _product_to_acp_row_for_validation(product: dict) -> dict:
@@ -374,11 +419,12 @@ async def proceed_to_checkout(request: Request, body: CheckoutBody):
 
     # Order → Task Queue integration: create vendor tasks for the new order
     order_id = order.get("id", "")
-    if order_id and settings.task_queue_service_url:
+    task_queue_url = getattr(settings, "task_queue_service_url", "") or ""
+    if order_id and task_queue_url:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(
-                    f"{settings.task_queue_service_url.rstrip('/')}/api/v1/orders/{order_id}/tasks"
+                    f"{task_queue_url.rstrip('/')}/api/v1/orders/{order_id}/tasks"
                 )
         except Exception:
             pass

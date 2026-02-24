@@ -22,7 +22,7 @@ from packages.shared.monitoring.health import DependencyCheck
 
 # Import after path setup - discovery-service modules
 from config import settings
-from db import check_connection
+from db import check_connection  # type: ignore[reportAttributeAccessIssue]
 from api.products import router as products_router
 from api.partners import router as partners_router
 from api.admin import router as admin_router
@@ -53,7 +53,7 @@ app.add_middleware(
 )
 
 # Exception handlers
-app.add_exception_handler(USOException, uso_exception_handler)
+app.add_exception_handler(USOException, uso_exception_handler)  # type: ignore[reportArgumentType]
 app.add_exception_handler(Exception, generic_exception_handler)
 
 # API routes
@@ -74,7 +74,7 @@ health_checker = HealthChecker("discovery-service", "0.1.0")
 
 async def check_database() -> DependencyCheck:
     """Check database connectivity."""
-    if not settings.supabase_configured:
+    if not getattr(settings, "supabase_configured", bool(settings.supabase_url and settings.supabase_key)):
         return DependencyCheck(
             name="database",
             status=DependencyStatus.UNHEALTHY,
@@ -120,7 +120,9 @@ async def root():
             "discover": "GET /api/v1/discover?intent=<query>",
             "manifest_ingest": "POST /api/v1/admin/manifest/ingest",
             "legacy_ingest": "POST /api/v1/admin/legacy/ingest",
-            "embedding_backfill": "POST /api/v1/admin/embeddings/backfill",
+            "embedding_status": "GET /api/v1/admin/embeddings/status",
+            "embedding_backfill": "POST /api/v1/admin/embeddings/backfill?type=products|kb_articles",
+            "discover_kb": "GET /api/v1/discover/kb?intent=<query>",
             "ucp_catalog": "GET /api/v1/ucp/items",
             "ucp_rest_schema": "GET /api/v1/ucp/rest.openapi.json",
             "well_known_ucp": "GET /.well-known/ucp",
@@ -158,7 +160,7 @@ async def well_known_ucp():
     Platform discovers us via this URL and calls our catalog API.
     Returns explicit application/json for crawlers.
     """
-    base = (settings.discovery_public_url or "").rstrip("/")
+    base = (getattr(settings, "discovery_public_url", "") or "").rstrip("/")
     if not base:
         base = "https://uso-discovery.onrender.com"
     body = {
