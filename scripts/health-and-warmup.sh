@@ -35,12 +35,18 @@ TIMEOUT=90
 
 run_e2e=false
 run_webhook=false
+every_minutes=0
 for arg in "$@"; do
   case "$arg" in
     --e2e) run_e2e=true ;;
     --webhook) run_webhook=true ;;
+    --loop) every_minutes="${HEALTH_LOOP_MINUTES:-10}" ;;
+    --every=*) every_minutes="${arg#--every=}" ;;
   esac
 done
+if [ -z "$every_minutes" ] && [ -n "${HEALTH_LOOP_MINUTES:-}" ] && [ "${HEALTH_LOOP_MINUTES:-0}" -gt 0 ] 2>/dev/null; then
+  every_minutes="$HEALTH_LOOP_MINUTES"
+fi
 
 echo "=== USO Health Check & Warmup ==="
 echo "Core:"
@@ -153,7 +159,7 @@ if [ "$run_e2e" = true ]; then
   else
     echo "  ✗ Chat failed"
     echo "$resp"
-    exit 1
+    return 1
   fi
   echo ""
 fi
@@ -169,7 +175,7 @@ if [ "$run_webhook" = true ]; then
   else
     echo "  ✗ Webhook failed"
     echo "$resp"
-    exit 1
+    return 1
   fi
   echo ""
 fi

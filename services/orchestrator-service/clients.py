@@ -9,6 +9,7 @@ import httpx
 from config import settings
 from packages.shared.discovery import fallback_search_query
 from packages.shared.gateway_signature import sign_request
+from registry import AgentEntry, get_agents
 
 logger = logging.getLogger(__name__)
 

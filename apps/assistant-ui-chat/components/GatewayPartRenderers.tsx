@@ -1,6 +1,7 @@
 "use client";
 
-import { MessagePrimitive } from "@assistant-ui/react";
+import React from "react";
+import { useAuiState } from "@assistant-ui/react";
 import { useGatewayAction } from "@/contexts/GatewayActionContext";
 
 type Product = {
@@ -154,28 +155,47 @@ function ThinkingRenderer({ data }: { data: { text?: string } }) {
   );
 }
 
-export const gatewayDataComponents = {
-  by_name: {
-    product_list: ProductListRenderer,
-    thematic_options: ThematicOptionsRenderer,
-    engagement_choice: EngagementChoiceRenderer,
-    experience_session: ExperienceSessionRenderer,
-    thinking: ThinkingRenderer,
-  },
-  Fallback: ({ name, data }: { name: string; data: unknown }) => (
+const DATA_RENDERERS_BY_NAME: Record<
+  string,
+  React.ComponentType<{ name?: string; data?: unknown }>
+> = {
+  product_list: ProductListRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
+  thematic_options: ThematicOptionsRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
+  engagement_choice: EngagementChoiceRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
+  experience_session: ExperienceSessionRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
+  thinking: ThinkingRenderer as React.ComponentType<{ name?: string; data?: unknown }>,
+};
+
+function DataPartFallback({ name, data }: { name: string; data: unknown }) {
+  return (
     <div className="my-2 text-xs text-gray-500">
       [{name}] <pre className="inline">{JSON.stringify(data)}</pre>
     </div>
-  ),
-};
+  );
+}
 
-/** Single Parts component: Gateway data parts; text uses default renderer. */
+/** Render assistant message parts manually to avoid scope.dataRenderers (not set by AI SDK runtime). */
 export function GatewayMessageParts() {
+  const content = useAuiState((s) => s.message.content);
+  if (!Array.isArray(content)) return null;
   return (
-    <MessagePrimitive.Parts
-      components={{
-        data: gatewayDataComponents,
-      }}
-    />
+    <div className="space-y-1">
+      {content.map((part, index) => {
+        if (!part || typeof part !== "object") return null;
+        const p = part as { type?: string; text?: string; name?: string; data?: unknown };
+        if (p.type === "text" && typeof p.text === "string") {
+          return (
+            <div key={index} className="whitespace-pre-wrap text-[var(--foreground)]">
+              {p.text}
+            </div>
+          );
+        }
+        if (p.type === "data" && p.name) {
+          const Renderer = DATA_RENDERERS_BY_NAME[p.name] ?? DataPartFallback;
+          return <Renderer key={index} name={p.name} data={p.data ?? {}} />;
+        }
+        return null;
+      })}
+    </div>
   );
 }

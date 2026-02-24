@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
   AssistantRuntimeProvider,
   ThreadPrimitive,
@@ -39,7 +39,14 @@ function UserMessage() {
 }
 
 export default function ChatPage() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    setSidebarOpen(mq.matches);
+    const handler = () => setSidebarOpen(mq.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
   const runtime = useChatRuntime({
     transport: new AssistantChatTransport({
       api: "/api/chat",
@@ -116,17 +123,17 @@ export default function ChatPage() {
     <AssistantRuntimeProvider runtime={runtime}>
       <GatewayActionProvider onAction={handleAction}>
         <div className="flex h-screen bg-[var(--background)]">
-          {/* Sidebar - assistant-ui.com style */}
+          {/* Sidebar - always visible; collapsed = narrow strip with Atreyai + toggle */}
           <aside
-            className={`flex shrink-0 flex-col border-r border-[var(--border)] bg-[var(--sidebar)] text-[var(--sidebar-foreground)] transition-[width] ${
-              sidebarOpen ? "w-56" : "w-0 overflow-hidden"
+            className={`flex shrink-0 flex-col border-r border-[var(--border)] bg-[var(--sidebar)] text-[var(--sidebar-foreground)] transition-[width] duration-200 ease-out ${
+              sidebarOpen ? "w-56" : "w-14"
             }`}
           >
-            <div className="flex h-14 items-center gap-2 border-b border-[var(--border)] px-3">
+            <div className="flex h-14 min-w-0 flex-shrink-0 items-center gap-2 border-b border-[var(--border)] px-2">
               <button
                 type="button"
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="rounded p-2 hover:bg-white/10"
+                className="flex shrink-0 items-center justify-center rounded p-2 hover:bg-white/10"
                 aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
               >
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -137,9 +144,14 @@ export default function ChatPage() {
                   )}
                 </svg>
               </button>
-              <span className="truncate text-sm font-medium">assistant-ui</span>
+              <span className={`truncate text-sm font-medium ${sidebarOpen ? "" : "hidden"}`}>
+                Atreyai
+              </span>
+              <span className={`text-sm font-semibold text-[var(--sidebar-foreground)] ${sidebarOpen ? "hidden" : ""}`} title="Atreyai">
+                A
+              </span>
             </div>
-            <div className="flex-1 overflow-y-auto p-2">
+            <div className={`flex-1 overflow-y-auto p-2 ${sidebarOpen ? "" : "hidden"}`}>
               <button
                 type="button"
                 onClick={() => window.location.reload()}
