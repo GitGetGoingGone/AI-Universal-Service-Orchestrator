@@ -542,6 +542,22 @@ async def run_agentic_loop(
     else:
         state["fulfillment_context"] = {}
 
+    # Required fulfillment fields: start from admin default (resolved fully before response with bundle/products)
+    _req_fields = None
+    _req_labels: Dict[str, str] = {}
+    if admin_settings:
+        raw = admin_settings.get("default_fulfillment_fields")
+        if isinstance(raw, list) and raw:
+            _req_fields = [str(f).strip() for f in raw if isinstance(f, str) and str(f).strip()]
+        lbl = admin_settings.get("default_fulfillment_field_labels")
+        if isinstance(lbl, dict):
+            _req_labels = {k: str(v).strip() for k, v in lbl.items() if isinstance(v, str) and str(v).strip()}
+    if not _req_fields:
+        _req_fields = list(DEFAULT_FULFILLMENT_FIELDS)
+        _req_labels = dict(DEFAULT_FULFILLMENT_FIELD_LABELS)
+    state["required_fulfillment_fields"] = _req_fields
+    state["fulfillment_field_labels"] = _req_labels
+
     intent_data = None
     products_data = None
     adaptive_card = None
@@ -597,12 +613,18 @@ async def run_agentic_loop(
             except Exception as e:
                 logger.debug("Rules layer skipped: %s", e)
 
-            # Merge fulfillment hints from this turn (delivery_address, pickup_address, pickup_time) into state for checkout gate
-            hints = _extract_fulfillment_hints(intent_data, user_message)
+            # Merge fulfillment hints from this turn (delivery_address, pickup_address, pickup_time, or custom from KB) into state for checkout gate
+            hints = _extract_fulfillment_hints(
+                intent_data, user_message, required_fields=state.get("required_fulfillment_fields")
+            )
             if hints:
                 for k, v in hints.items():
                     if v and isinstance(v, str) and v.strip():
                         state.setdefault("fulfillment_context", {})[k] = v.strip()
+
+            # Pass upsell/promo context into state so planner can mention promotions or suggest add-ons when probing
+            if engagement_data.get("upsell_surge"):
+                state["upsell_surge"] = engagement_data["upsell_surge"]
 
         # Next step: either from intent rules (hardcoded) or always from planner (model decides).
         from config import settings as orchestrator_settings
@@ -1136,15 +1158,27 @@ async def run_agentic_loop(
 
     await _emit_thinking(on_thinking, "before_response", intent_data or {}, thinking_messages or {})
 
+    # Resolve required fulfillment fields from admin, bundle (Discovery), and products/KB; update state for this response
+    try:
+        req_fields, req_labels = await _resolve_required_fulfillment_fields(
+            admin_settings, bundle_id, products_data
+        )
+        state["required_fulfillment_fields"] = req_fields
+        state["fulfillment_field_labels"] = req_labels
+    except Exception as e:
+        logger.debug("Resolve required fulfillment fields failed: %s", e)
+
     # Pass interaction stage to engagement so response layer can tune tone (opening vs narrowing)
     engagement_data["interaction_stage"] = state.get("interaction_stage", "narrowing")
 
-    # Pass fulfillment context and missing required fields so frontend can block checkout until provided
-    REQUIRED_FULFILLMENT_FIELDS = ("delivery_address", "pickup_address", "pickup_time")
+    # Pass fulfillment context and missing required fields (configurable from admin/bundle/KB) so frontend can block checkout until provided
+    required_fields_list = state.get("required_fulfillment_fields") or list(DEFAULT_FULFILLMENT_FIELDS)
     fc = state.get("fulfillment_context") or {}
     engagement_data["fulfillment_context"] = fc
+    engagement_data["required_fulfillment_fields"] = required_fields_list
+    engagement_data["fulfillment_field_labels"] = state.get("fulfillment_field_labels") or dict(DEFAULT_FULFILLMENT_FIELD_LABELS)
     engagement_data["missing_fulfillment_fields"] = [
-        f for f in REQUIRED_FULFILLMENT_FIELDS if not (fc.get(f) or "").strip()
+        f for f in required_fields_list if not (fc.get(f) or "").strip()
     ]
 
     # Build final response
@@ -1412,29 +1446,123 @@ def _extract_budget(intent_data: Optional[Dict[str, Any]]) -> Optional[int]:
     return None
 
 
+# Default fulfillment fields when admin has none configured (e.g. standard shipping)
+DEFAULT_FULFILLMENT_FIELDS = ("delivery_address", "pickup_address", "pickup_time")
+DEFAULT_FULFILLMENT_FIELD_LABELS = {
+    "delivery_address": "delivery address",
+    "pickup_address": "pickup address",
+    "pickup_time": "pickup time",
+}
+
+
+async def _resolve_required_fulfillment_fields(
+    admin_settings: Optional[Dict[str, Any]],
+    bundle_id: Optional[str],
+    products_data: Optional[Dict[str, Any]],
+) -> Tuple[List[str], Dict[str, str]]:
+    """Resolve required fulfillment field keys and labels from admin default, bundle (Discovery), and products/KB.
+    Returns (ordered list of field keys, field_key -> label dict)."""
+    fields_set: set = set()
+    labels: Dict[str, str] = {}
+
+    # 1. Admin default
+    if admin_settings:
+        raw = admin_settings.get("default_fulfillment_fields")
+        if isinstance(raw, list):
+            for f in raw:
+                if isinstance(f, str) and f.strip():
+                    fields_set.add(f.strip())
+        lbl = admin_settings.get("default_fulfillment_field_labels")
+        if isinstance(lbl, dict):
+            for k, v in lbl.items():
+                if isinstance(v, str) and v.strip():
+                    labels[k] = v.strip()
+    if not fields_set:
+        fields_set = set(DEFAULT_FULFILLMENT_FIELDS)
+        labels = dict(DEFAULT_FULFILLMENT_FIELD_LABELS)
+
+    # 2. Bundle from Discovery (when present)
+    if bundle_id:
+        try:
+            bundle = await get_bundle_details(bundle_id)
+            data = bundle.get("data", bundle) if isinstance(bundle, dict) else bundle
+            if isinstance(data, dict):
+                bf = data.get("required_fulfillment_fields")
+                if isinstance(bf, list):
+                    for f in bf:
+                        if isinstance(f, str) and f.strip():
+                            fields_set.add(f.strip())
+                bl = data.get("fulfillment_field_labels")
+                if isinstance(bl, dict):
+                    for k, v in bl.items():
+                        if isinstance(v, str) and v.strip():
+                            labels[k] = v.strip()
+        except Exception as e:
+            logger.debug("get_bundle_details for fulfillment fields failed: %s", e)
+
+    # 3. Products / suggested_bundle_options / kb_articles from products_data
+    if products_data and isinstance(products_data, dict):
+        for key in ("products", "suggested_bundle_options"):
+            items = products_data.get(key)
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict):
+                        rf = item.get("required_fulfillment_fields")
+                        if isinstance(rf, list):
+                            for f in rf:
+                                if isinstance(f, str) and f.strip():
+                                    fields_set.add(f.strip())
+                        fl = item.get("fulfillment_field_labels")
+                        if isinstance(fl, dict):
+                            for k, v in fl.items():
+                                if isinstance(v, str) and v.strip():
+                                    labels[k] = v.strip()
+        kb = products_data.get("kb_articles")
+        if isinstance(kb, list):
+            for art in kb:
+                if isinstance(art, dict):
+                    rf = art.get("required_fulfillment_fields")
+                    if isinstance(rf, list):
+                        for f in rf:
+                            if isinstance(f, str) and f.strip():
+                                fields_set.add(f.strip())
+                    fl = art.get("fulfillment_field_labels")
+                    if isinstance(fl, dict):
+                        for k, v in fl.items():
+                            if isinstance(v, str) and v.strip():
+                                labels[k] = v.strip()
+
+    # Stable order: default three first, then rest alphabetically
+    ordered = [f for f in DEFAULT_FULFILLMENT_FIELDS if f in fields_set]
+    ordered += sorted(fields_set - set(DEFAULT_FULFILLMENT_FIELDS))
+    for f in ordered:
+        if f not in labels:
+            labels[f] = f.replace("_", " ")
+    return (ordered, labels)
+
+
 def _extract_fulfillment_hints(
     intent_data: Optional[Dict[str, Any]],
     user_message: Optional[str] = None,
+    required_fields: Optional[List[str]] = None,
 ) -> Optional[Dict[str, str]]:
-    """Extract pickup_time, pickup_address, delivery_address from intent entities or user message."""
+    """Extract fulfillment fields from intent entities or user message.
+    required_fields: optional list of field keys to extract (e.g. from admin/KB); when set, any entity type in this list is added. Standard regex used for delivery_address, pickup_address, pickup_time."""
     hints: Dict[str, str] = {}
+    allowed = set(required_fields) if required_fields else {"delivery_address", "pickup_address", "pickup_time"}
     if intent_data:
         for e in intent_data.get("entities", []):
             if isinstance(e, dict):
-                t = (e.get("type") or "").lower()
+                t = (e.get("type") or "").lower().replace(" ", "_")
                 v = e.get("value")
-                if t and v is not None:
+                if t and v is not None and t in allowed:
                     vstr = str(v).strip()
-                    if t == "pickup_time" and vstr:
-                        hints["pickup_time"] = vstr
-                    elif t == "pickup_address" and vstr:
-                        hints["pickup_address"] = vstr
-                    elif t == "delivery_address" and vstr:
-                        hints["delivery_address"] = vstr
-    if user_message and len(hints) < 3:
+                    if vstr:
+                        hints[t] = vstr
+    # Fallback regex only for standard fields when not yet in hints
+    if user_message:
         msg = (user_message or "").strip()
-        if not hints.get("pickup_time"):
-            # e.g. "6 PM", "6:00", "6pm", "tonight", "at 7"
+        if "pickup_time" in allowed and not hints.get("pickup_time"):
             m = re.search(
                 r"(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)?|tonight|this evening)",
                 msg,
@@ -1442,8 +1570,7 @@ def _extract_fulfillment_hints(
             )
             if m:
                 hints["pickup_time"] = m.group(1).strip()
-        if not hints.get("pickup_address"):
-            # "pick me up at X", "pickup at X", "from X"
+        if "pickup_address" in allowed and not hints.get("pickup_address"):
             m = re.search(
                 r"(?:pick\s*(?:me\s*)?up\s*(?:at|from)\s*|pickup\s*(?:at|from)\s*|from\s+)([^,]+?)(?:\s*,|\s+deliver|\s+to\s|$)",
                 msg,
@@ -1451,8 +1578,7 @@ def _extract_fulfillment_hints(
             )
             if m:
                 hints["pickup_address"] = m.group(1).strip()
-        if not hints.get("delivery_address"):
-            # "deliver to X", "delivery to X", "at the X"
+        if "delivery_address" in allowed and not hints.get("delivery_address"):
             m = re.search(
                 r"(?:deliver\s*(?:to|at)\s*|delivery\s*(?:to|at)\s*|to\s+)([^,]+?)(?:\s*,|$)",
                 msg,

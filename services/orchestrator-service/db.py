@@ -324,6 +324,8 @@ def get_admin_orchestration_settings() -> Optional[Dict[str, Any]]:
             row.setdefault("planner_always_decides", False)
             row.setdefault("opening_instructions", None)
             row.setdefault("narrowing_instructions", None)
+            row.setdefault("default_fulfillment_fields", None)
+            row.setdefault("default_fulfillment_field_labels", None)
         return cast(Optional[Dict[str, Any]], row) if row and isinstance(row, dict) else None
     except Exception:
         return None

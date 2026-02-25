@@ -185,8 +185,12 @@ def _build_context(result: Dict[str, Any]) -> str:
                 product_entries.append(f"{name} ({price_str}) — features: {feats_str}")
             product_data_str = "; ".join(product_entries) if product_entries else ", ".join(product_names)
             missing_ff = engagement.get("missing_fulfillment_fields") or []
-            field_labels_ff = {"pickup_time": "pickup time", "pickup_address": "pickup address", "delivery_address": "delivery address"}
-            need_ff_str = ", ".join(field_labels_ff.get(f, f) for f in missing_ff)
+            field_labels_ff = engagement.get("fulfillment_field_labels") or {
+                "pickup_time": "pickup time",
+                "pickup_address": "pickup address",
+                "delivery_address": "delivery address",
+            }
+            need_ff_str = ", ".join(field_labels_ff.get(f, f.replace("_", " ")) for f in missing_ff)
             req_cta_line = (
                 f"REQUIRED before CTA: 'To place this order I'll need {need_ff_str} — you can share them in the chat now or when you tap Add this bundle.' "
                 if need_ff_str
