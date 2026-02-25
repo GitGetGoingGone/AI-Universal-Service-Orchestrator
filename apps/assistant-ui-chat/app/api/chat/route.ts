@@ -36,9 +36,22 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const messages = body.messages as { role: string; content: string }[] | undefined;
+    const messages = body.messages as { role: string; content: unknown }[] | undefined;
     const lastUser = messages?.filter((m) => m.role === "user").pop();
-    const text = (lastUser?.content ?? "").trim() || "Find products";
+    // AI SDK / assistant-ui may send content as string or as [{ type: "text", text: "..." }]
+    const content = lastUser?.content;
+    const rawText =
+      typeof content === "string"
+        ? content.trim()
+        : Array.isArray(content)
+          ? content
+              .map((p: { type?: string; text?: string }) =>
+                p?.type === "text" && typeof p?.text === "string" ? p.text : ""
+              )
+              .join("")
+              .trim()
+          : "";
+    const text = rawText || "Find products";
 
     const payload: Record<string, unknown> = {
       text,
