@@ -56,7 +56,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.add_exception_handler(USOException, uso_exception_handler)
+app.add_exception_handler(USOException, uso_exception_handler)  # type: ignore[reportArgumentType]
 app.add_exception_handler(Exception, generic_exception_handler)
 
 app.include_router(gateway_ucp_router)

@@ -138,16 +138,15 @@ def _build_context(result: Dict[str, Any]) -> str:
         if isinstance(exp_cats, list) and exp_cats:
             exp_str = ", ".join(str(t) for t in exp_cats[:12] if t)
             parts.append(
-                "User asked an open-ended question (e.g. what products we have). Respond with a short, friendly probe that asks what EXPERIENCE they want to explore. "
-                f"Use these available experience themes when relevant: {exp_str}. "
-                "Do NOT list all product categories. Do NOT suggest fetching products until they indicate an experience."
+                "User is browsing (open-ended). Base your response on their actual message above. "
+                f"Probe what experience they want; use these themes when relevant: {exp_str}. "
+                "Do NOT list categories or suggest fetching products until they pick an experience."
             )
         else:
             parts.append(
-                "User asked an open-ended question (e.g. what products we have). Respond with a short, friendly probe that asks what EXPERIENCE they want to explore. "
-                "Mention example themes: e.g. date night, celebration, something romantic, luxury, a gift, or baby. "
-                "Do NOT list all product categories. Do NOT suggest fetching products until they indicate an experience. "
-                "Example tone: 'What kind of experience are you looking for—something romantic, a celebration, a gift, or a date night? I can suggest themed bundles once I know.'"
+                "User is browsing (open-ended). Base your response on their actual message above. "
+                "Probe what experience they want — e.g. date night, gift, celebration — but phrase it in your own words, not a script. "
+                "Do NOT list categories or suggest fetching products until they indicate an experience."
             )
     elif intent_type == "discover_composite":
         exp_name = products.get("experience_name", "experience")
