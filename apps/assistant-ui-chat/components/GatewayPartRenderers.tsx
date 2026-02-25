@@ -90,11 +90,11 @@ function ThematicOptionsRenderer({
           <div className="mb-3 flex-1 font-medium text-gray-900 dark:text-gray-100">
             {opt.option_label ?? `Option ${i + 1}`}
           </div>
-          {opt.description && (
+          {opt.description != null && String(opt.description).trim() !== "" ? (
             <div className="mb-3 text-sm text-gray-600 dark:text-gray-400">
               {String(opt.description)}
             </div>
-          )}
+          ) : null}
           {onAction && (
             <button
               type="button"
