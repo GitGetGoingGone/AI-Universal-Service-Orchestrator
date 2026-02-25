@@ -829,7 +829,8 @@ async def suggest_composite_bundle(
         return []
 
     from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
-    provider, client = _get_planner_client_for_config(llm_config)
+    result = _get_planner_client_for_config(llm_config)
+    provider, client = result[0], result[1]
     if not client:
         return []
 
