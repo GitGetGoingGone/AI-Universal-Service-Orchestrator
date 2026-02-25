@@ -50,7 +50,7 @@ def _get_planner_client_for_config(llm_config: Dict[str, Any]):
             model = cfg.get("OSS_MODEL") or cfg.get("OPENAI_MODEL") or "gpt-4o"
             return ("facade", client, model)
     except Exception as e:
-        logger.debug("New LLM provider not used: %s", e)
+        logger.warning("New LLM provider not used: %s", e)
 
     # Legacy: platform config (llm_providers)
     from openai import OpenAI

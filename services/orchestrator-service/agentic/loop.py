@@ -927,7 +927,7 @@ async def run_agentic_loop(
                 tool_args,
                 resolve_intent_fn=resolve_intent_fn,
                 discover_products_fn=discover_products_fn,
-                discover_composite_fn=_discover_composite_fn,
+                discover_composite_fn=_discover_composite_fn,  # type: ignore[reportGeneralTypeIssues]
                 refine_bundle_category_fn=_refine_bundle_category_fn,
                 start_orchestration_fn=start_orchestration_fn,
                 create_standing_intent_fn=create_standing_intent_fn,
