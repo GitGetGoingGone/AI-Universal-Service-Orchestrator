@@ -1,6 +1,7 @@
 """LLM-generated engagement response - natural user-facing message instead of templated summary."""
 
 import asyncio
+import json
 import logging
 import queue
 import threading
@@ -190,7 +191,7 @@ def _build_context(result: Dict[str, Any]) -> str:
                 "pickup_address": "pickup address",
                 "delivery_address": "delivery address",
             }
-            need_ff_str = ", ".join(field_labels_ff.get(f, f.replace("_", " ")) for f in missing_ff)
+            need_ff_str = ", ".join(str(field_labels_ff.get(f, f.replace("_", " "))) for f in missing_ff)
             req_cta_line = (
                 f"REQUIRED before CTA: 'To place this order I'll need {need_ff_str} — you can share them in the chat now or when you tap Add this bundle.' "
                 if need_ff_str
@@ -566,6 +567,16 @@ async def stream_engagement_response(
 
     context = _build_context(result)
     user_content = f"User said: {user_message[:300]}\n\nWhat we did: {context}\n\nWrite a brief friendly response:"
+    prompt_sent = f"[System]\n{system_prompt}\n\n[User]\n{user_content}"
+
+    def _log_engagement(prompt: str, response: str) -> None:
+        max_len = 2000
+        p = prompt[:max_len] + f"...(truncated, {len(prompt)} chars)" if len(prompt) > max_len else prompt
+        r = response[:max_len] + f"...(truncated, {len(response)} chars)" if len(response) > max_len else response
+        logger.info(
+            "prompt_trace engagement: %s",
+            json.dumps({"prompt_sent": p, "response_received": r}, default=str),
+        )
 
     try:
         if provider in ("azure", "openrouter", "custom", "openai"):
@@ -596,6 +607,7 @@ async def stream_engagement_response(
             thread = threading.Thread(target=_openai_stream)
             thread.start()
             loop = asyncio.get_event_loop()
+            chunks: List[str] = []
             while True:
                 item = await loop.run_in_executor(None, thread_safe_q.get)
                 if item is None:
@@ -603,7 +615,9 @@ async def stream_engagement_response(
                 if isinstance(item, Exception):
                     logger.warning("Engagement stream LLM failed: %s", item)
                     return
+                chunks.append(item)
                 yield item
+            _log_engagement(prompt_sent, "".join(chunks))
             return
 
         if provider == "gemini":
@@ -623,6 +637,7 @@ async def stream_engagement_response(
 
             text = await asyncio.to_thread(_gemini_generate)
             if text:
+                _log_engagement(prompt_sent, text)
                 yield text
     except Exception as e:
         logger.warning("Engagement stream failed: %s", e)
@@ -944,7 +959,8 @@ async def suggest_composite_bundle_options(
         return []
 
     from .planner import _get_planner_client_for_config  # type: ignore[reportMissingImports]
-    provider, client = _get_planner_client_for_config(llm_config)
+    result = _get_planner_client_for_config(llm_config)
+    provider, client = result[0], result[1]
     if not client:
         return []
 

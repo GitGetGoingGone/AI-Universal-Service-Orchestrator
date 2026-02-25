@@ -2,7 +2,10 @@
 
 import asyncio
 import json
+import logging
 from typing import Any, Callable, Dict, List, Literal, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
@@ -147,14 +150,34 @@ async def _stream_chat_events(
     engagement_debug: Optional[Dict[str, Any]] = None
     summary_chunks: List[str] = []
     if body.debug:
-        summary_sync, engagement_debug = await generate_engagement_response(
+        engagement_res = await generate_engagement_response(
             body.text, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards, return_debug=True
         )
+        if isinstance(engagement_res, tuple):
+            summary_sync, engagement_debug = engagement_res
+            engagement_debug = engagement_debug if isinstance(engagement_debug, dict) else {}
+        else:
+            summary_sync = engagement_res
+            engagement_debug = {}
         if summary_sync is not None:
             summary_chunks = [summary_sync]
         if engagement_debug and summary_sync is None:
-            engagement_debug = (engagement_debug or {}) | {"response_received": ""}
+            engagement_debug = engagement_debug | {"response_received": ""}
+        _log_prompt_trace(
+            intent_request=_intent_request_for_trace(body),
+            intent_response=_intent_response_from_result(result),
+            engagement_debug=engagement_debug,
+            agent_reasoning=_agent_reasoning_from_result(result),
+            request_id=request_id,
+        )
     else:
+        _log_prompt_trace(
+            intent_request=_intent_request_for_trace(body),
+            intent_response=_intent_response_from_result(result),
+            engagement_debug=None,
+            agent_reasoning=_agent_reasoning_from_result(result),
+            request_id=request_id,
+        )
         async for delta in stream_engagement_response(
             body.text, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards
         ):
@@ -181,7 +204,7 @@ async def _stream_chat_events(
         summary_format="markdown" if not use_adaptive_cards else None,
     )
     if body.debug:
-        engagement_debug_or = engagement_debug or {}
+        engagement_debug_or: Dict[str, Any] = engagement_debug if isinstance(engagement_debug, dict) else {}
         prompt_sent_full = engagement_debug_or.get("prompt_sent") or ""
         intent_request = _intent_request_for_trace(body)
         response_data["prompt_trace"] = {
@@ -193,7 +216,7 @@ async def _stream_chat_events(
             },
             "intent": {
                 "request": intent_request,
-                "response": (result.get("data") or {}).get("intent") or {},
+                "response": _intent_response_from_result(result),
             },
             "engagement": engagement_debug_or,
             "agent_reasoning": result.get("agent_reasoning") or [],
@@ -386,24 +409,34 @@ async def chat(
     else:
         llm_config_ns = None
     # Always call the engagement LLM first; use planner message only as fallback when LLM fails or returns empty.
+    # Use return_debug=True to get prompt_sent/response_received for server-side logging (independent of body.debug).
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
-    engagement_debug_ns: Optional[Dict[str, Any]] = None
-    if body.debug:
-        summary, engagement_debug_ns = await generate_engagement_response(
-            body.text, result, llm_config=llm_config_ns, allow_markdown=not use_adaptive_cards, return_debug=True
-        )
-        if summary is None:
-            engagement_debug_ns = (engagement_debug_ns or {}) | {"response_received": ""}
+    engagement_res_ns = await generate_engagement_response(
+        body.text, result, llm_config=llm_config_ns, allow_markdown=not use_adaptive_cards, return_debug=True
+    )
+    if isinstance(engagement_res_ns, tuple):
+        summary, engagement_debug_ns = engagement_res_ns
+        engagement_debug_ns = engagement_debug_ns if isinstance(engagement_debug_ns, dict) else {}
     else:
-        summary = await generate_engagement_response(body.text, result, llm_config=llm_config_ns, allow_markdown=not use_adaptive_cards)
+        summary = engagement_res_ns
+        engagement_debug_ns = {}
     if not summary:
         summary = planner_message if (planner_message and planner_message.lower() not in generic_messages) else _build_summary(result)
-        if body.debug and not engagement_debug_ns:
-            engagement_debug_ns = {
+        engagement_debug_ns = engagement_debug_ns | {"response_received": summary or ""}
+        if not engagement_debug_ns.get("prompt_sent"):
+            engagement_debug_ns = engagement_debug_ns | {
                 "prompt_sent": "(engagement LLM failed or unavailable; used planner/template fallback)",
-                "response_received": summary or "",
             }
+    elif not engagement_debug_ns.get("response_received"):
+        engagement_debug_ns = engagement_debug_ns | {"response_received": summary or ""}
+    _log_prompt_trace(
+        intent_request=_intent_request_for_trace(body),
+        intent_response=_intent_response_from_result(result),
+        engagement_debug=engagement_debug_ns,
+        agent_reasoning=_agent_reasoning_from_result(result),
+        request_id=request_id,
+    )
     response_data_ns = chat_first_response(
         data=result.get("data", {}),
         machine_readable=result.get("machine_readable", {}),
@@ -415,16 +448,63 @@ async def chat(
         summary_format="markdown" if not use_adaptive_cards else None,
     )
     if body.debug:
-        engagement_debug_ns_or = engagement_debug_ns or {}
+        engagement_debug_ns_or: Dict[str, Any] = engagement_debug_ns
         prompt_sent_full_ns = engagement_debug_ns_or.get("prompt_sent") or ""
         response_data_ns["prompt_trace"] = {
             "request_payload": {"text": body.text, "messages_count": len(body.messages or []), "limit": body.limit, "platform": body.platform},
-            "intent": {"request": _intent_request_for_trace(body), "response": (result.get("data") or {}).get("intent") or {}},
+            "intent": {"request": _intent_request_for_trace(body), "response": _intent_response_from_result(result)},
             "engagement": engagement_debug_ns_or,
             "agent_reasoning": result.get("agent_reasoning") or [],
             "prompt_sent": prompt_sent_full_ns,
         }
     return response_data_ns
+
+
+def _truncate_for_log(val: Any, max_len: int = 2000) -> Any:
+    """Truncate long strings in log payload to avoid huge server logs."""
+    if isinstance(val, str) and len(val) > max_len:
+        return val[:max_len] + f"...(truncated, {len(val)} chars)"
+    if isinstance(val, dict):
+        return {k: _truncate_for_log(v, max_len) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_truncate_for_log(v, max_len) for v in val]
+    return val
+
+
+def _log_prompt_trace(
+    *,
+    intent_request: Dict[str, Any],
+    intent_response: Dict[str, Any],
+    engagement_debug: Optional[Dict[str, Any]] = None,
+    agent_reasoning: Optional[List[str]] = None,
+    request_id: str = "",
+) -> None:
+    """Log Intent + engagement + agent_reasoning to server logs for inspection (independent of debug param)."""
+    payload = {
+        "prompt_trace": {
+            "intent": {"request": intent_request, "response": intent_response},
+            "engagement": engagement_debug or {},
+            "agent_reasoning": agent_reasoning or [],
+        },
+        "request_id": request_id or None,
+    }
+    payload = _truncate_for_log(payload)
+    logger.info("prompt_trace: %s", json.dumps(payload, default=str))
+
+
+def _intent_response_from_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract intent response from loop result for logging."""
+    data = result.get("data")
+    if isinstance(data, dict):
+        intent = data.get("intent")
+        return intent if isinstance(intent, dict) else {}
+    return {}
+
+
+def _agent_reasoning_from_result(result: Dict[str, Any]) -> List[str]:
+    """Extract agent_reasoning from loop result for logging."""
+    ar = result.get("agent_reasoning")
+    return ar if isinstance(ar, list) else []
 
 
 def _intent_request_for_trace(body: ChatRequest) -> Dict[str, Any]:
