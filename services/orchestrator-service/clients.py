@@ -174,6 +174,28 @@ async def discover_products_broadcast(
     if budget_max is not None:
         filtered = [p for p in merged if p.get("price") is None or int(round(float(p["price"]) * 100)) <= budget_max]
         merged = filtered[:limit]
+
+    # Fallback: when UCP agents returned no products (e.g. 503), try legacy Discovery REST API
+    if not merged and getattr(settings, "discovery_service_url", "").strip():
+        try:
+            legacy = await discover_products(
+                query=query,
+                limit=limit,
+                location=location,
+                partner_id=partner_id,
+                exclude_partner_id=exclude_partner_id,
+                budget_max=budget_max,
+                experience_tag=experience_tag,
+                experience_tags=experience_tags,
+            )
+            inner = legacy.get("data") or legacy
+            products_list = inner.get("products") if isinstance(inner, dict) else []
+            if isinstance(products_list, list) and products_list:
+                merged = products_list[:limit]
+                logger.info("Discovery fallback: legacy /discover returned %d products for %s", len(merged), query)
+        except Exception as e:
+            logger.debug("Discovery fallback (legacy /discover) failed: %s", e)
+
     item_list_ld = product_list_ld(merged, count=len(merged))
     return {
         "data": {"products": merged, "count": len(merged)},

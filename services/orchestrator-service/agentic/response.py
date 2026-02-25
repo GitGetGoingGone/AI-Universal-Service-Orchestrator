@@ -70,8 +70,8 @@ def _build_context(result: Dict[str, Any]) -> str:
     intent_type = intent.get("intent_type", "unknown")
     parts.append(f"Intent: {intent_type}")
 
-    # Use purged proposed_plan from intent (e.g. after "no limo" → Flowers, Dinner only) so reply doesn't echo removed categories
-    proposed_plan = intent.get("proposed_plan")
+    # Use purged proposed_plan from intent or data (data has prior-turn plan from refinement context)
+    proposed_plan = intent.get("proposed_plan") or data.get("proposed_plan")
     if isinstance(proposed_plan, list) and proposed_plan:
         parts.append(f"Current plan — use ONLY these categories in your reply: {', '.join(str(p) for p in proposed_plan)}.")
     # Bundle themes from intent (e.g. Romantic Date Night, Casual, Adventure) — pass labels + descriptions so we can present them to the user
@@ -84,6 +84,15 @@ def _build_context(result: Dict[str, Any]) -> str:
             label = str(o.get("label", "")).strip()
             desc = (o.get("description") or "").strip() or "A curated experience for you."
             theme_entries.append(f"• {label}: {desc[:120]}")
+        # When Intent returns only 1 option, add fallback themed options so user gets 2–3 choices
+        sq = intent.get("search_queries") or []
+        if len(theme_entries) == 1 and len(sq) >= 2:
+            exp_name = (intent.get("experience_name") or "date night").lower()
+            if "date" in exp_name or "night" in exp_name or any(c in str(sq).lower() for c in ("flowers", "dinner", "limo")):
+                theme_entries.extend([
+                    "• Casual Date Night: A laid-back evening with dinner and flowers, no limo.",
+                    "• Luxury Date Night: Premium dinner and limo, with optional flowers.",
+                ])
         if theme_entries:
             parts.append(
                 "Themed experience options — you MUST present ALL of these to the user (2–3+ options), never pick or default to one:\n"
@@ -297,10 +306,20 @@ def _build_context(result: Dict[str, Any]) -> str:
             sq_list = intent.get("search_queries") or []
             if query is None or str(query).strip() in ("", "None"):
                 query = ", ".join(str(q) for q in sq_list[:5] if q) if sq_list else "your search"
-            parts.append(
-                f"No products found for '{query}'. Acknowledge what they asked for. Offer to refine the search "
-                "(e.g. different location, delivery date, or related terms) rather than pivoting to unrelated experiences."
-            )
+            prior_plan = data.get("proposed_plan")
+            if isinstance(prior_plan, list) and len(prior_plan) >= 2:
+                plan_str = " and ".join(str(p) for p in prior_plan)
+                parts.append(
+                    f"No products found for '{query}'. We were building: {plan_str}. "
+                    "Do NOT abandon the plan. Offer 2–3 alternatives: (1) swap the missing category for something else "
+                    "(e.g. replace flowers with chocolates), (2) try different search terms for that category, "
+                    "(3) keep the rest of the plan (e.g. dinner + limo) and skip or change that one. Let the user choose."
+                )
+            else:
+                parts.append(
+                    f"No products found for '{query}'. Acknowledge what they asked for. Offer to refine the search "
+                    "(e.g. different location, delivery date, or related terms) rather than pivoting to unrelated experiences."
+                )
 
     return " ".join(parts)
 
