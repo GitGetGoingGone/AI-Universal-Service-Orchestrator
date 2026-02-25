@@ -41,6 +41,8 @@ export async function POST(req: Request) {
       input?: string;
       thread_id?: string;
       user_id?: string;
+      bundle_id?: string;
+      explore_product_id?: string;
     };
 
     /** Extract text from message content/parts (AI SDK: string or [{ type: "text", text }]) */
@@ -92,6 +94,8 @@ export async function POST(req: Request) {
     if (normalizedMessages && normalizedMessages.length > 0) payload.messages = normalizedMessages;
     if (body.thread_id) payload.thread_id = body.thread_id;
     if (body.user_id) payload.user_id = body.user_id;
+    if (body.bundle_id) payload.bundle_id = body.bundle_id;
+    if (body.explore_product_id) payload.explore_product_id = body.explore_product_id;
 
     const res = await fetch(`${GATEWAY_URL}/api/v1/chat?stream=true&agentic=true`, {
       method: "POST",

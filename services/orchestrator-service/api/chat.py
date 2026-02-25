@@ -40,6 +40,7 @@ class ChatRequest(BaseModel):
     partner_id: Optional[str] = Field(None, description="Filter products to this partner (for embed/white-label)")
     bundle_id: Optional[str] = Field(None, description="Thread's bundle ID - use for order context, never ask user")
     order_id: Optional[str] = Field(None, description="Thread's paid order ID - use for track/support, never ask user")
+    explore_product_id: Optional[str] = Field(None, description="When set (e.g. from Explore button), fetch and show full product details")
     debug: bool = Field(False, description="When true, include prompt_trace (prompt sent and response received) for inspection")
 
 
@@ -78,6 +79,7 @@ async def _stream_chat_events(
                 messages=body.messages,
                 bundle_id=body.bundle_id,
                 order_id=body.order_id,
+                explore_product_id=body.explore_product_id,
                 on_thinking=on_thinking,
             )
             result_holder[0] = r
@@ -359,6 +361,7 @@ async def chat(
             messages=body.messages,
             bundle_id=body.bundle_id,
             order_id=body.order_id,
+            explore_product_id=body.explore_product_id,
         )
     except Exception as e:
         return chat_first_response(

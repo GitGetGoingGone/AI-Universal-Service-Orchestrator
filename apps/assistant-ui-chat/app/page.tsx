@@ -40,6 +40,7 @@ function UserMessage() {
 
 export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
     setSidebarOpen(mq.matches);
@@ -47,6 +48,15 @@ export default function ChatPage() {
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
+  const bundleIdRef = useRef<string | null>(null);
+  const exploreProductIdRef = useRef<string | null>(null);
+
   const runtime = useChatRuntime({
     transport: new AssistantChatTransport({
       api: "/api/chat",
@@ -65,12 +75,17 @@ export default function ChatPage() {
                   .join("")
                   .trim()
               : "";
-        return { body: { text: text || undefined } };
+        const body: Record<string, unknown> = { text: text || undefined };
+        if (bundleIdRef.current) body.bundle_id = bundleIdRef.current;
+        const epid = exploreProductIdRef.current;
+        if (epid) {
+          body.explore_product_id = epid;
+          exploreProductIdRef.current = null;
+        }
+        return { body };
       },
     }),
   });
-
-  const bundleIdRef = useRef<string | null>(null);
 
   const handleAction = async (payload: ActionPayload) => {
     const appendAssistant = (text: string) => {
@@ -92,7 +107,7 @@ export default function ChatPage() {
         if (!res.ok) throw new Error(json.error || "Add to bundle failed");
         const bid = json.bundle_id ?? json.data?.bundle_id;
         if (bid) bundleIdRef.current = bid;
-        appendAssistant(json.summary ?? json.message ?? "Added to bundle.");
+        setToast(json.summary ?? json.message ?? "Added to bundle.");
       } else if (payload.action === "add_bundle_bulk" && payload.product_ids?.length) {
         const body: Record<string, unknown> = {
           product_ids: payload.product_ids,
@@ -123,10 +138,18 @@ export default function ChatPage() {
           `Order ${payload.order_id} is ready. Proceed to payment when the flow is integrated.`
         );
       } else if (payload.action === "explore_product" && payload.product_id) {
+        exploreProductIdRef.current = payload.product_id;
         const name = payload.product_name ?? "this product";
         runtime.thread.append({
           role: "user",
           content: [{ type: "text" as const, text: `Tell me more about ${name}` }],
+        });
+      } else if (payload.action === "explore_theme" && payload.option_label) {
+        runtime.thread.append({
+          role: "user",
+          content: [
+            { type: "text" as const, text: `I'd like to explore the ${payload.option_label}` },
+          ],
         });
       }
     } catch (err) {
@@ -145,6 +168,14 @@ export default function ChatPage() {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <GatewayActionProvider onAction={handleAction}>
+        {toast && (
+          <div
+            role="status"
+            className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-lg dark:bg-gray-800"
+          >
+            {toast}
+          </div>
+        )}
         <div className="flex h-screen bg-[var(--background)]">
           {/* Sidebar - always visible; collapsed = narrow strip with Atreyai + toggle */}
           <aside
@@ -190,8 +221,8 @@ export default function ChatPage() {
 
           {/* Main chat area */}
           <div className="flex min-w-0 flex-1 flex-col">
-            <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-              <ThreadPrimitive.Viewport className="relative flex-1 overflow-y-auto">
+            <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col">
+              <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto">
                 <div className="mx-auto flex min-h-full max-w-2xl flex-col px-4 pb-4">
                   <AuiIf condition={(s) => s.thread.isEmpty}>
                     <div className="flex flex-1 flex-col items-center justify-center gap-6 py-12">
@@ -225,10 +256,18 @@ export default function ChatPage() {
                   </div>
                   <div className="h-4 shrink-0" />
                 </div>
-                <ThreadPrimitive.ScrollToBottom
-                  className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-xs shadow-lg transition-opacity hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                />
               </ThreadPrimitive.Viewport>
+
+              {/* Scroll to bottom - outside chat view, above composer; hidden when already at bottom */}
+              <ThreadPrimitive.ScrollToBottom
+                className="absolute bottom-20 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-xs shadow-lg transition-opacity hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-0 dark:hover:bg-zinc-800"
+                aria-label="Scroll to bottom"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                </svg>
+                <span>Scroll to bottom</span>
+              </ThreadPrimitive.ScrollToBottom>
 
               {/* Composer - ChatGPT-style */}
               <div className="border-t border-[var(--border)] bg-[var(--background)] p-4">

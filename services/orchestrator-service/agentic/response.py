@@ -297,11 +297,26 @@ def _build_context(result: Dict[str, Any]) -> str:
                     break
             if location:
                 parts.append(f"Location context: {location}.")
-            parts.append(
-                f"Found {count} products. Product cards will display them — write ONLY a brief one-line intro (e.g. 'Here are some options for you:' or 'I found a few options that might work.'). "
-                "Do NOT list products, prices, or descriptions in your message. Product data (for grounding): "
-                f"{'; '.join(discover_product_entries)}"
-            )
+            if engagement.get("product_detail_view") and count == 1 and top_products:
+                p = top_products[0] if isinstance(top_products[0], dict) else {}
+                name = p.get("name", "Product")
+                desc = (p.get("description") or "").strip()
+                features = p.get("features") or []
+                price = p.get("price")
+                currency = p.get("currency", "USD")
+                feats = "; ".join(str(f) for f in features[:5]) if features else ""
+                parts.append(
+                    f"User asked for details about: {name}. This is a PRODUCT-DETAIL view (Explore / Tell me more). "
+                    "Write a helpful 2–4 sentence summary: name, key description, notable features if any, and price. "
+                    f"Product: {name}. Description: {(desc or '')[:300]}. Features: {feats}. Price: {currency} {price}."
+                    " Invite them to Add to bundle. Be warm and specific — do NOT give a generic 'I found options' reply."
+                )
+            else:
+                parts.append(
+                    f"Found {count} products. Product cards will display them — write ONLY a brief one-line intro (e.g. 'Here are some options for you:' or 'I found a few options that might work.'). "
+                    "Do NOT list products, prices, or descriptions in your message. Product data (for grounding): "
+                    f"{'; '.join(discover_product_entries)}"
+                )
         else:
             query = intent.get("search_query")
             sq_list = intent.get("search_queries") or []

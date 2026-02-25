@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
-from clients import get_bundle_details, get_experience_categories, get_order_status
+from clients import get_bundle_details, get_experience_categories, get_order_status, get_product_details
 from .planner import plan_next_action
 from .tools import execute_tool
 
@@ -467,6 +467,7 @@ async def run_agentic_loop(
     messages: Optional[List[Dict[str, Any]]] = None,
     bundle_id: Optional[str] = None,
     order_id: Optional[str] = None,
+    explore_product_id: Optional[str] = None,
     on_thinking: Optional[Callable[[str, Optional[Dict]], Awaitable[None]]] = None,
     thinking_messages: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
@@ -474,7 +475,39 @@ async def run_agentic_loop(
     Run the agentic decision loop until completion.
 
     If use_agentic=False or planner fails, falls back to direct intent→discover flow.
+    When explore_product_id is set, fetches product details and returns product-detail view.
     """
+    if explore_product_id and (explore_product_id or "").strip():
+        pid = str(explore_product_id).strip()
+        await _emit_thinking(on_thinking, "before_product_details", {"product_id": pid}, thinking_messages or {})
+        try:
+            detail = await get_product_details(pid)
+            inner = detail.get("data", detail) if isinstance(detail.get("data"), dict) else detail
+            product = inner if isinstance(inner, dict) and inner.get("id") else None
+            if not product:
+                product = detail if isinstance(detail, dict) and detail.get("id") else None
+            if product:
+                products_data = {"products": [product], "count": 1}
+                intent_data = {"intent_type": "discover", "search_query": product.get("name", "product details")}
+                product_detail_engagement: Dict[str, Any] = {"product_detail_view": True}
+                from packages.shared.adaptive_cards import generate_product_card
+                adaptive_card = generate_product_card([product])
+                from packages.shared.json_ld import product_list_ld
+                machine_readable = product_list_ld([product], count=1)
+                out = _build_response(
+                    intent_data=intent_data,
+                    products_data=products_data,
+                    adaptive_card=adaptive_card,
+                    machine_readable=machine_readable,
+                    agent_reasoning=[],
+                    user_message=user_message,
+                    engagement_data=product_detail_engagement,
+                )
+                return out
+        except Exception as e:
+            logger.warning("get_product_details failed for %s: %s", pid, e)
+        # Fall through to normal flow if fetch failed
+
     if not use_agentic:
         return await _direct_flow(
             user_message,

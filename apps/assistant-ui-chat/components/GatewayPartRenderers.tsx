@@ -81,28 +81,35 @@ function ThematicOptionsRenderer({
   const options = data.options ?? [];
   if (options.length === 0) return null;
   return (
-    <div className="my-3 flex flex-wrap gap-2">
+    <div className="my-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {options.map((opt, i) => (
-        <button
+        <div
           key={i}
-          type="button"
-          onClick={() => {
-            if (
-              onAction &&
-              Array.isArray(opt.product_ids) &&
-              opt.product_ids.length > 0
-            ) {
-              onAction({
-                action: "add_bundle_bulk",
-                product_ids: opt.product_ids,
-                option_label: opt.option_label,
-              });
-            }
-          }}
-          className="rounded-full border border-gray-300 bg-gray-50 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+          className="flex flex-col rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
         >
-          {opt.option_label ?? `Option ${i + 1}`}
-        </button>
+          <div className="mb-3 flex-1 font-medium text-gray-900 dark:text-gray-100">
+            {opt.option_label ?? `Option ${i + 1}`}
+          </div>
+          {opt.description && (
+            <div className="mb-3 text-sm text-gray-600 dark:text-gray-400">
+              {String(opt.description)}
+            </div>
+          )}
+          {onAction && (
+            <button
+              type="button"
+              onClick={() =>
+                onAction({
+                  action: "explore_theme",
+                  option_label: opt.option_label ?? `Option ${i + 1}`,
+                })
+              }
+              className="mt-auto rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+            >
+              Explore more options
+            </button>
+          )}
+        </div>
       ))}
     </div>
   );

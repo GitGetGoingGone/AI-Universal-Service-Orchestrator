@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from config import settings
+from db import store_masked_id
 from packages.shared.adaptive_cards import generate_product_card
 from packages.shared.discovery import fallback_search_query
 from packages.shared.gateway_signature import sign_request
@@ -67,7 +68,7 @@ async def discover_products_via_rpc(
     headers["Content-Type"] = "application/json"
 
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.post(url, json=payload, headers=headers)
+        r = await client.post(url, content=body_bytes, headers=headers)
         r.raise_for_status()
         data = r.json()
     if "error" in data:
@@ -356,6 +357,8 @@ async def discover_products(
                 return _empty_discovery_fallback(query)
             r.raise_for_status()
             return r.json()
+
+    return _empty_discovery_fallback(query)
 
 
 async def get_product_details(product_id: str) -> Dict[str, Any]:
