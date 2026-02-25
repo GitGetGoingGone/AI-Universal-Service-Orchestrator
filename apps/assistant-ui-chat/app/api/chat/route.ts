@@ -35,23 +35,53 @@ export async function POST(req: Request) {
   }
 
   try {
-    const body = await req.json();
-    const messages = body.messages as { role: string; content: unknown }[] | undefined;
-    const lastUser = messages?.filter((m) => m.role === "user").pop();
-    // AI SDK / assistant-ui may send content as string or as [{ type: "text", text: "..." }]
-    const content = lastUser?.content;
+    const body = (await req.json()) as {
+      messages?: { role: string; content?: unknown; parts?: unknown }[];
+      text?: string;
+      input?: string;
+      thread_id?: string;
+      user_id?: string;
+    };
+
+    /** Extract text from message content/parts (AI SDK: string or [{ type: "text", text }]) */
+    function extractText(v: unknown): string {
+      if (typeof v === "string") return v.trim();
+      if (Array.isArray(v))
+        return v
+          .map((p: { type?: string; text?: string }) =>
+            p?.type === "text" && typeof p?.text === "string" ? p.text : ""
+          )
+          .join("")
+          .trim();
+      if (v && typeof v === "object" && "text" in v && typeof (v as { text: unknown }).text === "string")
+        return ((v as { text: string }).text || "").trim();
+      if (v && typeof v === "object" && "parts" in v && Array.isArray((v as { parts: unknown[] }).parts))
+        return extractText((v as { parts: unknown[] }).parts);
+      return "";
+    }
+
+    const messages = body.messages;
+    const userMessages = messages?.filter((m) => m.role === "user") ?? [];
+    const lastUser = userMessages.pop();
+    const fromContent = extractText(lastUser?.content);
+    const fromParts = extractText(lastUser?.parts);
     const rawText =
-      typeof content === "string"
-        ? content.trim()
-        : Array.isArray(content)
-          ? content
-              .map((p: { type?: string; text?: string }) =>
-                p?.type === "text" && typeof p?.text === "string" ? p.text : ""
-              )
-              .join("")
-              .trim()
-          : "";
+      (typeof body.text === "string" && body.text.trim()) ||
+      (typeof body.input === "string" && body.input.trim()) ||
+      fromContent ||
+      fromParts ||
+      userMessages
+        .reverse()
+        .map((m) => extractText(m.content) || extractText(m.parts))
+        .find((t) => t.length > 0) ||
+      "";
     const text = rawText || "Find products";
+
+    // Normalize messages so content is always string (orchestrator expects this for recent_conversation)
+    const normalizedMessages = messages?.map((m) => ({
+      role: m.role,
+      content: extractText(m.content) || extractText(m.parts),
+    }));
 
     const payload: Record<string, unknown> = {
       text,
@@ -59,7 +89,7 @@ export async function POST(req: Request) {
       platform: "web",
       stream: true,
     };
-    if (messages && messages.length > 0) payload.messages = messages;
+    if (normalizedMessages && normalizedMessages.length > 0) payload.messages = normalizedMessages;
     if (body.thread_id) payload.thread_id = body.thread_id;
     if (body.user_id) payload.user_id = body.user_id;
 

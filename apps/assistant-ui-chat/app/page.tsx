@@ -50,6 +50,23 @@ export default function ChatPage() {
   const runtime = useChatRuntime({
     transport: new AssistantChatTransport({
       api: "/api/chat",
+      prepareSendMessagesRequest: ({ messages }) => {
+        const lastUser = [...messages].reverse().find((m) => m.role === "user") as
+          | { content?: unknown; parts?: unknown }
+          | undefined;
+        const raw =
+          lastUser?.content ?? lastUser?.parts;
+        const text =
+          typeof raw === "string"
+            ? raw.trim()
+            : Array.isArray(raw)
+              ? (raw as { type?: string; text?: string }[])
+                  .map((p) => (p?.type === "text" && typeof p?.text === "string" ? p.text : ""))
+                  .join("")
+                  .trim()
+              : "";
+        return { body: { text: text || undefined } };
+      },
     }),
   });
 

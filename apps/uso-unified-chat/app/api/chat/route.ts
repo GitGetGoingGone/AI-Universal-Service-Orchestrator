@@ -54,6 +54,8 @@ export async function POST(req: Request) {
     const body = await req.json();
     const {
       messages,
+      text: bodyText,
+      input: bodyInput,
       partner_id,
       user_id,
       thread_id,
@@ -63,7 +65,9 @@ export async function POST(req: Request) {
       stream: streamRequested,
       debug: debugRequested,
     } = body as {
-      messages?: { role: string; content: string }[];
+      messages?: { role: string; content?: unknown; parts?: unknown }[];
+      text?: string;
+      input?: string;
       partner_id?: string;
       user_id?: string;
       thread_id?: string;
@@ -74,10 +78,36 @@ export async function POST(req: Request) {
       debug?: boolean;
     };
 
-    const lastUserMessage =
-      messages
-        ?.filter((m) => m.role === "user")
-        .pop()?.content || "Find products";
+    // Extract text: content may be string, [{ type: "text", text }], or parts (AI SDK format)
+    function extractText(v: unknown): string {
+      if (typeof v === "string") return v.trim();
+      if (Array.isArray(v))
+        return v
+          .map((p: { type?: string; text?: string }) =>
+            p?.type === "text" && typeof p?.text === "string" ? p.text : ""
+          )
+          .join("")
+          .trim();
+      if (v && typeof v === "object" && "text" in v && typeof (v as { text: unknown }).text === "string")
+        return ((v as { text: string }).text || "").trim();
+      if (v && typeof v === "object" && "parts" in v && Array.isArray((v as { parts: unknown[] }).parts))
+        return extractText((v as { parts: unknown[] }).parts);
+      return "";
+    }
+    const lastUser = messages?.filter((m) => m.role === "user").pop();
+    const rawText =
+      (typeof bodyText === "string" && bodyText.trim()) ||
+      (typeof bodyInput === "string" && bodyInput.trim()) ||
+      extractText(lastUser?.content) ||
+      extractText(lastUser?.parts) ||
+      "";
+    const lastUserMessage = rawText || "Find products";
+
+    // Normalize messages so content is always string (orchestrator expects this for recent_conversation)
+    const normalizedMessages = messages?.map((m) => ({
+      role: m.role,
+      content: extractText(m.content) || extractText(m.parts),
+    }));
 
     const supabase = getSupabase();
     let resolvedThreadId = thread_id;
@@ -159,8 +189,8 @@ export async function POST(req: Request) {
     if (resolvedThreadId) {
       payload.thread_id = resolvedThreadId;
     }
-    if (messages && messages.length > 0) {
-      payload.messages = messages;
+    if (normalizedMessages && normalizedMessages.length > 0) {
+      payload.messages = normalizedMessages;
     }
     if (bundle_id) payload.bundle_id = bundle_id;
     if (order_id) payload.order_id = order_id;

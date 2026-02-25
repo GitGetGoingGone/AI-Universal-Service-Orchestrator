@@ -712,10 +712,13 @@ export function ChatPage(props: ChatPageProps = {}) {
       addMessage({ role: "user", content: userMessage });
       setLoading(true);
       try {
+        const messagesWithNew = [...messages, { role: "user", content: userMessage }];
         const payload: Record<string, unknown> = {
-          messages: [...messages, { role: "user", content: userMessage }].map(
-            (m) => ({ role: m.role, content: m.content ?? "" })
-          ),
+          text: userMessage,
+          messages: messagesWithNew.map((m) => ({
+            role: m.role,
+            content: typeof m.content === "string" ? m.content : "",
+          })),
         };
         if (partnerId) payload.partner_id = partnerId;
         const effectiveAnonymousId = anonymousId ?? (typeof window !== "undefined" ? getOrCreateAnonymousId() : undefined);
