@@ -206,7 +206,7 @@ async def semantic_search_kb_articles(
             kwargs["exclude_partner_id"] = exclude_partner_id
 
         result = client.rpc("match_kb_articles", kwargs).execute()
-        rows = result.data or []
+        rows: List[Any] = list(result.data) if isinstance(result.data, list) else []
 
         out = []
         for r in rows:
@@ -248,7 +248,8 @@ async def backfill_product_embedding(product_id: str) -> bool:
     if not product.data:
         return False
 
-    inp = _get_product_embedding_input(product.data)
+    row: Dict[str, Any] = dict(product.data) if isinstance(product.data, dict) else {}
+    inp = _get_product_embedding_input(row)
     if not inp:
         return False
 
@@ -340,7 +341,7 @@ async def semantic_search(
         kwargs = {
             "query_embedding": embedding_str,
             "match_count": limit * 3 if tags_list else limit,  # fetch extra for post-filter when multi-tag
-            "match_threshold": 0.0,
+            "match_threshold": 0.3,  # filter out low-similarity results; avoids showing unrelated products when query has no matches (e.g. "flowers" → limos)
         }
         if partner_id:
             kwargs["filter_partner_id"] = partner_id
@@ -350,20 +351,22 @@ async def semantic_search(
             kwargs["filter_experience_tag"] = tags_list[0]
 
         result = client.rpc("match_products_v2", kwargs).execute()
-        rows = result.data or []
+        rows: List[Any] = list(result.data) if isinstance(result.data, list) else []
 
         # Normalize to dict with expected keys (created_at for ranking, sold_count for product_mix, experience_tags for discovery)
         select_cols = ("id", "name", "description", "price", "currency", "capabilities", "metadata", "partner_id", "created_at", "sold_count", "experience_tags")
-        out = [
-            {k: r.get(k) for k in select_cols if k in r}
-            for r in rows
-        ]
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            out.append({k: r.get(k) for k in select_cols if k in r})
         # AND semantics: keep only products that have all requested tags
         if len(tags_list) > 1:
+            exp_tags_val: Any
             out = [
                 r for r in out
-                if r and isinstance(r.get("experience_tags"), list)
-                and set(str(t).strip().lower() for t in r["experience_tags"] if t) >= set(tags_list)
+                if r and isinstance((exp_tags_val := r.get("experience_tags")), list)
+                and set(str(t).strip().lower() for t in exp_tags_val if t) >= set(tags_list)
             ]
         return out[:limit]
     except Exception:

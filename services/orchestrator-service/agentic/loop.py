@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
-from clients import get_bundle_details, get_order_status
+from clients import get_bundle_details, get_experience_categories, get_order_status
 from .planner import plan_next_action
 from .tools import execute_tool
 
@@ -873,7 +873,7 @@ async def run_agentic_loop(
             # Emit thinking before tool execution
             ctx = dict(intent_data or {})
             ctx["location"] = ctx.get("location") or _merged_location(intent_data, state) or tool_args.get("location")
-            ctx["query"] = tool_args.get("query") or intent_data.get("search_query")
+            ctx["query"] = tool_args.get("query") or (intent_data or {}).get("search_query")
             ctx["experience_name"] = tool_args.get("experience_name") or (intent_data or {}).get("experience_name")
             if tool_name == "get_weather":
                 await _emit_thinking(on_thinking, "before_weather", {**ctx, "location": ctx.get("location") or tool_args.get("location", "your area")}, thinking_messages or {})
@@ -896,9 +896,10 @@ async def run_agentic_loop(
                 if purged_sq:
                     tool_args["search_queries"] = purged_sq
                     # Filter bundle_options to only tiers whose categories are in purged set (no limo etc.)
-                    if purged_set and tool_args.get("bundle_options"):
+                    bundle_opts = tool_args.get("bundle_options") or []
+                    if purged_set and bundle_opts:
                         filtered = []
-                        for opt in tool_args["bundle_options"]:
+                        for opt in bundle_opts:
                             if not isinstance(opt, dict):
                                 continue
                             cats = opt.get("categories") or []
@@ -1211,6 +1212,18 @@ async def run_agentic_loop(
 
     # Pass interaction stage to engagement so response layer can tune tone (opening vs narrowing)
     engagement_data["interaction_stage"] = state.get("interaction_stage", "narrowing")
+
+    # When discover returned 0 products, fetch experience_categories so response can suggest alternatives
+    if (intent_data or {}).get("intent_type") == "discover":
+        pd = products_data or {}
+        pc = pd.get("products") if isinstance(pd, dict) else []
+        if not (pc and len(pc) > 0):
+            try:
+                cats = await get_experience_categories()
+                if cats:
+                    engagement_data["experience_categories"] = cats
+            except Exception as e:
+                logger.debug("get_experience_categories for no-results fallback failed: %s", e)
 
     # Pass fulfillment context and missing required fields (configurable from admin/bundle/KB) so frontend can block checkout until provided
     required_fields_list = state.get("required_fulfillment_fields") or list(DEFAULT_FULFILLMENT_FIELDS)

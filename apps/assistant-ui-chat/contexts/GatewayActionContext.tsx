@@ -7,7 +7,8 @@ export type ActionPayload =
   | { action: "add_bundle_bulk"; product_ids: string[]; option_label?: string }
   | { action: "proceed_to_payment"; order_id?: string }
   | { action: "view_bundle"; bundle_id: string }
-  | { action: "checkout"; bundle_id: string };
+  | { action: "checkout"; bundle_id: string }
+  | { action: "explore_product"; product_id: string; product_name?: string };
 
 export type GatewayActionHandler = (payload: ActionPayload) => Promise<void>;
 

@@ -122,6 +122,12 @@ export default function ChatPage() {
         appendAssistant(
           `Order ${payload.order_id} is ready. Proceed to payment when the flow is integrated.`
         );
+      } else if (payload.action === "explore_product" && payload.product_id) {
+        const name = payload.product_name ?? "this product";
+        runtime.thread.append({
+          role: "user",
+          content: [{ type: "text" as const, text: `Tell me more about ${name}` }],
+        });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Action failed";

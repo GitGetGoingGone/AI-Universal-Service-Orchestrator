@@ -298,8 +298,9 @@ def _build_context(result: Dict[str, Any]) -> str:
             if location:
                 parts.append(f"Location context: {location}.")
             parts.append(
-                f"Found {count} products. Format as curated listing (top 5–6). ONLY mention products from Product data below—do NOT invent any. Per entry: use exact name and price from data, brief description, CTA from Allowed CTAs only. "
-                f"Product data (ONLY these): {'; '.join(discover_product_entries)}"
+                f"Found {count} products. Product cards will display them — write ONLY a brief one-line intro (e.g. 'Here are some options for you:' or 'I found a few options that might work.'). "
+                "Do NOT list products, prices, or descriptions in your message. Product data (for grounding): "
+                f"{'; '.join(discover_product_entries)}"
             )
         else:
             query = intent.get("search_query")
@@ -316,10 +317,19 @@ def _build_context(result: Dict[str, Any]) -> str:
                     "(3) keep the rest of the plan (e.g. dinner + limo) and skip or change that one. Let the user choose."
                 )
             else:
-                parts.append(
-                    f"No products found for '{query}'. Acknowledge what they asked for. Offer to refine the search "
-                    "(e.g. different location, delivery date, or related terms) rather than pivoting to unrelated experiences."
-                )
+                exp_cats = (intent.get("experience_categories") or engagement.get("experience_categories") or [])
+                if isinstance(exp_cats, list) and exp_cats:
+                    exp_str = ", ".join(str(c) for c in exp_cats[:10] if c)
+                    parts.append(
+                        f"No products found for '{query}'. Acknowledge what they asked for. "
+                        f"Suggest other available categories for the user to pick from: {exp_str}. "
+                        "Invite them to choose one (e.g. 'We have X, Y, Z — which would you like to explore?'). Do NOT show unrelated products."
+                    )
+                else:
+                    parts.append(
+                        f"No products found for '{query}'. Acknowledge what they asked for. Offer to refine the search "
+                        "(e.g. different location, delivery date, or related terms) rather than pivoting to unrelated experiences."
+                    )
 
     return " ".join(parts)
 

@@ -43,7 +43,7 @@ function ProductListRenderer({ data }: { data: { products?: Product[] } }) {
             {p.currency ?? "USD"} {(p.price ?? 0).toFixed(2)}
           </div>
           {onAction && p.id && (
-            <div className="mt-2">
+            <div className="mt-2 flex flex-wrap gap-1">
               <button
                 type="button"
                 onClick={() =>
@@ -52,6 +52,19 @@ function ProductListRenderer({ data }: { data: { products?: Product[] } }) {
                 className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
               >
                 Add to bundle
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onAction({
+                    action: "explore_product",
+                    product_id: p.id!,
+                    product_name: p.name,
+                  })
+                }
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              >
+                Explore
               </button>
             </div>
           )}
