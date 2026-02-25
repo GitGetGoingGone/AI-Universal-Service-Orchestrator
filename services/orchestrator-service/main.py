@@ -1,5 +1,6 @@
 """Orchestrator Service - Intent → Discovery flow."""
 
+import logging
 import sys
 from pathlib import Path
 
@@ -21,6 +22,17 @@ from packages.shared.monitoring import HealthChecker, health_router
 from packages.shared.monitoring.health import DependencyCheck, DependencyStatus
 
 from config import settings
+
+# Ensure prompt_trace and other app logs appear in server output (independent of uvicorn config)
+for _log_name in ("api.chat", "agentic.response"):
+    _log = logging.getLogger(_log_name)
+    _log.setLevel(getattr(logging, (settings.log_level or "INFO").upper(), logging.INFO))
+    if not _log.handlers:
+        _h = logging.StreamHandler()
+        _h.setLevel(logging.INFO)
+        _h.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+        _log.addHandler(_h)
+
 from api.chat import router as chat_router
 from api.products import router as products_router
 from api.link_account import router as link_account_router
