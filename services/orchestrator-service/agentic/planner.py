@@ -209,6 +209,12 @@ async def plan_next_action(
 
     try:
         if provider in ("azure", "openrouter", "custom", "facade"):
+            if not getattr(client, "chat", None):
+                logger.warning(
+                    "Planner client lacks 'chat' (type=%s). Use OpenAI-compatible client for Groq/OSS (OSS_ENDPOINT). Falling back to rule-based plan.",
+                    type(client).__name__,
+                )
+                return _fallback_plan(user_message, state)
             messages = [
                 {"role": "system", "content": planner_prompt},
                 {"role": "user", "content": user_content},
