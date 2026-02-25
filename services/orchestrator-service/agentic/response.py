@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 RESPONSE_SYSTEM = """You are a friendly shopping assistant. Given the user's message and what was found/done, write a brief, natural 1-3 sentence response to the user.
 
 Be conversational and helpful. Mention key findings (e.g. product categories, count) without listing everything. Invite the user to add items to their bundle or ask for more.
-Do NOT use markdown, bullets, or formal structure. Keep it under 100 words.
+Keep it under 300 words.
 """
 
 # When adaptive cards are off, we allow markdown so the client can render formatted text
@@ -86,9 +86,9 @@ def _build_context(result: Dict[str, Any]) -> str:
             theme_entries.append(f"• {label}: {desc[:120]}")
         if theme_entries:
             parts.append(
-                "Themed experience options (PRESENT these to the user — list each with its description so they can choose):\n"
+                "Themed experience options — you MUST present ALL of these to the user (2–3+ options), never pick or default to one:\n"
                 + "\n".join(theme_entries)
-                + "\nAfter listing, invite them to pick one and share date/area so you can tailor it."
+                + "\nList each option with its description so the user can choose. After listing, invite them to pick one and share date/area. Do NOT say 'I'm thinking X' or suggest a single option."
             )
 
     last_suggestion = result.get("last_suggestion")
@@ -125,6 +125,9 @@ def _build_context(result: Dict[str, Any]) -> str:
                 eng_parts.append(f"Promo: {msg}")
         if us.get("apply_surge") and us.get("surge_pct"):
             eng_parts.append(f"Surge pricing: {us['surge_pct']}%")
+        fc = engagement.get("fulfillment_context") or {}
+        if fc.get("discover_location_exclusion"):
+            eng_parts.append(f"User prefers to avoid: {fc['discover_location_exclusion']} (acknowledge this, e.g. 'outside of downtown')")
         if eng_parts:
             parts.append("Engagement context: " + ". ".join(eng_parts))
 
@@ -241,8 +244,8 @@ def _build_context(result: Dict[str, Any]) -> str:
             # No products yet: either present themed ideas (from bundle_options above) or gather details
             if isinstance(bundle_opts, list) and bundle_opts:
                 parts.append(
-                    "User asked for themed ideas or suggestions. You MUST present the themed experience options listed above (each with its description). "
-                    "Then ask for date and area so you can tailor the chosen experience. Do NOT list individual products yet."
+                    "User asked for themed ideas or suggestions. You MUST present 2–3+ themed experience options listed above (each with its description). "
+                    "Let the user choose — never pick or default to one option. Then ask for date and area so you can tailor the chosen experience. Do NOT list individual products yet."
                 )
             else:
                 parts.append(
@@ -294,7 +297,10 @@ def _build_context(result: Dict[str, Any]) -> str:
             sq_list = intent.get("search_queries") or []
             if query is None or str(query).strip() in ("", "None"):
                 query = ", ".join(str(q) for q in sq_list[:5] if q) if sq_list else "your search"
-            parts.append(f"No products found for '{query}'.")
+            parts.append(
+                f"No products found for '{query}'. Acknowledge what they asked for. Offer to refine the search "
+                "(e.g. different location, delivery date, or related terms) rather than pivoting to unrelated experiences."
+            )
 
     return " ".join(parts)
 

@@ -14,7 +14,7 @@ export async function GET() {
     const supabase = createSupabaseServerClient();
     const { data, error } = await supabase
       .from("external_api_providers")
-      .select("id, name, api_type, base_url, display_order, enabled, created_at, updated_at, api_key_encrypted")
+      .select("id, name, api_type, base_url, extra_config, display_order, enabled, created_at, updated_at, api_key_encrypted")
       .order("display_order", { ascending: true })
       .order("api_type", { ascending: true });
 
@@ -64,16 +64,20 @@ export async function POST(request: Request) {
     }
 
     const supabase = createSupabaseServerClient();
+    const insertRow: Record<string, unknown> = {
+      name: String(name),
+      api_type,
+      base_url: base_url ? String(base_url).trim() || null : null,
+      api_key_encrypted,
+      enabled: true,
+      updated_at: new Date().toISOString(),
+    };
+    if (extra_config != null && typeof extra_config === "object" && !Array.isArray(extra_config)) {
+      insertRow.extra_config = extra_config;
+    }
     const { data, error } = await supabase
       .from("external_api_providers")
-      .insert({
-        name: String(name),
-        api_type,
-        base_url: base_url ? String(base_url).trim() || null : null,
-        api_key_encrypted,
-        enabled: true,
-        updated_at: new Date().toISOString(),
-      })
+      .insert(insertRow)
       .select()
       .single();
 

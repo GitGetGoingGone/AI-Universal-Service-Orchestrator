@@ -126,6 +126,7 @@ type ExternalApiProvider = {
   name: string;
   api_type: string;
   base_url: string | null;
+  extra_config?: Record<string, unknown>;
   has_key: boolean;
   enabled: boolean;
   display_order: number;
@@ -255,11 +256,14 @@ export function ConfigEditor() {
   const [externalApiProviders, setExternalApiProviders] = useState<ExternalApiProvider[]>([]);
   const [addingExternalApi, setAddingExternalApi] = useState(false);
   const [editingExternalApiId, setEditingExternalApiId] = useState<string | null>(null);
-  const [externalApiForm, setExternalApiForm] = useState<Partial<ExternalApiProvider> & { api_key?: string }>({
+  const [externalApiForm, setExternalApiForm] = useState<
+    Partial<ExternalApiProvider> & { api_key?: string; extra_config?: Record<string, unknown> }
+  >({
     name: "",
     api_type: "web_search",
     base_url: "",
     api_key: "",
+    extra_config: {},
   });
   const [llmProviders, setLlmProviders] = useState<LLMProvider[]>([]);
   const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null);
@@ -1073,15 +1077,46 @@ export function ConfigEditor() {
       {activeTab === "integrations" && (
         <div className="space-y-6">
           <p className="text-sm text-[rgb(var(--color-text-secondary))]">
-            External APIs for engagement tools: events, weather, web search. Keys are encrypted.
+            External APIs power engagement tools for composite experiences (date night, picnic, etc.). Configure weather, events, and web search. Keys are encrypted.
           </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+            <div className="rounded border border-[rgb(var(--color-border))] p-4">
+              <div className="font-medium mb-1">Weather</div>
+              <p className="text-[rgb(var(--color-text-secondary))] mb-2">Current conditions for location-based experiences.</p>
+              <a href="https://www.weatherapi.com" target="_blank" rel="noreferrer" className="text-[rgb(var(--color-primary))] hover:underline">
+                WeatherAPI.com →
+              </a>
+              <span className="mx-1">·</span>
+              <a href="https://openweathermap.org/api" target="_blank" rel="noreferrer" className="text-[rgb(var(--color-primary))] hover:underline">
+                OpenWeatherMap
+              </a>
+            </div>
+            <div className="rounded border border-[rgb(var(--color-border))] p-4">
+              <div className="font-medium mb-1">Events</div>
+              <p className="text-[rgb(var(--color-text-secondary))] mb-2">Concerts, shows, and local events.</p>
+              <a href="https://developer.ticketmaster.com" target="_blank" rel="noreferrer" className="text-[rgb(var(--color-primary))] hover:underline">
+                Ticketmaster Discovery →
+              </a>
+            </div>
+            <div className="rounded border border-[rgb(var(--color-border))] p-4">
+              <div className="font-medium mb-1">Web Search</div>
+              <p className="text-[rgb(var(--color-text-secondary))] mb-2">Search for context and recommendations.</p>
+              <a href="https://serper.dev" target="_blank" rel="noreferrer" className="text-[rgb(var(--color-primary))] hover:underline">
+                Serper →
+              </a>
+              <span className="mx-1">·</span>
+              <a href="https://tavily.com" target="_blank" rel="noreferrer" className="text-[rgb(var(--color-primary))] hover:underline">
+                Tavily
+              </a>
+            </div>
+          </div>
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
           onClick={() => setExternalApisExpanded((e) => !e)}
           className="flex items-center justify-between w-full text-left font-medium"
         >
-          External APIs (Events, Weather, Web Search)
+          External API Providers (Weather · Events · Web Search)
           <span className="text-sm text-[rgb(var(--color-text-secondary))]">
             {externalApisExpanded ? "−" : "+"}
           </span>
@@ -1089,7 +1124,7 @@ export function ConfigEditor() {
         {externalApisExpanded && (
           <div className="mt-4 space-y-4">
             <p className="text-sm text-[rgb(var(--color-text-secondary))]">
-              Add external APIs for engagement tools (events, weather, web search). Keys are encrypted. Select which provider to use per type.
+              Add providers for each API type. Keys are encrypted. Select which provider to use per type via &quot;Use for {`{type}`}&quot;.
             </p>
             {addingExternalApi && (
               <div className="rounded border border-[rgb(var(--color-border))] p-4 space-y-3">
@@ -1100,7 +1135,13 @@ export function ConfigEditor() {
                     type="text"
                     value={externalApiForm.name ?? ""}
                     onChange={(e) => setExternalApiForm((f) => ({ ...f, name: e.target.value }))}
-                    placeholder="e.g. Tavily Search"
+                    placeholder={
+                      externalApiForm.api_type === "weather"
+                        ? "e.g. WeatherAPI"
+                        : externalApiForm.api_type === "events"
+                          ? "e.g. Ticketmaster"
+                          : "e.g. Serper Search"
+                    }
                     className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
                   />
                 </div>
@@ -1108,21 +1149,62 @@ export function ConfigEditor() {
                   <label className="block text-sm mb-1">API Type</label>
                   <select
                     value={externalApiForm.api_type ?? "web_search"}
-                    onChange={(e) => setExternalApiForm((f) => ({ ...f, api_type: e.target.value }))}
+                    onChange={(e) => {
+                      const t = e.target.value;
+                      setExternalApiForm((f) => ({
+                        ...f,
+                        api_type: t,
+                        base_url:
+                          t === "weather"
+                            ? "https://api.weatherapi.com/v1"
+                            : t === "events"
+                              ? "https://app.ticketmaster.com/discovery/v2"
+                              : "https://google.serper.dev",
+                        extra_config: t === "weather" ? { provider: "weatherapi" } : {},
+                      }));
+                    }}
                     className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
                   >
-                    <option value="web_search">Web Search</option>
                     <option value="weather">Weather</option>
                     <option value="events">Events</option>
+                    <option value="web_search">Web Search</option>
                   </select>
                 </div>
+                {externalApiForm.api_type === "weather" && (
+                  <div>
+                    <label className="block text-sm mb-1">Weather provider format</label>
+                    <select
+                      value={(externalApiForm.extra_config?.provider as string) ?? "weatherapi"}
+                      onChange={(e) =>
+                        setExternalApiForm((f) => ({
+                          ...f,
+                          extra_config: { ...(f.extra_config ?? {}), provider: e.target.value },
+                          base_url:
+                            e.target.value === "weatherapi"
+                              ? "https://api.weatherapi.com/v1"
+                              : "https://api.openweathermap.org",
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                    >
+                      <option value="weatherapi">WeatherAPI.com</option>
+                      <option value="openweathermap">OpenWeatherMap</option>
+                    </select>
+                  </div>
+                )}
                 <div>
-                  <label className="block text-sm mb-1">Base URL (optional for some APIs)</label>
+                  <label className="block text-sm mb-1">Base URL</label>
                   <input
                     type="text"
                     value={externalApiForm.base_url ?? ""}
                     onChange={(e) => setExternalApiForm((f) => ({ ...f, base_url: e.target.value }))}
-                    placeholder="https://api.tavily.com"
+                    placeholder={
+                      externalApiForm.api_type === "weather"
+                        ? "https://api.weatherapi.com/v1 or https://api.openweathermap.org"
+                        : externalApiForm.api_type === "events"
+                          ? "https://app.ticketmaster.com/discovery/v2"
+                          : "https://google.serper.dev or https://api.tavily.com"
+                    }
                     className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
                   />
                 </div>
@@ -1148,11 +1230,12 @@ export function ConfigEditor() {
                             api_type: externalApiForm.api_type,
                             base_url: externalApiForm.base_url || undefined,
                             api_key: externalApiForm.api_key || undefined,
+                            extra_config: externalApiForm.extra_config || undefined,
                           }),
                         });
                         if (!res.ok) throw new Error("Failed");
                         setAddingExternalApi(false);
-                        setExternalApiForm({ name: "", api_type: "web_search", base_url: "", api_key: "" });
+                        setExternalApiForm({ name: "", api_type: "web_search", base_url: "", api_key: "", extra_config: {} });
                         fetchExternalApis();
                       } catch {
                         alert("Failed to add external API");
@@ -1178,7 +1261,7 @@ export function ConfigEditor() {
                         type="text"
                         value={externalApiForm.name ?? p.name}
                         onChange={(e) => setExternalApiForm((f) => ({ ...f, name: e.target.value }))}
-                        placeholder="e.g. Tavily Search"
+                        placeholder="e.g. WeatherAPI"
                         className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
                       />
                     </div>
@@ -1189,13 +1272,35 @@ export function ConfigEditor() {
                         onChange={(e) => setExternalApiForm((f) => ({ ...f, api_type: e.target.value }))}
                         className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
                       >
-                        <option value="web_search">Web Search</option>
                         <option value="weather">Weather</option>
                         <option value="events">Events</option>
+                        <option value="web_search">Web Search</option>
                       </select>
                     </div>
+                    {p.api_type === "weather" && (
+                      <div>
+                        <label className="block text-sm mb-1">Weather provider format</label>
+                        <select
+                          value={(externalApiForm.extra_config?.provider ?? p.extra_config?.provider ?? "weatherapi") as string}
+                          onChange={(e) =>
+                            setExternalApiForm((f) => ({
+                              ...f,
+                              extra_config: { ...(f.extra_config ?? p.extra_config ?? {}), provider: e.target.value },
+                              base_url:
+                                e.target.value === "weatherapi"
+                                  ? "https://api.weatherapi.com/v1"
+                                  : "https://api.openweathermap.org",
+                            }))
+                          }
+                          className="w-full px-3 py-2 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]"
+                        >
+                          <option value="weatherapi">WeatherAPI.com</option>
+                          <option value="openweathermap">OpenWeatherMap</option>
+                        </select>
+                      </div>
+                    )}
                     <div>
-                      <label className="block text-sm mb-1">Base URL (optional)</label>
+                      <label className="block text-sm mb-1">Base URL</label>
                       <input
                         type="text"
                         value={externalApiForm.base_url ?? p.base_url ?? ""}
@@ -1225,6 +1330,7 @@ export function ConfigEditor() {
                               base_url: baseUrl || null,
                             };
                             if (externalApiForm.api_key) body.api_key = externalApiForm.api_key;
+                            if (externalApiForm.extra_config != null) body.extra_config = externalApiForm.extra_config;
                             const res = await fetch(`/api/platform/external-api-providers/${p.id}`, {
                               method: "PATCH",
                               headers: { "Content-Type": "application/json" },
@@ -1232,7 +1338,7 @@ export function ConfigEditor() {
                             });
                             if (!res.ok) throw new Error("Failed");
                             setEditingExternalApiId(null);
-                            setExternalApiForm({ name: "", api_type: "web_search", base_url: "", api_key: "" });
+                            setExternalApiForm({ name: "", api_type: "web_search", base_url: "", api_key: "", extra_config: {} });
                             fetchExternalApis();
                           } catch {
                             alert("Failed to update external API");
@@ -1245,7 +1351,7 @@ export function ConfigEditor() {
                         variant="outline"
                         onClick={() => {
                           setEditingExternalApiId(null);
-                          setExternalApiForm({ name: "", api_type: "web_search", base_url: "", api_key: "" });
+                          setExternalApiForm({ name: "", api_type: "web_search", base_url: "", api_key: "", extra_config: {} });
                         }}
                       >
                         Cancel
@@ -1290,7 +1396,13 @@ export function ConfigEditor() {
                         type="button"
                         onClick={() => {
                           setAddingExternalApi(false);
-                          setExternalApiForm({ name: p.name, api_type: p.api_type, base_url: p.base_url ?? "", api_key: "" });
+                          setExternalApiForm({
+                            name: p.name,
+                            api_type: p.api_type,
+                            base_url: p.base_url ?? "",
+                            api_key: "",
+                            extra_config: p.extra_config ?? {},
+                          });
                           setEditingExternalApiId(p.id);
                         }}
                         className="text-sm text-[rgb(var(--color-text-secondary))] hover:underline"

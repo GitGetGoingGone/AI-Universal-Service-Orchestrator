@@ -7,6 +7,15 @@ logger = logging.getLogger(__name__)
 
 # Guardrail limits
 MAX_TEXT_LEN = 2000
+
+# Location values that indicate rejection (e.g. "not downtown") — never pass to weather/events API
+_LOCATION_NEGATION_PREFIXES = ("not ", "no ", "anything but ", "anywhere but ", "excluding ", "except ")
+
+
+def _is_location_negation(loc: str) -> bool:
+    """Return True if location is a rejection (e.g. 'not downtown'), not a valid place."""
+    v = (loc or "").strip().lower()
+    return bool(v and any(v.startswith(p) for p in _LOCATION_NEGATION_PREFIXES))
 MAX_QUERY_LEN = 500
 MAX_LOCATION_LEN = 200
 MAX_MESSAGE_LEN = 1000
@@ -274,14 +283,14 @@ def apply_guardrails(name: str, params: Dict[str, Any]) -> Tuple[Dict[str, Any],
 
     elif name == "get_weather":
         loc = (p.get("location") or "").strip()
-        if not loc:
-            return {}, "get_weather requires non-empty location"
+        if not loc or _is_location_negation(loc):
+            return {}, "get_weather requires a valid location (e.g. city name); exclusions like 'not downtown' are not valid"
         p["location"] = loc[:MAX_LOCATION_LEN]
 
     elif name == "get_upcoming_occasions":
         loc = (p.get("location") or "").strip()
-        if not loc:
-            return {}, "get_upcoming_occasions requires non-empty location"
+        if not loc or _is_location_negation(loc):
+            return {}, "get_upcoming_occasions requires a valid location (e.g. city name); exclusions like 'not downtown' are not valid"
         p["location"] = loc[:MAX_LOCATION_LEN]
         limit = p.get("limit", 5)
         try:

@@ -54,7 +54,7 @@ async def _web_search(query: str, max_results: int = 5) -> Dict[str, Any]:
 
 
 async def _get_weather(location: str) -> Dict[str, Any]:
-    """Call weather API (OpenWeatherMap or compatible)."""
+    """Call weather API. Supports WeatherAPI.com and OpenWeatherMap via extra_config.provider."""
     from db import get_supabase
     from packages.shared.external_api import get_external_api_config
 
@@ -66,14 +66,38 @@ async def _get_weather(location: str) -> Dict[str, Any]:
     base_url = (cfg.get("base_url") or "https://api.openweathermap.org").rstrip("/")
     api_key = cfg.get("api_key", "")
     extra = cfg.get("extra_config") or {}
-    # OpenWeatherMap: ?q=city&appid=key. Some use lat/lon from extra_config.
-    params = {"q": location, "appid": api_key, "units": extra.get("units", "imperial")}
+    provider = (extra.get("provider") or "").lower()
+
+    if provider == "weatherapi":
+        # WeatherAPI.com: /current.json?key=...&q=...
+        path = "/current.json"
+        params = {"key": api_key, "q": location}
+    else:
+        # OpenWeatherMap (default): /data/2.5/weather?q=...&appid=...
+        path = "/data/2.5/weather"
+        params = {"q": location, "appid": api_key, "units": extra.get("units", "imperial")}
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as http:
-            resp = await http.get(f"{base_url}/data/2.5/weather", params=params)
+            resp = await http.get(f"{base_url}{path}", params=params)
             resp.raise_for_status()
             data = resp.json()
+            if provider == "weatherapi":
+                current = data.get("current", {})
+                cond = current.get("condition", {})
+                temp_c = current.get("temp_c")
+                feels_c = current.get("feelslike_c", temp_c)
+                temp_f = round(temp_c * 9 / 5 + 32, 1) if temp_c is not None else None
+                feels_f = round(feels_c * 9 / 5 + 32, 1) if feels_c is not None else temp_f
+                return {
+                    "data": {
+                        "location": location,
+                        "temp": temp_f,
+                        "feels_like": feels_f,
+                        "description": cond.get("text", ""),
+                        "humidity": current.get("humidity"),
+                    }
+                }
             main = data.get("main", {})
             weather = (data.get("weather") or [{}])[0]
             return {
@@ -622,6 +646,23 @@ async def run_agentic_loop(
                     if v and isinstance(v, str) and v.strip():
                         state.setdefault("fulfillment_context", {})[k] = v.strip()
 
+            # Persist discover date/location for composite discovery so next turn remembers "tomorrow in Dallas"
+            discover_loc = _extract_location(intent_data)
+            if discover_loc:
+                state.setdefault("fulfillment_context", {})["discover_location"] = discover_loc
+            for e in (intent_data or {}).get("entities", []):
+                if not isinstance(e, dict):
+                    continue
+                t = (e.get("type") or "").lower()
+                v = e.get("value")
+                if t == "location" and v:
+                    vstr = str(v).strip()
+                    vl = vstr.lower()
+                    if any(vl.startswith(p) for p in _LOCATION_NEGATION_PREFIXES):
+                        state.setdefault("fulfillment_context", {})["discover_location_exclusion"] = vstr
+                elif t in ("time", "date") and v and str(v).strip():
+                    state.setdefault("fulfillment_context", {})["discover_date"] = str(v).strip()
+
             # Pass upsell/promo context into state so planner can mention promotions or suggest add-ons when probing
             if engagement_data.get("upsell_surge"):
                 state["upsell_surge"] = engagement_data["upsell_surge"]
@@ -677,7 +718,7 @@ async def run_agentic_loop(
                     # Refinement leak: use purged search_queries/proposed_plan from state if present
                     sq = state.get("purged_search_queries") or intent_data.get("search_queries") or ["flowers", "restaurant", "movies"]
                     # Run discover_composite: on first turn (probe_count 0) show options without requiring location; after that probe if location/time missing
-                    if not _has_location_or_time(intent_data, user_message) and state.get("probe_count", 0) >= 1:
+                    if not _has_location_or_time(intent_data, user_message, state) and state.get("probe_count", 0) >= 1:
                         state["orchestrator_state"] = ORCHESTRATOR_STATE_AWAITING_PROBE
                         plan = None  # Let planner run → complete with probing for location/time
                     else:
@@ -688,7 +729,7 @@ async def run_agentic_loop(
                                 "bundle_options": intent_data.get("bundle_options") or [],
                                 "search_queries": sq,
                                 "experience_name": intent_data.get("experience_name") or "experience",
-                                "location": _extract_location(intent_data),
+                                "location": _merged_location(intent_data, state),
                                 "budget_max": _extract_budget(intent_data),
                             },
                             "reasoning": "Intent recommended discover_composite (or refine_composite with purged categories).",
@@ -800,7 +841,7 @@ async def run_agentic_loop(
                 if not current_q or current_q.lower() in generic_for_discover:
                     tool_args["query"] = fallback_search_query(user_message)
                 if intent_data:
-                    loc = _extract_location(intent_data)
+                    loc = _merged_location(intent_data, state)
                     if loc:
                         tool_args.setdefault("location", loc)
                     budget_cents = _extract_budget(intent_data)
@@ -831,7 +872,7 @@ async def run_agentic_loop(
 
             # Emit thinking before tool execution
             ctx = dict(intent_data or {})
-            ctx["location"] = ctx.get("location") or _extract_location(intent_data) or tool_args.get("location")
+            ctx["location"] = ctx.get("location") or _merged_location(intent_data, state) or tool_args.get("location")
             ctx["query"] = tool_args.get("query") or intent_data.get("search_query")
             ctx["experience_name"] = tool_args.get("experience_name") or (intent_data or {}).get("experience_name")
             if tool_name == "get_weather":
@@ -869,8 +910,8 @@ async def run_agentic_loop(
                     tool_args["search_queries"] = intent_data.get("search_queries") or []
                 if not tool_args.get("experience_name"):
                     tool_args["experience_name"] = intent_data.get("experience_name") or "experience"
-                if not tool_args.get("location") and intent_data:
-                    tool_args["location"] = _extract_location(intent_data)
+                if not tool_args.get("location"):
+                    tool_args["location"] = _merged_location(intent_data, state)
                 if not tool_args.get("budget_max") and intent_data:
                     tool_args["budget_max"] = _extract_budget(intent_data)
 
@@ -1341,27 +1382,35 @@ ORCHESTRATOR_STATE_AWAITING_PROBE = "AWAITING_PROBE"
 def _has_location_or_time(
     intent_data: Optional[Dict[str, Any]],
     user_message: Optional[str] = None,
+    state: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """Return True only if we have BOTH location AND time for composite (Halt & Preview until both are present)."""
-    if not intent_data:
-        return False
-    loc = _extract_location(intent_data)
+    """Return True only if we have BOTH location AND time for composite (Halt & Preview until both are present).
+    Checks intent entities first, then state.fulfillment_context (discover_location, discover_date) from prior turns."""
+    fc = (state or {}).get("fulfillment_context") or {}
+    loc = _extract_location(intent_data) if intent_data else None
     has_location = bool(loc and str(loc).strip())
-    if not has_location:
+    if not has_location and intent_data:
         for e in intent_data.get("entities", []):
-            if isinstance(e, dict) and (e.get("type") or "").lower() == "location" and e.get("value"):
-                has_location = True
-                break
+            if isinstance(e, dict) and (e.get("type") or "").lower() == "location":
+                v = e.get("value")
+                if v and str(v).strip() and not str(v).strip().lower().startswith(("not ", "no ")):
+                    has_location = True
+                    break
+    if not has_location and fc.get("discover_location"):
+        has_location = True
     has_time = False
-    hints = _extract_fulfillment_hints(intent_data, user_message)
-    if hints and (hints.get("pickup_time") or hints.get("pickup_address")):
+    if intent_data:
+        hints = _extract_fulfillment_hints(intent_data, user_message)
+        if hints and (hints.get("pickup_time") or hints.get("pickup_address")):
+            has_time = True
+        for e in intent_data.get("entities", []):
+            if isinstance(e, dict):
+                t = (e.get("type") or "").lower()
+                if t in ("time", "date") and e.get("value"):
+                    has_time = True
+                    break
+    if not has_time and fc.get("discover_date"):
         has_time = True
-    for e in intent_data.get("entities", []):
-        if isinstance(e, dict):
-            t = (e.get("type") or "").lower()
-            if t in ("time", "date") and e.get("value"):
-                has_time = True
-                break
     return has_location and has_time
 
 
@@ -1421,13 +1470,32 @@ def _pivot_outdoor_to_indoor(
     return (new_queries or search_queries, new_opts or bundle_options)
 
 
+# Location values that indicate rejection/exclusion (e.g. "not downtown") — never use as weather/search query
+_LOCATION_NEGATION_PREFIXES = ("not ", "no ", "anything but ", "anywhere but ", "excluding ", "except ")
+
+
+def _merged_location(intent_data: Optional[Dict[str, Any]], state: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Location from current intent or prior-turn fulfillment_context (for discover_composite)."""
+    loc = _extract_location(intent_data)
+    if loc:
+        return loc
+    fc = (state or {}).get("fulfillment_context") or {}
+    return fc.get("discover_location") or None
+
+
 def _extract_location(intent_data: Optional[Dict[str, Any]]) -> Optional[str]:
-    """Extract location from intent entities."""
+    """Extract location from intent entities. Returns None for negations (e.g. 'not downtown')."""
     if not intent_data:
         return None
     for e in intent_data.get("entities", []):
-        if isinstance(e, dict) and e.get("type") == "location":
-            return str(e.get("value", "")) or None
+        if isinstance(e, dict) and (e.get("type") or "").lower() == "location":
+            v = str(e.get("value", "") or "").strip()
+            if not v:
+                continue
+            vl = v.lower()
+            if any(vl.startswith(prefix) for prefix in _LOCATION_NEGATION_PREFIXES):
+                continue  # "not downtown", "no downtown" etc. — exclusion, not a location
+            return v
     return None
 
 

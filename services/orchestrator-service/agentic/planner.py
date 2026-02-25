@@ -15,7 +15,8 @@ Rule 1: Read Admin Config. If ucp_prioritized is true in state, call fetch_ucp_m
 
 Rule 2: For outdoor/location-based experiences (date night, picnic, etc.), ALWAYS call get_weather and get_upcoming_occasions for the location BEFORE calling discover_composite. Use this data to pivot the plan if necessary (e.g., rain -> suggest "Indoor Dining" instead of "Picnic"). Update the proposed_plan in your reasoning so the frontend Draft Itinerary reflects the pivot.
 
-Rule 3 (Halt & Preview): Do NOT execute discover_composite if location or time is missing. Instead call complete with ONE short concierge message. Use state.proposed_plan and state.entities to acknowledge what the user already gave (e.g. "Today it is! I'm planning your Flowers and Dinner for Downtown. What neighborhood are we looking at?") — never repeat the full 4-question list. The frontend receives proposed_plan as the Draft Itinerary (checklist) while you probe.
+Rule 3 (Halt & Preview): Do NOT execute discover_composite if location or time is missing. Use state.entities AND state.fulfillment_context (discover_location, discover_date) from prior turns—if we already have both from earlier messages, do NOT probe again. When user says "I said tomorrow already" or similar, we have date/location in fulfillment_context; proceed to discover_composite. Otherwise call complete with ONE short concierge message. Acknowledge what the user already gave (e.g. "Today it is! I'm planning your Flowers and Dinner for Downtown. What neighborhood are we looking at?") — never repeat the full 4-question list.
+- Options first: When state.bundle_option_labels has 2+ themed options (e.g. Romantic Date Night, Casual, Luxury), your complete message MUST offer those options to the user — e.g. "Here are a few experiences: Romantic, Casual, Luxury. Which speaks to you? What date and area?" Do NOT default to one plan like "I'm thinking Flowers and Dinner and Limo." Give the user 2–3 choices to pick from.
 
 Rule 4 (browse / open-ended): For intent browse or generic queries (e.g. "what products do you have", "what do you have", "show me options"), you may call complete with a short message that narrows direction—OR call discover_products with a reasonable query inferred from the user message (e.g. "flowers", "gifts", "casual"). If you complete with a probe: NEVER repeat the same question. Use state.last_suggestion and state.recent_conversation to see what was already asked; rephrase differently, offer concrete choices (e.g. "Would you like to see flowers, gifts, or date night ideas?"), or mention promotions/upsell when state.upsell_surge has addon_categories or promo_products (e.g. "We have a special on [X] right now—want me to show you?" or "I can show you our popular options, or we have a promotion when you add [category]."). Vary your approach each turn so the user is not asked the same thing again. For intent discover with a specific search_query (e.g. "flowers", "flowers delivery", "baby", "baby gifts", "gifts for delivery"): call discover_products immediately—do NOT ask for experience type or location first. For intent discover_composite (multi-part experience like "date night", "flowers and dinner"), when user has provided location and time (or date), call discover_composite; when they have not, call complete with a short probe (Rule 3). Simple product discovery (discover) never requires location/time; only discover_composite does.
 
@@ -366,15 +367,22 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                 sq = intent_data.get("search_queries") or ["flowers", "dinner", "movies"]
                 proposed_plan = intent_data.get("proposed_plan") or ["Flowers", "Dinner", "Limo"]
             # Halt & Preview: if location or time missing, complete with ONE short concierge message (not 4-question list)
+            # Also consider prior-turn fulfillment_context (discover_location, discover_date)
+            fc = (state.get("fulfillment_context") or {})
             entities = intent_data.get("entities") or []
+
+            def _is_valid_loc(v):
+                s = (v or "").strip().lower()
+                return bool(s) and not any(s.startswith(p) for p in ("not ", "no ", "anything but ", "anywhere but ", "excluding ", "except "))
+
             has_location = any(
-                isinstance(e, dict) and (e.get("type") or "").lower() == "location" and e.get("value")
+                isinstance(e, dict) and (e.get("type") or "").lower() == "location" and _is_valid_loc(e.get("value"))
                 for e in entities
-            )
+            ) or bool(fc.get("discover_location"))
             has_time = any(
                 isinstance(e, dict) and (e.get("type") or "").lower() in ("time", "date") and e.get("value")
                 for e in entities
-            )
+            ) or bool(fc.get("discover_date"))
             has_budget = any(
                 isinstance(e, dict) and (e.get("type") or "").lower() == "budget" and e.get("value")
                 for e in entities
@@ -385,8 +393,8 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
             exp_name_display = exp_name
             if (exp_name or "").lower() == "baby" or (proposed_plan and len(proposed_plan) == 1 and (proposed_plan[0] or "").lower() == "baby"):
                 exp_name_display = "baby shower or baby products experience"
-            loc_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() == "location"), None)
-            time_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() in ("time", "date")), None)
+            loc_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() == "location" and _is_valid_loc(e.get("value"))), None) or fc.get("discover_location")
+            time_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() in ("time", "date") and e.get("value")), None) or fc.get("discover_date")
             # When user said "more options" / "show me more" etc., skip date/area probe and fetch products
             if intent_data.get("unrelated_to_probing"):
                 pass  # fall through to discover_composite below
@@ -397,6 +405,9 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                 elif has_time and loc_val:
                     pass
                 else:
+                    bundle_opts = intent_data.get("bundle_options") or []
+                    opts_labels = [str(o.get("label", "")) for o in bundle_opts[:6] if isinstance(o, dict) and o.get("label")]
+                    opts_str = ", ".join(opts_labels) if len(opts_labels) >= 2 else None
                     if time_val and loc_val:
                         msg = f"Today it is! I'm planning your {plan_str} for {loc_val}. What neighborhood or area should I focus on?"
                     elif time_val:
@@ -404,18 +415,18 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                     elif loc_val:
                         msg = f"I'm planning your {plan_str} for {loc_val}. What date are you thinking?"
                     else:
-                        msg = f"I'd love to help you plan a perfect {exp_name_display}! I'm thinking {plan_str}. What date are you planning for, and which area — e.g. downtown or a neighborhood?"
+                        if opts_str:
+                            msg = f"I'd love to help you plan a perfect {exp_name_display}! Here are a few options: {opts_str}. Which speaks to you? What date are you planning for, and which area — e.g. downtown or a neighborhood?"
+                        else:
+                            msg = f"I'd love to help you plan a perfect {exp_name_display}! I'm thinking {plan_str}. What date are you planning for, and which area — e.g. downtown or a neighborhood?"
                     return {
                         "action": "complete",
                         "message": msg,
                         "reasoning": "Halt & Preview: location or time missing; concierge probe with proposed_plan.",
                     }
             exp_name = intent_data.get("experience_name") or "experience"
-            loc = None
-            for e in intent_data.get("entities", []):
-                if isinstance(e, dict) and e.get("type") == "location":
-                    loc = str(e.get("value", "")) or None
-                    break
+            # Use merged location from entities or prior fulfillment_context
+            loc = loc_val if _is_valid_loc(loc_val) else (fc.get("discover_location") or None)
             return {
                 "action": "tool",
                 "tool_name": "discover_composite",

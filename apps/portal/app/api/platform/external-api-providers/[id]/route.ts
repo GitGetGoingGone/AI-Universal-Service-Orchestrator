@@ -35,6 +35,12 @@ export async function PATCH(
         ? encryptLlmKey(String(body.api_key))
         : body.api_key;
     }
+    if (body.extra_config !== undefined) {
+      patch.extra_config =
+        body.extra_config != null && typeof body.extra_config === "object" && !Array.isArray(body.extra_config)
+          ? body.extra_config
+          : {};
+    }
 
     const supabase = createSupabaseServerClient();
     const { data, error } = await supabase
