@@ -95,6 +95,7 @@ function ChatContent({
   anonymousId,
   onThreadMetadata,
   onHasBundle,
+  hasBundle,
 }: {
   threadId: string | null;
   initialMessages: LoadedMessage[];
@@ -102,6 +103,7 @@ function ChatContent({
   anonymousId: string;
   onThreadMetadata: (p: { thread_id: string; thread_title?: string }) => void;
   onHasBundle: (v: boolean) => void;
+  hasBundle: boolean;
 }) {
   const bundleIdRef = useRef<string | null>(initialBundleId);
   const exploreProductIdRef = useRef<string | null>(null);
@@ -184,13 +186,6 @@ function ChatContent({
     }
   }, [runtime]);
 
-  const [addConfirmToast, setAddConfirmToast] = useState<string | null>(null);
-  useEffect(() => {
-    if (!addConfirmToast) return;
-    const t = setTimeout(() => setAddConfirmToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [addConfirmToast]);
-
   const actionInFlightRef = useRef(false);
   const handleAction = useCallback(
     async (payload: ActionPayload) => {
@@ -216,7 +211,7 @@ function ChatContent({
           const bid = json.bundle_id ?? json.data?.bundle_id;
           if (bid) bundleIdRef.current = bid;
           onHasBundle(true);
-          setAddConfirmToast(`${json.summary ?? json.message ?? "Added to bundle."} You can view your bundle anytime or add more items.`);
+          appendAssistant(`${json.summary ?? json.message ?? "Added to bundle."} You can view your bundle anytime or add more items.`);
         } else if (payload.action === "add_bundle_bulk" && payload.product_ids?.length) {
           const body: Record<string, unknown> = { product_ids: payload.product_ids, option_label: payload.option_label };
           if (bundleIdRef.current) body.bundle_id = bundleIdRef.current;
@@ -230,7 +225,7 @@ function ChatContent({
           const bid = json.bundle_id ?? json.data?.bundle_id;
           if (bid) bundleIdRef.current = bid;
           onHasBundle(true);
-          setAddConfirmToast(`${json.summary ?? json.message ?? "Added bundle."} You can view your bundle anytime.`);
+          appendAssistant(`${json.summary ?? json.message ?? "Added bundle."} You can view your bundle anytime.`);
         } else if (payload.action === "checkout" && payload.bundle_id) {
           const res = await fetch("/api/checkout", {
             method: "POST",
@@ -297,19 +292,9 @@ function ChatContent({
     });
   };
 
-  const hasBundle = !!bundleIdRef.current;
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <GatewayActionProvider onAction={handleAction}>
-        {addConfirmToast && (
-          <div
-            role="status"
-            className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-lg dark:bg-gray-800"
-          >
-            {addConfirmToast}
-          </div>
-        )}
         <ThreadMetadataListener onMetadata={onThreadMetadata} />
         <div className="flex min-w-0 flex-1 flex-col">
           <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col">
@@ -351,7 +336,23 @@ function ChatContent({
               <span>Scroll to bottom</span>
             </ThreadPrimitive.ScrollToBottom>
             <div className="border-t border-[var(--border)] bg-[var(--background)] p-4">
-              <div className="mx-auto max-w-2xl">
+              <div className="mx-auto max-w-2xl space-y-2">
+                {hasBundle && bundleIdRef.current && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleAction({ action: "view_bundle", bundle_id: bundleIdRef.current! });
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--primary)]/50 bg-[var(--primary)]/10 px-3 py-2 text-sm font-medium text-[var(--primary)] hover:bg-[var(--primary)]/20"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8 4-8-4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                    </svg>
+                    View bundle
+                  </button>
+                )}
                 <ComposerPrimitive.Root className="flex items-end gap-2 rounded-2xl border border-[var(--input)] bg-[var(--background)] shadow-sm focus-within:ring-2 focus-within:ring-[var(--ring)]">
                   <button type="button" className="shrink-0 rounded-full p-2 text-[var(--muted)] hover:bg-zinc-100 hover:text-[var(--foreground)] dark:hover:bg-zinc-800" aria-label="Add attachment">
                     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -579,6 +580,7 @@ export default function ChatPage() {
           anonymousId={anonymousId}
           onThreadMetadata={handleThreadMetadata}
           onHasBundle={setHasBundle}
+          hasBundle={hasBundle}
         />
       </div>
     </div>
