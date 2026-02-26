@@ -509,6 +509,20 @@ async def confirm_payment(order_id: str) -> Dict[str, Any]:
         return r.json()
 
 
+async def create_checkout_session(
+    order_id: str, success_url: str, cancel_url: str
+) -> Dict[str, Any]:
+    """Call Payment service to create Stripe Checkout Session. Returns url for redirect."""
+    url = f"{settings.payment_service_url}/api/v1/payment/checkout-session"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(
+            url,
+            json={"order_id": order_id, "success_url": success_url, "cancel_url": cancel_url},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 async def create_change_request(
     order_id: str,
     order_leg_id: str,

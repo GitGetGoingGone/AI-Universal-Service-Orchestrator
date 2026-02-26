@@ -77,5 +77,11 @@ async def stripe_webhook(request: Request):
         if order_id:
             await update_order_payment_status(order_id, "failed")
         logger.warning("Payment failed for order %s", order_id)
+    elif event.type == "checkout.session.completed":
+        session = event.data.object
+        order_id = (session.metadata or {}).get("order_id")
+        if order_id:
+            await update_order_payment_status(order_id, "paid")
+            logger.info("Checkout completed for order %s", order_id)
 
     return Response(status_code=200)

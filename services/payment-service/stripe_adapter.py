@@ -84,6 +84,31 @@ async def create_sponsorship_payment_intent(
     }
 
 
+async def create_checkout_session(
+    order_id: str,
+    success_url: str,
+    cancel_url: str,
+    line_items: list,
+    currency: str = "usd",
+) -> Dict[str, Any]:
+    """
+    Create Stripe Checkout Session for redirect-based payment.
+    Returns { url } - redirect user to this URL.
+    """
+    _ensure_stripe_configured()
+    stripe.api_key = settings.stripe_secret_key
+
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        payment_method_types=["card"],
+        line_items=line_items,
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"order_id": order_id},
+    )
+    return {"url": session.url, "session_id": session.id}
+
+
 async def confirm_payment_intent(payment_intent_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve PaymentIntent (e.g. after confirmation)."""
     _ensure_stripe_configured()

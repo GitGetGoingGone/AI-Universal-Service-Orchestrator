@@ -16,6 +16,7 @@ from clients import (
     proceed_to_checkout as proceed_to_checkout_client,
     create_payment_intent as create_payment_intent_client,
     confirm_payment as confirm_payment_client,
+    create_checkout_session as create_checkout_session_client,
     create_change_request as create_change_request_client,
 )
 
@@ -215,6 +216,33 @@ class ConfirmPaymentBody(BaseModel):
     """Request body for confirming payment (demo mode)."""
 
     order_id: str
+
+
+class CheckoutSessionBody(BaseModel):
+    """Create Checkout Session for redirect payment."""
+
+    order_id: str
+    success_url: str
+    cancel_url: str
+
+
+@router.post("/payment/checkout-session")
+async def create_checkout_session_route(body: CheckoutSessionBody):
+    """Create Stripe Checkout Session. Returns url for redirect (no Stripe.js needed)."""
+    try:
+        return await create_checkout_session_client(
+            order_id=body.order_id,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if e.response.status_code == 400:
+            raise HTTPException(status_code=400, detail=str(e.response.json().get("detail", "Bad request")))
+        raise HTTPException(status_code=502, detail=f"Payment service error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Payment service error: {e}")
 
 
 @router.post("/payment/confirm")

@@ -167,14 +167,18 @@ fi
 # --- Optional: Webhook push ---
 if [ "$run_webhook" = true ]; then
   echo "--- Webhook push ---"
-  resp=$(curl -sf --max-time "$TIMEOUT" -X POST "$WEBHOOK/api/v1/webhooks/chat/chatgpt/test-123" \
+  resp=$(curl -s --max-time "$TIMEOUT" -w "\n%{http_code}" -X POST "$WEBHOOK/api/v1/webhooks/chat/chatgpt/test-123" \
     -H "Content-Type: application/json" \
     -d '{"narrative": "Test update"}')
-  if echo "$resp" | grep -q '"status"'; then
+  http_code=$(echo "$resp" | tail -n1)
+  body=$(echo "$resp" | sed '$d')
+  if echo "$body" | grep -q '"status"'; then
     echo "  ✓ Webhook OK"
+  elif [ "$http_code" = "503" ] && echo "$body" | grep -q "not configured"; then
+    echo "  ○ Webhook push skipped (CHATGPT_WEBHOOK_URL not set)"
   else
-    echo "  ✗ Webhook failed"
-    echo "$resp"
+    echo "  ✗ Webhook failed (HTTP $http_code)"
+    echo "$body"
     return 1
   fi
   echo ""

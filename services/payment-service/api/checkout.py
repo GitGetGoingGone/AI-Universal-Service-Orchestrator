@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from config import settings
 from db import get_order_with_items, create_payment_record, update_order_payment_status
-from stripe_adapter import create_payment_intent
+from stripe_adapter import create_payment_intent, create_checkout_session
 
 router = APIRouter(prefix="/api/v1", tags=["Payment"])
 
@@ -58,6 +58,63 @@ async def create_payment(body: CreatePaymentBody):
         "amount": total,
         "currency": currency,
     }
+
+
+class CheckoutSessionBody(BaseModel):
+    """Create Checkout Session for redirect payment."""
+
+    order_id: str
+    success_url: str
+    cancel_url: str
+
+
+@router.post("/payment/checkout-session")
+async def create_checkout_session_route(body: CheckoutSessionBody):
+    """
+    Create Stripe Checkout Session. Returns url for redirect.
+    No client-side Stripe.js needed.
+    """
+    order = await get_order_with_items(body.order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("payment_status") == "paid":
+        raise HTTPException(status_code=400, detail="Order already paid")
+
+    items = order.get("items") or []
+    line_items = []
+    for item in items:
+        unit = float(item.get("unit_price") or 0)
+        qty = int(item.get("quantity") or 1)
+        line_items.append({
+            "price_data": {
+                "currency": order.get("currency", "usd").lower(),
+                "product_data": {"name": item.get("item_name") or "Item"},
+                "unit_amount": int(round(unit * 100)),
+            },
+            "quantity": qty,
+        })
+    if not line_items:
+        total = float(order.get("total_amount") or 0)
+        line_items = [{
+            "price_data": {
+                "currency": order.get("currency", "usd").lower(),
+                "product_data": {"name": order.get("bundle_id", "Order")},
+                "unit_amount": max(50, int(round(total * 100))),
+            },
+            "quantity": 1,
+        }]
+
+    try:
+        result = await create_checkout_session(
+            order_id=body.order_id,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+            line_items=line_items,
+            currency=order.get("currency", "usd").lower(),
+        )
+        return {"url": result["url"], "session_id": result.get("session_id")}
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 class ConfirmPaymentBody(BaseModel):
