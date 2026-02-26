@@ -184,6 +184,13 @@ function ChatContent({
     }
   }, [runtime]);
 
+  const [addConfirmToast, setAddConfirmToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!addConfirmToast) return;
+    const t = setTimeout(() => setAddConfirmToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [addConfirmToast]);
+
   const actionInFlightRef = useRef(false);
   const handleAction = useCallback(
     async (payload: ActionPayload) => {
@@ -209,7 +216,7 @@ function ChatContent({
           const bid = json.bundle_id ?? json.data?.bundle_id;
           if (bid) bundleIdRef.current = bid;
           onHasBundle(true);
-          appendAssistant(`${json.summary ?? json.message ?? "Added to bundle."} You can view your bundle anytime or add more items.`);
+          setAddConfirmToast(`${json.summary ?? json.message ?? "Added to bundle."} You can view your bundle anytime or add more items.`);
         } else if (payload.action === "add_bundle_bulk" && payload.product_ids?.length) {
           const body: Record<string, unknown> = { product_ids: payload.product_ids, option_label: payload.option_label };
           if (bundleIdRef.current) body.bundle_id = bundleIdRef.current;
@@ -223,7 +230,7 @@ function ChatContent({
           const bid = json.bundle_id ?? json.data?.bundle_id;
           if (bid) bundleIdRef.current = bid;
           onHasBundle(true);
-          appendAssistant(`${json.summary ?? json.message ?? "Added bundle."} You can view your bundle anytime.`);
+          setAddConfirmToast(`${json.summary ?? json.message ?? "Added bundle."} You can view your bundle anytime.`);
         } else if (payload.action === "checkout" && payload.bundle_id) {
           const res = await fetch("/api/checkout", {
             method: "POST",
@@ -295,6 +302,14 @@ function ChatContent({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <GatewayActionProvider onAction={handleAction}>
+        {addConfirmToast && (
+          <div
+            role="status"
+            className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-lg dark:bg-gray-800"
+          >
+            {addConfirmToast}
+          </div>
+        )}
         <ThreadMetadataListener onMetadata={onThreadMetadata} />
         <div className="flex min-w-0 flex-1 flex-col">
           <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col">
