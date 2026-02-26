@@ -1,15 +1,67 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { loadStripe } from "@stripe/stripe-js";
+import { loadStripe, Stripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 
-const stripePromise =
+const stripePromise: Promise<Stripe | null> | null =
   typeof window !== "undefined" && process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
     ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, {
         apiVersion: "2023-10-16",
       })
     : null;
+
+/** Wraps Elements with pre-resolved Stripe instance so useStripe() is available immediately. */
+function ElementsWithStripe({
+  stripePromise: promise,
+  clientSecret,
+  orderId,
+  amount,
+  currency,
+  onSuccess,
+  onError,
+}: {
+  stripePromise: Promise<Stripe | null> | null;
+  clientSecret: string;
+  orderId: string;
+  amount: number;
+  currency: string;
+  onSuccess?: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [stripeInstance, setStripeInstance] = useState<Stripe | null>(null);
+
+  useEffect(() => {
+    if (!promise) return;
+    promise.then((s) => s && setStripeInstance(s));
+  }, [promise]);
+
+  if (!stripeInstance) {
+    return (
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)]/30 p-4 text-sm text-[var(--muted-foreground)]">
+        Loading Stripe…
+      </div>
+    );
+  }
+
+  return (
+    <Elements
+      stripe={stripeInstance}
+      options={{
+        clientSecret,
+        appearance: { theme: "stripe" },
+      }}
+    >
+      <PaymentFormInner
+        orderId={orderId}
+        amount={amount}
+        currency={currency}
+        onSuccess={() => onSuccess?.()}
+        onError={onError}
+      />
+    </Elements>
+  );
+}
 
 function PaymentFormInner({
   orderId,
@@ -27,6 +79,7 @@ function PaymentFormInner({
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
+  const isReady = Boolean(stripe && elements);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,10 +111,10 @@ function PaymentFormInner({
       <PaymentElement options={{ layout: "tabs" }} />
       <button
         type="submit"
-        disabled={!stripe || loading}
+        disabled={!isReady || loading}
         className="w-full rounded-lg bg-[var(--primary)] px-4 py-3 text-sm font-medium text-[var(--primary-foreground)] disabled:opacity-50 hover:opacity-90"
       >
-        {loading ? "Processing…" : `Pay ${currency} ${amount.toFixed(2)}`}
+        {loading ? "Processing…" : isReady ? `Pay ${currency} ${amount.toFixed(2)}` : "Preparing…"}
       </button>
     </form>
   );
@@ -129,21 +182,15 @@ export function PaymentFormInline({
       <p className="mb-3 text-sm font-medium text-[var(--foreground)]">
         Order {orderId.slice(0, 8)}… — {currency} {amount.toFixed(2)}
       </p>
-      <Elements
-        stripe={stripePromise}
-        options={{
-          clientSecret,
-          appearance: { theme: "stripe" },
-        }}
-      >
-        <PaymentFormInner
-          orderId={orderId}
-          amount={amount}
-          currency={currency}
-          onSuccess={() => onSuccess?.()}
-          onError={setError}
-        />
-      </Elements>
+      <ElementsWithStripe
+        stripePromise={stripePromise}
+        clientSecret={clientSecret}
+        orderId={orderId}
+        amount={amount}
+        currency={currency}
+        onSuccess={() => onSuccess?.()}
+        onError={setError}
+      />
     </div>
   );
 }

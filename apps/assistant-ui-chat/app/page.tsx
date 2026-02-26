@@ -381,19 +381,6 @@ function ChatContent({
                       </div>
                     </div>
                   )}
-                  {pendingOrderId && (
-                    <div className="flex justify-start">
-                      <div className="msg-assistant max-w-[85%] rounded-2xl bg-[var(--muted)]/30 px-4 py-3">
-                        <PaymentFormInline
-                          orderId={pendingOrderId}
-                          onSuccess={() => {
-                            setPendingOrderId(null);
-                            setAddConfirmations((prev) => [...prev, "Payment successful!"]);
-                          }}
-                        />
-                      </div>
-                    </div>
-                  )}
                 </div>
                 <div className="h-4 shrink-0" />
               </div>
@@ -409,6 +396,17 @@ function ChatContent({
             </ThreadPrimitive.ScrollToBottom>
             <div className="border-t border-[var(--border)] bg-[var(--background)] p-4">
               <div className="mx-auto max-w-2xl space-y-2">
+                {pendingOrderId && (
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
+                    <PaymentFormInline
+                      orderId={pendingOrderId}
+                      onSuccess={() => {
+                        setPendingOrderId(null);
+                        setAddConfirmations((prev) => [...prev, "Payment successful!"]);
+                      }}
+                    />
+                  </div>
+                )}
                 {hasBundle && bundleIdRef.current && (
                   <div className="flex gap-2">
                     <button
