@@ -17,6 +17,8 @@ from clients import (
     create_payment_intent as create_payment_intent_client,
     confirm_payment as confirm_payment_client,
     create_checkout_session as create_checkout_session_client,
+    create_checkout_session_from_order as create_checkout_session_from_order_client,
+    get_order_status as get_order_status_client,
     create_change_request as create_change_request_client,
 )
 
@@ -237,10 +239,20 @@ async def create_checkout_session_route(body: CheckoutSessionBody):
         )
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
+            order = await get_order_status_client(body.order_id)
+            if order and "error" not in order:
+                return await create_checkout_session_from_order_client(
+                    order_id=body.order_id,
+                    success_url=body.success_url,
+                    cancel_url=body.cancel_url,
+                    order=order,
+                )
             raise HTTPException(status_code=404, detail="Order not found")
         if e.response.status_code == 400:
             raise HTTPException(status_code=400, detail=str(e.response.json().get("detail", "Bad request")))
         raise HTTPException(status_code=502, detail=f"Payment service error: {e}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Payment service error: {e}")
 

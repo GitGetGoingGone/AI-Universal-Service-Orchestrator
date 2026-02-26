@@ -117,6 +117,59 @@ async def create_checkout_session_route(body: CheckoutSessionBody):
         raise HTTPException(status_code=503, detail=str(e))
 
 
+class CheckoutSessionFromOrderBody(BaseModel):
+    """Create Checkout Session with order data (when order is in Discovery DB only)."""
+
+    order_id: str
+    success_url: str
+    cancel_url: str
+    order: dict  # { items: [...], total_amount, currency }
+
+
+@router.post("/payment/checkout-session-from-order")
+async def create_checkout_session_from_order_route(body: CheckoutSessionFromOrderBody):
+    """
+    Create Stripe Checkout Session using provided order data.
+    Use when order exists in Discovery but not in Payment service DB.
+    """
+    order = body.order
+    items = order.get("items") or []
+    line_items = []
+    for item in items:
+        unit = float(item.get("unit_price") or 0)
+        qty = int(item.get("quantity") or 1)
+        line_items.append({
+            "price_data": {
+                "currency": (order.get("currency") or "usd").lower(),
+                "product_data": {"name": item.get("item_name") or "Item"},
+                "unit_amount": int(round(unit * 100)),
+            },
+            "quantity": qty,
+        })
+    if not line_items:
+        total = float(order.get("total_amount") or 0)
+        line_items = [{
+            "price_data": {
+                "currency": (order.get("currency") or "usd").lower(),
+                "product_data": {"name": order.get("bundle_id", "Order")},
+                "unit_amount": max(50, int(round(total * 100))),
+            },
+            "quantity": 1,
+        }]
+
+    try:
+        result = await create_checkout_session(
+            order_id=body.order_id,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+            line_items=line_items,
+            currency=(order.get("currency") or "usd").lower(),
+        )
+        return {"url": result["url"], "session_id": result.get("session_id")}
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 class ConfirmPaymentBody(BaseModel):
     """Confirm payment for order (demo mode only)."""
 

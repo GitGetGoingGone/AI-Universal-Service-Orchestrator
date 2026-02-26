@@ -523,6 +523,25 @@ async def create_checkout_session(
         return r.json()
 
 
+async def create_checkout_session_from_order(
+    order_id: str, success_url: str, cancel_url: str, order: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Call Payment service with order data (fallback when order not in Payment DB)."""
+    url = f"{settings.payment_service_url}/api/v1/payment/checkout-session-from-order"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(
+            url,
+            json={
+                "order_id": order_id,
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+                "order": order,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 async def create_change_request(
     order_id: str,
     order_leg_id: str,
