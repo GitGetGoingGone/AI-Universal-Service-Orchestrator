@@ -11,6 +11,7 @@ import {
 } from "@assistant-ui/react";
 import { useChatRuntime, AssistantChatTransport } from "@assistant-ui/react-ai-sdk";
 import { GatewayMessageParts } from "@/components/GatewayPartRenderers";
+import { PaymentFormInline } from "@/components/PaymentFormInline";
 import { GatewayActionProvider, type ActionPayload } from "@/contexts/GatewayActionContext";
 
 const SUGGESTIONS = [
@@ -83,6 +84,36 @@ function UserMessage() {
         <MessagePrimitive.Parts />
       </div>
     </MessagePrimitive.Root>
+  );
+}
+
+type BundleItem = { name?: string; price?: number; currency?: string };
+function BundleViewCard({
+  items,
+  total,
+  currency = "USD",
+}: {
+  items: BundleItem[];
+  total: number;
+  currency?: string;
+}) {
+  return (
+    <div className="my-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <p className="mb-3 font-medium text-[var(--foreground)]">Your bundle</p>
+      <ul className="mb-3 space-y-2 text-sm text-[var(--foreground)]">
+        {items.map((it, i) => (
+          <li key={i} className="flex justify-between">
+            <span>{it.name ?? "Item"}</span>
+            <span>
+              {it.currency ?? currency} {(it.price ?? 0).toFixed(2)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="border-t border-[var(--border)] pt-2 text-sm font-medium">
+        Total: {currency} {total.toFixed(2)}
+      </p>
+    </div>
   );
 }
 
@@ -187,17 +218,18 @@ function ChatContent({
   }, [runtime]);
 
   const [addConfirmations, setAddConfirmations] = useState<string[]>([]);
+  const [bundleView, setBundleView] = useState<{
+    items: BundleItem[];
+    total: number;
+    currency: string;
+  } | null>(null);
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const actionInFlightRef = useRef(false);
   const handleAction = useCallback(
     async (payload: ActionPayload) => {
       if (actionInFlightRef.current) return;
       actionInFlightRef.current = true;
-      const appendAssistant = (text: string) => {
-        runtime.thread.append({
-          role: "assistant",
-          content: [{ type: "text" as const, text }],
-        });
-      };
       try {
         if (payload.action === "add_to_bundle" && payload.product_id) {
           const body: Record<string, string> = { product_id: payload.product_id };
@@ -212,7 +244,7 @@ function ChatContent({
           const bid = json.bundle_id ?? json.data?.bundle_id;
           if (bid) bundleIdRef.current = bid;
           onHasBundle(true);
-          appendAssistant(`${json.summary ?? json.message ?? "Added to bundle."} You can view your bundle anytime or add more items.`);
+          setAddConfirmations((prev) => [...prev, `${json.summary ?? json.message ?? "Added to bundle."} You can view your bundle anytime or add more items.`]);
         } else if (payload.action === "add_bundle_bulk" && payload.product_ids?.length) {
           const body: Record<string, unknown> = { product_ids: payload.product_ids, option_label: payload.option_label };
           if (bundleIdRef.current) body.bundle_id = bundleIdRef.current;
@@ -234,31 +266,22 @@ function ChatContent({
             body: JSON.stringify({ bundle_id: payload.bundle_id }),
           });
           const json = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(json.error || "Checkout failed");
+          if (!res.ok) throw new Error(json.error || json.detail || "Checkout failed");
           const orderId = json.order_id ?? json.data?.id;
           if (orderId) {
             orderIdRef.current = orderId;
             sessionStorage.setItem("uso_order_id", orderId);
-            runtime.thread.append({
-              role: "assistant",
-              content: [
-                { type: "text" as const, text: json.summary ?? json.message ?? "Your order is ready. Complete your payment below:" },
-                { type: "data" as const, name: "payment_form", data: { order_id: orderId } },
-              ],
-            });
+            setActionError(null);
+            setAddConfirmations((prev) => [...prev, json.summary ?? json.message ?? "Your order is ready. Complete your payment below:"]);
+            setPendingOrderId(orderId);
           } else {
-            appendAssistant(json.summary ?? json.message ?? "Proceeding to checkout.");
+            setAddConfirmations((prev) => [...prev, json.summary ?? json.message ?? "Proceeding to checkout."]);
           }
         } else if (payload.action === "proceed_to_payment" && payload.order_id) {
           orderIdRef.current = payload.order_id;
           sessionStorage.setItem("uso_order_id", payload.order_id);
-          runtime.thread.append({
-            role: "assistant",
-            content: [
-              { type: "text" as const, text: "Complete your payment below:" },
-              { type: "data" as const, name: "payment_form", data: { order_id: payload.order_id } },
-            ],
-          });
+          setAddConfirmations((prev) => [...prev, "Complete your payment below:"]);
+          setPendingOrderId(payload.order_id);
         } else if (payload.action === "explore_product" && payload.product_id) {
           exploreProductIdRef.current = payload.product_id;
           const name = payload.product_name ?? "this product";
@@ -272,13 +295,24 @@ function ChatContent({
             content: [{ type: "text" as const, text: `I'd like to explore the ${payload.option_label}` }],
           });
         } else if (payload.action === "view_bundle" && payload.bundle_id) {
-          runtime.thread.append({
-            role: "user",
-            content: [{ type: "text" as const, text: "Show me my bundle" }],
-          });
+          setActionError(null);
+          const res = await fetch(`/api/bundles/${payload.bundle_id}`);
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(json.error || "Failed to load bundle");
+          const data = json.data ?? json;
+          const items = (data.items ?? []).map((it: { name?: string; price?: number; currency?: string }) => ({
+            name: it.name ?? "Item",
+            price: it.price ?? 0,
+            currency: it.currency ?? "USD",
+          }));
+          const total = typeof data.total_price === "number" ? data.total_price : parseFloat(data.total_price) || 0;
+          const currency = data.currency ?? "USD";
+          setBundleView({ items, total, currency });
         }
       } catch (err) {
-        appendAssistant(`Error: ${err instanceof Error ? err.message : "Action failed"}`);
+        const msg = err instanceof Error ? err.message : "Action failed";
+        setActionError(msg);
+        setAddConfirmations((prev) => [...prev, `Error: ${msg}`]);
       } finally {
         actionInFlightRef.current = false;
       }
@@ -330,6 +364,36 @@ function ChatContent({
                       </div>
                     </div>
                   ))}
+                  {bundleView && (
+                    <div className="flex justify-start">
+                      <div className="msg-assistant relative max-w-[85%] rounded-2xl bg-[var(--muted)]/30 px-4 py-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setBundleView(null)}
+                          className="absolute right-2 top-2 rounded p-1 text-[var(--muted)] hover:bg-[var(--muted)]/50 hover:text-[var(--foreground)]"
+                          aria-label="Dismiss"
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                        <BundleViewCard items={bundleView.items} total={bundleView.total} currency={bundleView.currency} />
+                      </div>
+                    </div>
+                  )}
+                  {pendingOrderId && (
+                    <div className="flex justify-start">
+                      <div className="msg-assistant max-w-[85%] rounded-2xl bg-[var(--muted)]/30 px-4 py-3">
+                        <PaymentFormInline
+                          orderId={pendingOrderId}
+                          onSuccess={() => {
+                            setPendingOrderId(null);
+                            setAddConfirmations((prev) => [...prev, "Payment successful!"]);
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="h-4 shrink-0" />
               </div>
