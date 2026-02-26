@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import {
   AssistantRuntimeProvider,
   ThreadPrimitive,
@@ -112,35 +112,42 @@ function ChatContent({
   }
   if (initialBundleId) bundleIdRef.current = initialBundleId;
 
-  const runtime = useChatRuntime({
-    transport: new AssistantChatTransport({
-      api: "/api/chat",
-      prepareSendMessagesRequest: ({ messages }) => {
-        const lastUser = [...messages].reverse().find((m) => m.role === "user") as { content?: unknown; parts?: unknown } | undefined;
-        const raw = lastUser?.content ?? lastUser?.parts;
-        const text =
-          typeof raw === "string"
-            ? raw.trim()
-            : Array.isArray(raw)
-              ? (raw as { type?: string; text?: string }[])
-                  .map((p) => (p?.type === "text" && typeof p?.text === "string" ? p.text : ""))
-                  .join("")
-                  .trim()
-              : "";
-        const body: Record<string, unknown> = { text: text || undefined, anonymous_id: anonymousId };
-        if (bundleIdRef.current) body.bundle_id = bundleIdRef.current;
-        if (orderIdRef.current) body.order_id = orderIdRef.current;
-        const tid = threadId ?? sessionStorage.getItem(STORAGE_THREAD);
-        if (tid) body.thread_id = tid;
-        const epid = exploreProductIdRef.current;
-        if (epid) {
-          body.explore_product_id = epid;
-          exploreProductIdRef.current = null;
-        }
-        return { body };
-      },
-    }),
-  });
+  const threadIdRef = useRef(threadId);
+  threadIdRef.current = threadId;
+
+  const transport = useMemo(
+    () =>
+      new AssistantChatTransport({
+        api: "/api/chat",
+        prepareSendMessagesRequest: ({ messages }) => {
+          const lastUser = [...messages].reverse().find((m) => m.role === "user") as { content?: unknown; parts?: unknown } | undefined;
+          const raw = lastUser?.content ?? lastUser?.parts;
+          const text =
+            typeof raw === "string"
+              ? raw.trim()
+              : Array.isArray(raw)
+                ? (raw as { type?: string; text?: string }[])
+                    .map((p) => (p?.type === "text" && typeof p?.text === "string" ? p.text : ""))
+                    .join("")
+                    .trim()
+                : "";
+          const body: Record<string, unknown> = { text: text || undefined, anonymous_id: anonymousId };
+          if (bundleIdRef.current) body.bundle_id = bundleIdRef.current;
+          if (orderIdRef.current) body.order_id = orderIdRef.current;
+          const tid = threadIdRef.current ?? (typeof window !== "undefined" ? sessionStorage.getItem(STORAGE_THREAD) : null);
+          if (tid) body.thread_id = tid;
+          const epid = exploreProductIdRef.current;
+          if (epid) {
+            body.explore_product_id = epid;
+            exploreProductIdRef.current = null;
+          }
+          return { body };
+        },
+      }),
+    [anonymousId]
+  );
+
+  const runtime = useChatRuntime({ transport });
 
   useEffect(() => {
     if (initialMessages.length === 0 || !threadId) return;
@@ -177,8 +184,11 @@ function ChatContent({
     }
   }, [runtime]);
 
+  const actionInFlightRef = useRef(false);
   const handleAction = useCallback(
     async (payload: ActionPayload) => {
+      if (actionInFlightRef.current) return;
+      actionInFlightRef.current = true;
       const appendAssistant = (text: string) => {
         runtime.thread.append({
           role: "assistant",
@@ -266,6 +276,8 @@ function ChatContent({
         }
       } catch (err) {
         appendAssistant(`Error: ${err instanceof Error ? err.message : "Action failed"}`);
+      } finally {
+        actionInFlightRef.current = false;
       }
     },
     [runtime, onHasBundle]
