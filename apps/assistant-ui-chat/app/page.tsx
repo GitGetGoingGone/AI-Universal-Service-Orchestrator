@@ -22,6 +22,8 @@ const SUGGESTIONS = [
 const STORAGE_ANON = "uso_anonymous_id";
 const STORAGE_THREAD = "uso_thread_id";
 
+const hydratedThreadIds = new Set<string>();
+
 function getOrCreateAnonymousId(): string {
   if (typeof window === "undefined") return "";
   let id = sessionStorage.getItem(STORAGE_ANON);
@@ -140,10 +142,10 @@ function ChatContent({
     }),
   });
 
-  const hydratedRef = useRef(false);
   useEffect(() => {
-    if (hydratedRef.current || initialMessages.length === 0) return;
-    hydratedRef.current = true;
+    if (initialMessages.length === 0 || !threadId) return;
+    if (hydratedThreadIds.has(threadId)) return;
+    hydratedThreadIds.add(threadId);
     for (const m of initialMessages) {
       const content = typeof m.content === "string" ? m.content : String(m.content ?? "");
       if (!content && m.role === "system") continue;
@@ -152,7 +154,10 @@ function ChatContent({
         content: [{ type: "text" as const, text: content }],
       });
     }
-  }, [initialMessages, runtime]);
+    return () => {
+      hydratedThreadIds.delete(threadId);
+    };
+  }, [initialMessages, runtime, threadId]);
 
   const paymentSuccessHandled = useRef(false);
   useEffect(() => {
