@@ -231,22 +231,19 @@ class CheckoutSessionBody(BaseModel):
 @router.post("/payment/checkout-session")
 async def create_checkout_session_route(body: CheckoutSessionBody):
     """Create Stripe Checkout Session. Returns url for redirect (no Stripe.js needed)."""
+    # Always fetch order from Discovery (source of truth) and pass to Payment
+    order = await get_order_status_client(body.order_id)
+    if not order or order.get("error"):
+        raise HTTPException(status_code=404, detail="Order not found")
     try:
-        return await create_checkout_session_client(
+        return await create_checkout_session_from_order_client(
             order_id=body.order_id,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
+            order=order,
         )
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
-            order = await get_order_status_client(body.order_id)
-            if order and "error" not in order:
-                return await create_checkout_session_from_order_client(
-                    order_id=body.order_id,
-                    success_url=body.success_url,
-                    cancel_url=body.cancel_url,
-                    order=order,
-                )
             raise HTTPException(status_code=404, detail="Order not found")
         if e.response.status_code == 400:
             raise HTTPException(status_code=400, detail=str(e.response.json().get("detail", "Bad request")))
