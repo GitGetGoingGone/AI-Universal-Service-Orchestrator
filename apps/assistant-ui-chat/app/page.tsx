@@ -396,15 +396,6 @@ export default function ChatPage() {
     fetchThreads();
   }, [fetchThreads]);
 
-  const initialLoadDone = useRef(false);
-  useEffect(() => {
-    if (!anonymousId || initialLoadDone.current) return;
-    const tid = typeof window !== "undefined" ? sessionStorage.getItem(STORAGE_THREAD) : null;
-    if (!tid) return;
-    initialLoadDone.current = true;
-    handleSelectThread(tid);
-  }, [anonymousId, handleSelectThread]);
-
   const handleNewChat = () => {
     sessionStorage.removeItem(STORAGE_THREAD);
     setThreadId(null);
@@ -435,6 +426,15 @@ export default function ChatPage() {
       setLoadingThread(false);
     }
   }, [threadId, loadedThread?.id, anonymousId]);
+
+  const initialLoadDone = useRef(false);
+  useEffect(() => {
+    if (!anonymousId || initialLoadDone.current) return;
+    const tid = typeof window !== "undefined" ? sessionStorage.getItem(STORAGE_THREAD) : null;
+    if (!tid) return;
+    initialLoadDone.current = true;
+    handleSelectThread(tid);
+  }, [anonymousId, handleSelectThread]);
 
   const handleDeleteThread = async (id: string) => {
     try {
