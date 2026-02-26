@@ -47,22 +47,26 @@ function ProductListRenderer({ data }: { data: { products?: Product[] } }) {
             <div className="mt-2 flex flex-wrap gap-1">
               <button
                 type="button"
-                onClick={() =>
-                  onAction({ action: "add_to_bundle", product_id: p.id! })
-                }
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onAction({ action: "add_to_bundle", product_id: p.id! });
+                }}
                 className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
               >
                 Add to bundle
               </button>
               <button
                 type="button"
-                onClick={() =>
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
                   onAction({
                     action: "explore_product",
                     product_id: p.id!,
                     product_name: p.name,
-                  })
-                }
+                  });
+                }}
                 className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
               >
                 Explore
@@ -134,7 +138,9 @@ function EngagementChoiceRenderer({
         <button
           key={i}
           type="button"
-          onClick={() => {
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
             if (!onAction) return;
             if (cta.action === "add_to_bundle") {
               const first = options[0];

@@ -388,7 +388,6 @@ export default function ChatPage() {
   const [hasBundle, setHasBundle] = useState(false);
   const [loadingThread, setLoadingThread] = useState(false);
   const anonymousId = typeof window !== "undefined" ? getOrCreateAnonymousId() : "";
-
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
     setSidebarOpen(mq.matches);
