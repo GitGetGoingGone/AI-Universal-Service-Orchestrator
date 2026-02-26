@@ -110,14 +110,7 @@ function ChatContent({
   }
   if (initialBundleId) bundleIdRef.current = initialBundleId;
 
-  const initialMsgs = initialMessages.map((m) => ({
-    id: m.id,
-    role: m.role as "user" | "assistant" | "system",
-    content: typeof m.content === "string" ? m.content : String(m.content ?? ""),
-  }));
-
   const runtime = useChatRuntime({
-    initialMessages: initialMsgs.length > 0 ? initialMsgs : undefined,
     transport: new AssistantChatTransport({
       api: "/api/chat",
       prepareSendMessagesRequest: ({ messages }) => {
@@ -146,6 +139,20 @@ function ChatContent({
       },
     }),
   });
+
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current || initialMessages.length === 0) return;
+    hydratedRef.current = true;
+    for (const m of initialMessages) {
+      const content = typeof m.content === "string" ? m.content : String(m.content ?? "");
+      if (!content && m.role === "system") continue;
+      runtime.thread.append({
+        role: m.role as "user" | "assistant" | "system",
+        content: [{ type: "text" as const, text: content }],
+      });
+    }
+  }, [initialMessages, runtime]);
 
   const paymentSuccessHandled = useRef(false);
   useEffect(() => {
