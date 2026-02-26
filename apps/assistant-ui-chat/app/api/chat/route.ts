@@ -2,9 +2,26 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
 } from "ai";
+import { getSupabase } from "@/lib/supabase";
 
 const GATEWAY_URL =
   process.env.NEXT_PUBLIC_GATEWAY_URL || "http://localhost:8002";
+
+/** Derive a human-friendly conversation title from the orchestrator response. */
+function deriveThreadTitle(data: Record<string, unknown>, fallback: string): string {
+  const d = data.data as Record<string, unknown> | undefined;
+  const intent = d?.intent as Record<string, unknown> | undefined;
+  const searchQuery = (intent?.search_query as string) || "";
+  const intentType = (intent?.intent_type as string) || "";
+  if (intentType === "discover_composite" && searchQuery) {
+    const capped = searchQuery.slice(0, 40);
+    return `Planning ${capped.charAt(0).toUpperCase() + capped.slice(1)}`;
+  }
+  if (searchQuery && searchQuery.length <= 50) {
+    return searchQuery.charAt(0).toUpperCase() + searchQuery.slice(1);
+  }
+  return fallback.slice(0, 50) || "New chat";
+}
 
 function isLocalhost(url: string): boolean {
   try {
@@ -40,8 +57,10 @@ export async function POST(req: Request) {
       text?: string;
       input?: string;
       thread_id?: string;
+      anonymous_id?: string;
       user_id?: string;
       bundle_id?: string;
+      order_id?: string;
       explore_product_id?: string;
     };
 
@@ -85,6 +104,49 @@ export async function POST(req: Request) {
       content: extractText(m.content) || extractText(m.parts),
     }));
 
+    const supabase = getSupabase();
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const tid = typeof body.thread_id === "string" ? body.thread_id : null;
+    let resolvedThreadId: string | null = tid && uuidRegex.test(tid) ? tid : null;
+    let isNewThread = false;
+
+    if (supabase && body.anonymous_id) {
+      if (resolvedThreadId) {
+        const { data: thread } = await supabase
+          .from("chat_threads")
+          .select("id, anonymous_id")
+          .eq("id", resolvedThreadId)
+          .single();
+        if (!thread || thread.anonymous_id !== body.anonymous_id) {
+          resolvedThreadId = null;
+        }
+      }
+      if (!resolvedThreadId) {
+        const { data: newThread } = await supabase
+          .from("chat_threads")
+          .insert({
+            anonymous_id: body.anonymous_id,
+            title: text.slice(0, 100) || "New chat",
+          })
+          .select("id")
+          .single();
+        resolvedThreadId = newThread?.id ?? null;
+        isNewThread = !!newThread?.id;
+      }
+      if (resolvedThreadId) {
+        await supabase.from("chat_messages").insert({
+          thread_id: resolvedThreadId,
+          role: "user",
+          content: text,
+          channel: "web",
+        });
+        await supabase
+          .from("chat_threads")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", resolvedThreadId);
+      }
+    }
+
     const payload: Record<string, unknown> = {
       text,
       limit: 20,
@@ -92,9 +154,10 @@ export async function POST(req: Request) {
       stream: true,
     };
     if (normalizedMessages && normalizedMessages.length > 0) payload.messages = normalizedMessages;
-    if (body.thread_id) payload.thread_id = body.thread_id;
+    if (resolvedThreadId) payload.thread_id = resolvedThreadId;
     if (body.user_id) payload.user_id = body.user_id;
     if (body.bundle_id) payload.bundle_id = body.bundle_id;
+    if (body.order_id) payload.order_id = body.order_id;
     if (body.explore_product_id) payload.explore_product_id = body.explore_product_id;
 
     const res = await fetch(`${GATEWAY_URL}/api/v1/chat?stream=true&agentic=true`, {
@@ -227,15 +290,48 @@ export async function POST(req: Request) {
           }
           if (Array.isArray(suggestedCtas) && suggestedCtas.length > 0) {
             const orderId = (doneData.order_id as string) ?? (doneData.data as Record<string, unknown>)?.order_id as string | undefined;
+            const bundleId = (doneData.bundle_id as string) ?? body.bundle_id as string | undefined;
             writer.write({
               type: "data-engagement_choice",
               data: {
-                ctas: suggestedCtas.map((c) => ({
+                ctas: suggestedCtas.map((c: { label?: string; action?: string; order_id?: string; bundle_id?: string }) => ({
                   ...c,
                   ...(orderId && c.action === "proceed_to_payment" ? { order_id: orderId } : {}),
+                  ...(bundleId && c.action === "view_bundle" ? { bundle_id: bundleId } : {}),
                 })),
                 options: suggestedOptions ?? [],
               },
+            });
+          }
+          // Inline Stripe payment form when order is ready (seamless checkout in chat)
+          const orderIdForPayment = (doneData.order_id as string) ?? (doneData.data as Record<string, unknown>)?.order_id as string | undefined;
+          if (orderIdForPayment && typeof orderIdForPayment === "string") {
+            writer.write({
+              type: "data-payment_form",
+              data: { order_id: orderIdForPayment },
+            });
+          }
+
+          // Persist assistant message and set model-generated title for new threads
+          if (supabase && resolvedThreadId) {
+            const assistantContent = summary || null;
+            const adaptiveCard = doneData.adaptive_card ?? null;
+            await supabase.from("chat_messages").insert({
+              thread_id: resolvedThreadId,
+              role: "assistant",
+              content: assistantContent,
+              adaptive_card: adaptiveCard,
+              channel: "web",
+            });
+            const updatePayload: Record<string, string> = { updated_at: new Date().toISOString() };
+            if (isNewThread) {
+              updatePayload.title = deriveThreadTitle(doneData, text) || text.slice(0, 50) || "New chat";
+            }
+            await supabase.from("chat_threads").update(updatePayload).eq("id", resolvedThreadId);
+            const threadTitle = isNewThread ? (deriveThreadTitle(doneData, text) || text.slice(0, 50) || "New chat") : undefined;
+            writer.write({
+              type: "data-thread_metadata",
+              data: { thread_id: resolvedThreadId, ...(threadTitle && { thread_title: threadTitle }) },
             });
           }
         },

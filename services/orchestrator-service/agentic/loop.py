@@ -1258,6 +1258,16 @@ async def run_agentic_loop(
             except Exception as e:
                 logger.debug("get_experience_categories for no-results fallback failed: %s", e)
 
+    # Halt & Preview: when discover_composite completes with probing (no products yet), pass intent's
+    # bundle_options as suggested_bundle_options so the frontend renders thematic option cards
+    if not engagement_data.get("suggested_bundle_options") and (intent_data or {}).get("intent_type") == "discover_composite":
+        intent_opts = (intent_data or {}).get("bundle_options") or []
+        if intent_opts:
+            engagement_data["suggested_bundle_options"] = [
+                {"option_label": o.get("label", f"Option {i+1}"), "description": o.get("description", "")}
+                for i, o in enumerate(intent_opts) if isinstance(o, dict)
+            ]
+
     # Pass fulfillment context and missing required fields (configurable from admin/bundle/KB) so frontend can block checkout until provided
     required_fields_list = state.get("required_fulfillment_fields") or list(DEFAULT_FULFILLMENT_FIELDS)
     fc = state.get("fulfillment_context") or {}

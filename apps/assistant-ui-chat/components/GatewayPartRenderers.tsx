@@ -3,6 +3,7 @@
 import React from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { useGatewayAction } from "@/contexts/GatewayActionContext";
+import { PaymentFormInline } from "./PaymentFormInline";
 
 type Product = {
   id?: string;
@@ -119,7 +120,7 @@ function EngagementChoiceRenderer({
   data,
 }: {
   data: {
-    ctas?: { label?: string; action?: string; order_id?: string }[];
+    ctas?: { label?: string; action?: string; order_id?: string; bundle_id?: string }[];
     options?: BundleOption[];
   };
 }) {
@@ -146,6 +147,8 @@ function EngagementChoiceRenderer({
               }
             } else if (cta.action === "proceed_to_payment" && cta.order_id) {
               onAction({ action: "proceed_to_payment", order_id: cta.order_id });
+            } else if (cta.action === "view_bundle" && cta.bundle_id) {
+              onAction({ action: "view_bundle", bundle_id: cta.bundle_id });
             }
           }}
           className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -184,6 +187,16 @@ function ThinkingRenderer({ data, isLive }: { data: { text?: string }; isLive?: 
   );
 }
 
+function PaymentFormRenderer({
+  data,
+}: {
+  data: { order_id?: string };
+}) {
+  const orderId = data?.order_id;
+  if (!orderId || typeof orderId !== "string") return null;
+  return <PaymentFormInline orderId={orderId} />;
+}
+
 type DataPartProps = { name?: string; data?: unknown; isLive?: boolean };
 const DATA_RENDERERS_BY_NAME: Record<string, React.ComponentType<DataPartProps>> = {
   product_list: ProductListRenderer as React.ComponentType<DataPartProps>,
@@ -191,7 +204,13 @@ const DATA_RENDERERS_BY_NAME: Record<string, React.ComponentType<DataPartProps>>
   engagement_choice: EngagementChoiceRenderer as React.ComponentType<DataPartProps>,
   experience_session: ExperienceSessionRenderer as React.ComponentType<DataPartProps>,
   thinking: ThinkingRenderer as React.ComponentType<DataPartProps>,
+  payment_form: PaymentFormRenderer as React.ComponentType<DataPartProps>,
+  thread_metadata: ThreadMetadataRenderer as React.ComponentType<DataPartProps>,
 };
+
+function ThreadMetadataRenderer() {
+  return null;
+}
 
 function DataPartFallback({ name, data }: { name: string; data: unknown }) {
   return (

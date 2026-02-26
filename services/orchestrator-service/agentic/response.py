@@ -312,11 +312,21 @@ def _build_context(result: Dict[str, Any]) -> str:
                     " Invite them to Add to bundle. Be warm and specific — do NOT give a generic 'I found options' reply."
                 )
             else:
-                parts.append(
+                intro = (
                     f"Found {count} products. Product cards will display them — write ONLY a brief one-line intro (e.g. 'Here are some options for you:' or 'I found a few options that might work.'). "
                     "Do NOT list products, prices, or descriptions in your message. Product data (for grounding): "
                     f"{'; '.join(discover_product_entries)}"
                 )
+                missing_ff = engagement.get("missing_fulfillment_fields") or []
+                if "delivery_address" in missing_ff and any(
+                    kw in str(intent.get("search_query", "")).lower() for kw in ("delivery", "flowers", "flower", "chocolate", "gift")
+                ):
+                    intro += (
+                        " When the user adds to bundle or is ready to checkout, you'll need their delivery address. "
+                        "If they haven't shared it, add a friendly line like: 'When you're ready, I'll need your delivery address to complete the order.' "
+                        "Or ask naturally when they add items."
+                    )
+                parts.append(intro)
         else:
             query = intent.get("search_query")
             sq_list = intent.get("search_queries") or []

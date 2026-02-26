@@ -138,6 +138,8 @@ async def _stream_chat_events(
         res_engagement = res_data.get("engagement") or {}
         if res_engagement.get("suggested_bundle_options"):
             suggested_ctas_stream.append({"label": "Add to bundle", "action": "add_to_bundle"})
+        if body.bundle_id:
+            suggested_ctas_stream.append({"label": "View bundle", "action": "view_bundle", "bundle_id": body.bundle_id})
         if body.order_id or res_engagement.get("order_status"):
             suggested_ctas_stream.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
 
@@ -403,6 +405,8 @@ async def chat(
         res_engagement = res_data.get("engagement") or {}
         if res_engagement.get("suggested_bundle_options"):
             suggested_ctas.append({"label": "Add to bundle", "action": "add_to_bundle"})
+        if body.bundle_id:
+            suggested_ctas.append({"label": "View bundle", "action": "view_bundle", "bundle_id": body.bundle_id})
         if body.order_id or res_engagement.get("order_status"):
             suggested_ctas.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
 
