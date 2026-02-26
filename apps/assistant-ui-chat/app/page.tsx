@@ -186,6 +186,7 @@ function ChatContent({
     }
   }, [runtime]);
 
+  const [addConfirmations, setAddConfirmations] = useState<string[]>([]);
   const actionInFlightRef = useRef(false);
   const handleAction = useCallback(
     async (payload: ActionPayload) => {
@@ -225,7 +226,7 @@ function ChatContent({
           const bid = json.bundle_id ?? json.data?.bundle_id;
           if (bid) bundleIdRef.current = bid;
           onHasBundle(true);
-          appendAssistant(`${json.summary ?? json.message ?? "Added bundle."} You can view your bundle anytime.`);
+          setAddConfirmations((prev) => [...prev, `${json.summary ?? json.message ?? "Added bundle."} You can view your bundle anytime.`]);
         } else if (payload.action === "checkout" && payload.bundle_id) {
           const res = await fetch("/api/checkout", {
             method: "POST",
@@ -322,6 +323,13 @@ function ChatContent({
                   <ThreadPrimitive.Messages
                     components={{ UserMessage, AssistantMessage }}
                   />
+                  {addConfirmations.map((text, i) => (
+                    <div key={i} className="flex justify-start">
+                      <div className="msg-assistant max-w-[85%] rounded-2xl bg-[var(--muted)]/30 px-4 py-2.5 text-sm text-[var(--foreground)]">
+                        {text}
+                      </div>
+                    </div>
+                  ))}
                 </div>
                 <div className="h-4 shrink-0" />
               </div>
@@ -338,20 +346,36 @@ function ChatContent({
             <div className="border-t border-[var(--border)] bg-[var(--background)] p-4">
               <div className="mx-auto max-w-2xl space-y-2">
                 {hasBundle && bundleIdRef.current && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleAction({ action: "view_bundle", bundle_id: bundleIdRef.current! });
-                    }}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--primary)]/50 bg-[var(--primary)]/10 px-3 py-2 text-sm font-medium text-[var(--primary)] hover:bg-[var(--primary)]/20"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8 4-8-4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                    </svg>
-                    View bundle
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleAction({ action: "view_bundle", bundle_id: bundleIdRef.current! });
+                      }}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-[var(--primary)]/50 bg-[var(--primary)]/10 px-3 py-2 text-sm font-medium text-[var(--primary)] hover:bg-[var(--primary)]/20"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8 4-8-4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                      </svg>
+                      View bundle
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleAction({ action: "checkout", bundle_id: bundleIdRef.current! });
+                      }}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-[var(--primary-foreground)] hover:opacity-90"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                      Checkout
+                    </button>
+                  </div>
                 )}
                 <ComposerPrimitive.Root className="flex items-end gap-2 rounded-2xl border border-[var(--input)] bg-[var(--background)] shadow-sm focus-within:ring-2 focus-within:ring-[var(--ring)]">
                   <button type="button" className="shrink-0 rounded-full p-2 text-[var(--muted)] hover:bg-zinc-100 hover:text-[var(--foreground)] dark:hover:bg-zinc-800" aria-label="Add attachment">
