@@ -42,6 +42,8 @@ async def root():
         "version": "0.1.0",
         "endpoints": {
             "create_payment": "POST /api/v1/payment/create - Create PaymentIntent",
+            "checkout_session": "POST /api/v1/payment/checkout-session - Create Checkout Session (redirect)",
+            "checkout_session_from_order": "POST /api/v1/payment/checkout-session-from-order - Create Session with order data",
             "sponsorship_create": "POST /api/v1/sponsorship/create - Create sponsorship PaymentIntent",
             "stripe_webhook": "POST /webhooks/stripe - Stripe webhook",
         },
