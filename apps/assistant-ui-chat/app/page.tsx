@@ -433,13 +433,15 @@ export default function ChatPage() {
   }, [threadId, loadedThread?.id, anonymousId]);
 
   const initialLoadDone = useRef(false);
+  const handleSelectThreadRef = useRef(handleSelectThread);
+  handleSelectThreadRef.current = handleSelectThread;
   useEffect(() => {
     if (!anonymousId || initialLoadDone.current) return;
     const tid = typeof window !== "undefined" ? sessionStorage.getItem(STORAGE_THREAD) : null;
     if (!tid) return;
     initialLoadDone.current = true;
-    handleSelectThread(tid);
-  }, [anonymousId, handleSelectThread]);
+    handleSelectThreadRef.current(tid);
+  }, [anonymousId]);
 
   const handleDeleteThread = async (id: string) => {
     try {
