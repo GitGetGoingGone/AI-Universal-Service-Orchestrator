@@ -206,9 +206,33 @@ So for testing **without hosting your own file**, you can use the following.
 
 **CORS:** The discovery service runs server-side and fetches the URL from your backend, so browser CORS does not apply. FakeStoreAPI allows server requests.
 
-### UCP: no public catalog server
+### UCP: Walmart and external UCP partners
 
-For **UCP**, there is no public URL that serves a live product catalog you can plug in. Options:
+To add **Walmart** (or another UCP retailer) as a discovery partner:
+
+1. Run the seed migration: `supabase db push` (includes `20250128200000_seed_walmart_ucp_partner.sql`).
+2. Discovery fetches `/.well-known/ucp` from each `internal_agent_registry` base URL, gets the catalog endpoint, and queries it in parallel with LocalDB.
+3. To disable: `UPDATE internal_agent_registry SET enabled = false WHERE base_url = 'https://www.walmart.com';`
+4. To add more partners: insert into `internal_agent_registry` with `capability = 'discovery'` and the partner base URL.
+
+**Note:** Walmart's `/.well-known/ucp` currently returns 404; discovery will include Walmart when their endpoint responds.
+
+#### UCP catalog path fallbacks
+
+The `UCPManifestDriver` (in `packages/shared/discovery_aggregator.py`) resolves the catalog base from the manifest (`ucp.services["dev.ucp.shopping"].rest.endpoint`) or falls back to `{base}/api/v1/ucp`. It then tries these paths in order until one returns 200:
+
+| Path | Notes |
+|------|-------|
+| `/items` | UCP standard (OpenAPI `searchGifts`, operationId). Our discovery service uses this. |
+| `/search` | Common alternative for product search APIs. |
+| `/item` | Singular; response parsed as `{"item": {...}}` and wrapped into a list. |
+| `/products` | Generic product listing; response may use `products` or `items` array. |
+
+Supported response shapes: `items`, `products`, or `item` (single object). Query params: `q`, `limit`.
+
+### UCP: no public catalog server (manifest ingest)
+
+For **manifest ingest** (POST /api/v1/admin/manifest/ingest), there is no public URL that serves a live product catalog. Options:
 
 - Use **UCP Playground** ([ucp.dev/playground](https://ucp.dev/playground/)) to understand the protocol (discovery → capability negotiation → checkout). It does not expose a feed URL.
 - Use **sample code** from [Universal-Commerce-Protocol/samples](https://github.com/Universal-Commerce-Protocol/samples) to run a minimal UCP “store” locally and point `manifest_url` at your local catalog endpoint (then you are effectively hosting it).

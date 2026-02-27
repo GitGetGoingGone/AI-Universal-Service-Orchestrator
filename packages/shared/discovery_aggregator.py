@@ -8,7 +8,7 @@ Normalizes all responses into UCPProduct schema (capabilities, features) to prev
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from .discovery import is_browse_query
 
@@ -160,14 +160,15 @@ class UCPManifestDriver:
             if not urls:
                 return []
             all_items: List[UCPProduct] = []
+            headers = {"Accept": "application/json", "User-Agent": "USO-Orchestrator/1.0 (UCP Discovery)"}
             for base_url in urls[:5]:
                 try:
                     manifest_url = f"{base_url.rstrip('/')}/.well-known/ucp.json"
-                    async with httpx.AsyncClient(timeout=5.0) as client:
-                        r = await client.get(manifest_url)
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        r = await client.get(manifest_url, headers=headers)
                         if r.status_code != 200:
                             manifest_url = f"{base_url.rstrip('/')}/.well-known/ucp"
-                            r = await client.get(manifest_url)
+                            r = await client.get(manifest_url, headers=headers)
                         if r.status_code != 200:
                             continue
                         data = r.json()
@@ -181,14 +182,35 @@ class UCPManifestDriver:
                                 rest = dev.get("rest", dev)
                                 if isinstance(rest, dict):
                                     catalog_url = rest.get("endpoint", rest.get("catalog"))
+                    base = base_url.rstrip("/")
                     if not catalog_url:
-                        catalog_url = f"{base_url.rstrip('/')}/api/v1/ucp/items"
-                    async with httpx.AsyncClient(timeout=5.0) as client:
-                        r = await client.get(catalog_url, params={"q": query, "limit": limit})
-                        if r.status_code != 200:
-                            continue
-                        cat = r.json()
+                        catalog_base = f"{base}/api/v1/ucp"
+                    else:
+                        cu = catalog_url.rstrip("/")
+                        for suffix in ("/items", "/search", "/item", "/products"):
+                            if cu.endswith(suffix):
+                                catalog_base = cu[: -len(suffix)]
+                                break
+                        else:
+                            catalog_base = cu
+                    # Try primary path /items, then fallbacks: /search, /item, /products
+                    catalog_paths = ["/items", "/search", "/item", "/products"]
+                    cat = None
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        for path in catalog_paths:
+                            url = f"{catalog_base.rstrip('/')}{path}"
+                            r = await client.get(url, params={"q": query, "limit": limit}, headers=headers)
+                            if r.status_code == 200:
+                                try:
+                                    cat = r.json()
+                                    break
+                                except Exception:
+                                    pass
+                    if not cat:
+                        continue
                     items = cat.get("items", cat.get("products", []))
+                    if not items and isinstance(cat.get("item"), dict):
+                        items = [cat["item"]]
                     for it in (items or [])[:limit]:
                         raw = it if isinstance(it, dict) else {}
                         pid = raw.get("id", raw.get("item", {}).get("id", ""))
@@ -298,7 +320,7 @@ class DiscoveryAggregator:
         if not tasks:
             return []
         try:
-            results: List[List[UCPProduct]] = await asyncio.wait_for(
+            raw_results: List[Union[List[UCPProduct], BaseException]] = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
                 timeout=timeout_sec,
             )
@@ -306,7 +328,7 @@ class DiscoveryAggregator:
             logger.warning("DiscoveryAggregator timed out after %sms", self._timeout_ms)
             return []
         merged: Dict[str, UCPProduct] = {}
-        for r in results:
+        for r in raw_results:
             if isinstance(r, Exception):
                 logger.warning("Discovery driver failed: %s", r)
                 continue
