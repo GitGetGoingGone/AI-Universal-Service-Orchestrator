@@ -202,7 +202,7 @@ class UCPManifestDriver:
         }
         headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "USO-Orchestrator/1.0 (UCP+MCP)"}
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=3.0) as client:
                 r = await client.post(mcp_endpoint, json=payload, headers=headers)
         except Exception as e:
             logger.debug("UCP MCP request failed %s: %s", mcp_endpoint, e)
@@ -234,7 +234,7 @@ class UCPManifestDriver:
             for base_url in urls[:5]:
                 try:
                     manifest_url = f"{base_url.rstrip('/')}/.well-known/ucp.json"
-                    async with httpx.AsyncClient(timeout=10.0) as client:
+                    async with httpx.AsyncClient(timeout=3.0) as client:
                         r = await client.get(manifest_url, headers=headers)
                         if r.status_code != 200:
                             manifest_url = f"{base_url.rstrip('/')}/.well-known/ucp"
@@ -259,6 +259,7 @@ class UCPManifestDriver:
                                 p = _normalize_to_ucp_product(raw, "UCP")
                                 if p.id:
                                     all_items.append(p)
+                            logger.info("UCP driver: %s returned %s products for query=%s", base, len(products_raw), query[:50] if query else "")
                             continue
                     if isinstance(ucp, dict):
                         services = ucp.get("services", {})
@@ -281,7 +282,7 @@ class UCPManifestDriver:
                     # Try primary path /items, then fallbacks: /search, /item, /products
                     catalog_paths = ["/items", "/search", "/item", "/products"]
                     cat = None
-                    async with httpx.AsyncClient(timeout=10.0) as client:
+                    async with httpx.AsyncClient(timeout=3.0) as client:
                         for path in catalog_paths:
                             url = f"{catalog_base.rstrip('/')}{path}"
                             r = await client.get(url, params={"q": query, "limit": limit}, headers=headers)
@@ -425,6 +426,9 @@ class DiscoveryAggregator:
             if isinstance(r, Exception):
                 logger.warning("Discovery driver failed: %s", r)
                 continue
+            n = len(r) if isinstance(r, list) else 0
+            if n > 0:
+                logger.info("DiscoveryAggregator: one driver returned %s products", n)
             for p in r if isinstance(r, list) else []:
                 if isinstance(p, UCPProduct) and p.id:
                     merged[p.id] = p
