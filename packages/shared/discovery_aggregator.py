@@ -9,6 +9,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+from urllib.parse import urlparse
 
 from .discovery import is_browse_query
 
@@ -145,15 +146,32 @@ class UCPManifestDriver:
     UCP is the discovery/contract; the manifest can declare multiple transports (rest, mcp, embedded).
     When dev.ucp.shopping lists transport 'mcp', we call that endpoint via MCP tools/call (search_shop_catalog).
     Otherwise we try REST (GET /items, /search, etc.).
+    Uses the origin (scheme + host) of base_url for manifest and relative endpoints so stored paths
+    like https://kyliecosmetics.com/.well-known/ucp still resolve to https://kyliecosmetics.com/.well-known/ucp.
     """
 
     def __init__(self, get_partner_manifest_urls: Optional[Callable[[], Awaitable[List[str]]]] = None):
         self._get_urls = get_partner_manifest_urls
 
-    def _parse_shopping_transport(self, ucp: dict, base_url: str) -> tuple:
+    @staticmethod
+    def _origin(base_url: str) -> str:
+        """Return scheme + netloc (origin) so manifest and relative MCP paths resolve correctly."""
+        u = base_url.strip().rstrip("/")
+        if not u:
+            return ""
+        try:
+            parsed = urlparse(u)
+            if parsed.netloc:
+                return f"{parsed.scheme or 'https'}://{parsed.netloc}"
+            return u
+        except Exception:
+            return u
+
+    def _parse_shopping_transport(self, ucp: dict, origin: str) -> tuple:
         """
         Return (mcp_endpoint, rest_endpoint) from dev.ucp.shopping.
         dev.ucp.shopping can be a dict (legacy) or list of { transport, endpoint, ... }.
+        origin: scheme + host (e.g. https://kyliecosmetics.com) for resolving relative endpoints.
         """
         services = ucp.get("services", {}) if isinstance(ucp, dict) else {}
         dev = services.get("dev.ucp.shopping") if isinstance(services, dict) else None
@@ -161,6 +179,7 @@ class UCPManifestDriver:
             return None, None
         mcp_url = None
         rest_url = None
+        base = (origin or "").rstrip("/")
         if isinstance(dev, list):
             for entry in dev:
                 if not isinstance(entry, dict):
@@ -170,15 +189,15 @@ class UCPManifestDriver:
                 if not ep:
                     continue
                 if t == "mcp":
-                    mcp_url = ep if ep.startswith("http") else f"{base_url.rstrip('/')}/{ep.lstrip('/')}"
+                    mcp_url = ep if ep.startswith("http") else f"{base}/{ep.lstrip('/')}"
                 elif t == "rest":
-                    rest_url = ep if ep.startswith("http") else f"{base_url.rstrip('/')}/{ep.lstrip('/')}"
+                    rest_url = ep if ep.startswith("http") else f"{base}/{ep.lstrip('/')}"
         elif isinstance(dev, dict):
             rest = dev.get("rest", dev)
             if isinstance(rest, dict):
                 rest_url = (rest.get("endpoint") or rest.get("catalog") or "").strip() or None
                 if rest_url and not rest_url.startswith("http"):
-                    rest_url = f"{base_url.rstrip('/')}/{rest_url.lstrip('/')}"
+                    rest_url = f"{base}/{rest_url.lstrip('/')}"
         if mcp_url and mcp_url.startswith("http://"):
             mcp_url = "https://" + mcp_url[7:]
         return mcp_url, rest_url
@@ -233,25 +252,27 @@ class UCPManifestDriver:
             headers = {"Accept": "application/json", "User-Agent": "USO-Orchestrator/1.0 (UCP Discovery)"}
             for base_url in urls[:5]:
                 try:
-                    manifest_url = f"{base_url.rstrip('/')}/.well-known/ucp.json"
+                    origin = self._origin(base_url)
+                    if not origin:
+                        continue
+                    manifest_url = f"{origin}/.well-known/ucp.json"
                     async with httpx.AsyncClient(timeout=3.0) as client:
                         r = await client.get(manifest_url, headers=headers)
                         if r.status_code != 200:
-                            manifest_url = f"{base_url.rstrip('/')}/.well-known/ucp"
+                            manifest_url = f"{origin}/.well-known/ucp"
                             r = await client.get(manifest_url, headers=headers)
                         if r.status_code != 200:
                             continue
                         data = r.json()
                     catalog_url = None
                     ucp = data.get("ucp", data)
-                    mcp_endpoint, rest_endpoint = self._parse_shopping_transport(ucp, base_url) if isinstance(ucp, dict) else (None, None)
-                    base = base_url.rstrip("/")
-                    slug = base.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "_")[:64]
+                    mcp_endpoint, rest_endpoint = self._parse_shopping_transport(ucp, origin) if isinstance(ucp, dict) else (None, None)
+                    slug = origin.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "_")[:64]
 
                     if mcp_endpoint:
                         products_raw = await self._search_via_mcp(mcp_endpoint, query, limit, slug)
                         if not products_raw and "/api/ucp/mcp" in (mcp_endpoint or ""):
-                            host = base.replace("http://", "").replace("https://", "").split("/")[0]
+                            host = origin.replace("http://", "").replace("https://", "").split("/")[0]
                             fallback_mcp = f"https://{host}/api/mcp"
                             products_raw = await self._search_via_mcp(fallback_mcp, query, limit, slug)
                         if products_raw:
@@ -259,7 +280,7 @@ class UCPManifestDriver:
                                 p = _normalize_to_ucp_product(raw, "UCP")
                                 if p.id:
                                     all_items.append(p)
-                            logger.info("UCP driver: %s returned %s products for query=%s", base, len(products_raw), query[:50] if query else "")
+                            logger.info("UCP driver: %s returned %s products for query=%s", origin, len(products_raw), query[:50] if query else "")
                             continue
                     if isinstance(ucp, dict):
                         services = ucp.get("services", {})
@@ -270,7 +291,7 @@ class UCPManifestDriver:
                                 if isinstance(rest, dict):
                                     catalog_url = rest.get("endpoint", rest.get("catalog"))
                     if not catalog_url:
-                        catalog_base = rest_endpoint or f"{base}/api/v1/ucp"
+                        catalog_base = rest_endpoint or f"{origin}/api/v1/ucp"
                     else:
                         cu = (catalog_url or rest_endpoint or "").rstrip("/")
                         for suffix in ("/items", "/search", "/item", "/products"):
@@ -278,7 +299,7 @@ class UCPManifestDriver:
                                 catalog_base = cu[: -len(suffix)]
                                 break
                         else:
-                            catalog_base = cu or f"{base}/api/v1/ucp"
+                            catalog_base = cu or f"{origin}/api/v1/ucp"
                     # Try primary path /items, then fallbacks: /search, /item, /products
                     catalog_paths = ["/items", "/search", "/item", "/products"]
                     cat = None
