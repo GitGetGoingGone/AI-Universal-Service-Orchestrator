@@ -33,15 +33,15 @@ def get_agents(capability: Optional[str] = None) -> List[AgentEntry]:
     """
     Load Business Agents from internal_agent_registry (Supabase).
     When capability is set, return only agents that have that capability.
-    Returns list of AgentEntry (base_url, display_name, slug). Slug is used for ID masking (uso_{slug}_{id}).
-    When DB is empty or not configured, falls back to single discovery_service_url so existing behavior is preserved.
+    For capability 'discovery': only return agents that implement Discovery RPC (exclude UCP and
+    SHOPIFY store registrations, which are called by the Discovery service internally).
     """
     client = get_supabase()
     if client:
         try:
             q = (
                 client.table("internal_agent_registry")
-                .select("base_url, display_name, capability")
+                .select("base_url, display_name, capability, transport_type")
                 .eq("enabled", True)
             )
             if capability and str(capability).strip():
@@ -54,6 +54,10 @@ def get_agents(capability: Optional[str] = None) -> List[AgentEntry]:
                 for row in rows:
                     if not isinstance(row, dict):
                         continue
+                    if capability == "discovery":
+                        tt = (row.get("transport_type") or "").strip().upper()
+                        if tt in ("UCP", "SHOPIFY"):
+                            continue
                     base_url = (row.get("base_url") or "").strip().rstrip("/")
                     if not base_url or base_url in seen:
                         continue

@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -40,9 +41,16 @@ async def discover_products_via_rpc(
 ) -> Dict[str, Any]:
     """
     Call a Business Agent (Discovery) via JSON-RPC 2.0 discovery/search.
-    base_url: agent base URL (e.g. from RegistryDriver). Returns {"products": [...], "count": N} or raises.
+    base_url: agent base URL from registry. Uses origin only (scheme + host) for RPC
+    so /api/v1/ucp/rpc is correct even if base_url was stored with a path (e.g. /.well-known/ucp).
     """
     path = "/api/v1/ucp/rpc"
+    try:
+        parsed = urlparse(base_url)
+        origin = f"{parsed.scheme or 'https'}://{parsed.netloc}" if parsed.netloc else base_url.rstrip("/")
+    except Exception:
+        origin = base_url.rstrip("/")
+    url = f"{origin.rstrip('/')}{path}"
     payload = {
         "jsonrpc": "2.0",
         "method": "discovery/search",
@@ -63,7 +71,6 @@ async def discover_products_via_rpc(
 
     import json
     body_bytes = json.dumps(payload).encode("utf-8")
-    url = f"{base_url.rstrip('/')}{path}"
     headers = _gateway_headers_for_discovery("POST", path, body_bytes)
     headers["Content-Type"] = "application/json"
 

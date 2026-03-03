@@ -86,17 +86,19 @@ export async function POST(req: Request) {
     const lastUser = userMessages.pop();
     const fromContent = extractText(lastUser?.content);
     const fromParts = extractText(lastUser?.parts);
+    // Never use a previous user message as the current turn text (would send wrong message, e.g. "find flowers" when user said "cosmetics")
     const rawText =
       (typeof body.text === "string" && body.text.trim()) ||
       (typeof body.input === "string" && body.input.trim()) ||
       fromContent ||
       fromParts ||
-      userMessages
-        .reverse()
-        .map((m) => extractText(m.content) || extractText(m.parts))
-        .find((t) => t.length > 0) ||
+      (lastUser && typeof (lastUser as { content?: unknown }).content === "string"
+        ? ((lastUser as { content: string }).content || "").trim()
+        : "") ||
       "";
-    const text = rawText || "Find products";
+    const text =
+      rawText ||
+      "Show me how wonderful your platform is and all the categories";
 
     // Normalize messages so content is always string (orchestrator expects this for recent_conversation)
     const normalizedMessages = messages?.map((m) => ({
