@@ -1,6 +1,6 @@
 -- RPC to retrieve decrypted Shopify access token from Vault.
 -- Used by payment-service when creating/completing Shopify Draft Orders.
--- Requires vault extension and that the secret was stored via insert_shopify_token.
+-- When vault extension is not available, get_shopify_token returns NULL.
 
 BEGIN;
 
@@ -13,6 +13,9 @@ AS $$
 DECLARE
   token_text TEXT;
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vault') THEN
+    RETURN NULL;
+  END IF;
   SELECT decrypted_secret INTO token_text
   FROM vault.decrypted_secrets
   WHERE id = vault_ref
@@ -21,6 +24,6 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION get_shopify_token IS 'Returns decrypted Shopify access token for Draft Order API calls. Service-only.';
+COMMENT ON FUNCTION get_shopify_token IS 'Returns decrypted Shopify access token for Draft Order API calls. Service-only. Returns NULL if vault not available.';
 
 COMMIT;

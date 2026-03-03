@@ -140,10 +140,80 @@ class LocalDBDriver:
 
 
 class UCPManifestDriver:
-    """Driver that fetches from partner /.well-known/ucp.json (or /.well-known/ucp) and catalog."""
+    """
+    Driver that fetches from partners via UCP manifest (/.well-known/ucp).
+    UCP is the discovery/contract; the manifest can declare multiple transports (rest, mcp, embedded).
+    When dev.ucp.shopping lists transport 'mcp', we call that endpoint via MCP tools/call (search_shop_catalog).
+    Otherwise we try REST (GET /items, /search, etc.).
+    """
 
     def __init__(self, get_partner_manifest_urls: Optional[Callable[[], Awaitable[List[str]]]] = None):
         self._get_urls = get_partner_manifest_urls
+
+    def _parse_shopping_transport(self, ucp: dict, base_url: str) -> tuple:
+        """
+        Return (mcp_endpoint, rest_endpoint) from dev.ucp.shopping.
+        dev.ucp.shopping can be a dict (legacy) or list of { transport, endpoint, ... }.
+        """
+        services = ucp.get("services", {}) if isinstance(ucp, dict) else {}
+        dev = services.get("dev.ucp.shopping") if isinstance(services, dict) else None
+        if dev is None:
+            return None, None
+        mcp_url = None
+        rest_url = None
+        if isinstance(dev, list):
+            for entry in dev:
+                if not isinstance(entry, dict):
+                    continue
+                t = (entry.get("transport") or "").strip().lower()
+                ep = (entry.get("endpoint") or "").strip()
+                if not ep:
+                    continue
+                if t == "mcp":
+                    mcp_url = ep if ep.startswith("http") else f"{base_url.rstrip('/')}/{ep.lstrip('/')}"
+                elif t == "rest":
+                    rest_url = ep if ep.startswith("http") else f"{base_url.rstrip('/')}/{ep.lstrip('/')}"
+        elif isinstance(dev, dict):
+            rest = dev.get("rest", dev)
+            if isinstance(rest, dict):
+                rest_url = (rest.get("endpoint") or rest.get("catalog") or "").strip() or None
+                if rest_url and not rest_url.startswith("http"):
+                    rest_url = f"{base_url.rstrip('/')}/{rest_url.lstrip('/')}"
+        if mcp_url and mcp_url.startswith("http://"):
+            mcp_url = "https://" + mcp_url[7:]
+        return mcp_url, rest_url
+
+    async def _search_via_mcp(self, mcp_endpoint: str, query: str, limit: int, slug: str) -> List[Dict[str, Any]]:
+        """Call MCP tools/call search_shop_catalog at mcp_endpoint; return list of product dicts."""
+        try:
+            from .shopify_mcp_driver import _extract_products_from_mcp_response
+        except ImportError:
+            logger.debug("shopify_mcp_driver not available for UCP MCP transport")
+            return []
+        import httpx
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "search_shop_catalog",
+                "arguments": {"query": query or "products", "filters": [{"available": True}]},
+            },
+        }
+        headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "USO-Orchestrator/1.0 (UCP+MCP)"}
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.post(mcp_endpoint, json=payload, headers=headers)
+        except Exception as e:
+            logger.debug("UCP MCP request failed %s: %s", mcp_endpoint, e)
+            return []
+        if r.status_code != 200:
+            return []
+        try:
+            data = r.json()
+        except Exception:
+            return []
+        return _extract_products_from_mcp_response(data, slug, 0.0)
 
     async def search(
         self,
@@ -174,6 +244,18 @@ class UCPManifestDriver:
                         data = r.json()
                     catalog_url = None
                     ucp = data.get("ucp", data)
+                    mcp_endpoint, rest_endpoint = self._parse_shopping_transport(ucp, base_url) if isinstance(ucp, dict) else (None, None)
+                    base = base_url.rstrip("/")
+                    slug = base.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "_")[:64]
+
+                    if mcp_endpoint:
+                        products_raw = await self._search_via_mcp(mcp_endpoint, query, limit, slug)
+                        if products_raw:
+                            for raw in products_raw[:limit]:
+                                p = _normalize_to_ucp_product(raw, "UCP")
+                                if p.id:
+                                    all_items.append(p)
+                            continue
                     if isinstance(ucp, dict):
                         services = ucp.get("services", {})
                         if isinstance(services, dict):
@@ -182,17 +264,16 @@ class UCPManifestDriver:
                                 rest = dev.get("rest", dev)
                                 if isinstance(rest, dict):
                                     catalog_url = rest.get("endpoint", rest.get("catalog"))
-                    base = base_url.rstrip("/")
                     if not catalog_url:
-                        catalog_base = f"{base}/api/v1/ucp"
+                        catalog_base = rest_endpoint or f"{base}/api/v1/ucp"
                     else:
-                        cu = catalog_url.rstrip("/")
+                        cu = (catalog_url or rest_endpoint or "").rstrip("/")
                         for suffix in ("/items", "/search", "/item", "/products"):
                             if cu.endswith(suffix):
                                 catalog_base = cu[: -len(suffix)]
                                 break
                         else:
-                            catalog_base = cu
+                            catalog_base = cu or f"{base}/api/v1/ucp"
                     # Try primary path /items, then fallbacks: /search, /item, /products
                     catalog_paths = ["/items", "/search", "/item", "/products"]
                     cat = None

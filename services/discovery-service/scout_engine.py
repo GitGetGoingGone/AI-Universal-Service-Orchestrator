@@ -13,7 +13,7 @@ from packages.shared.discovery_aggregator import (
 from packages.shared.shopify_mcp_driver import ShopifyMCPDriver
 from packages.shared.ranking import sort_products_by_rank
 
-from db import (
+from db import (  # type: ignore[reportAttributeAccessIssue]
     get_active_sponsorships,
     get_admin_orchestration_settings,
     get_composite_discovery_config,
@@ -152,7 +152,7 @@ async def _fetch_via_aggregator(
     experience_tags: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Fetch via DiscoveryAggregator (LocalDB + optional UCP from private registry) with timeout."""
-    admin = await get_admin_orchestration_settings()
+    admin = await get_admin_orchestration_settings()  # type: ignore[reportGeneralTypeIssues]
     timeout_ms = 5000
     if admin and isinstance(admin.get("discovery_timeout_ms"), (int, float)):
         timeout_ms = int(admin["discovery_timeout_ms"])
@@ -200,14 +200,14 @@ async def _fetch_and_rank(
     """Fetch products (semantic or text) and apply ranking or product_mix."""
     fetch_limit = limit
     product_mix = None
-    cdc = await get_composite_discovery_config()
+    cdc = await get_composite_discovery_config()  # type: ignore[reportGeneralTypeIssues]
     if cdc and cdc.get("product_mix"):
         mix = cdc.get("product_mix")
         if isinstance(mix, list) and len(mix) > 0:
             product_mix = mix
             fetch_limit = max(limit, 50)
 
-    admin = await get_admin_orchestration_settings()
+    admin = await get_admin_orchestration_settings()  # type: ignore[reportGeneralTypeIssues]
     use_aggregator = True  # DiscoveryAggregator is default; timeout from admin or 5000ms
 
     if not query or not query.strip():
@@ -253,12 +253,21 @@ async def _fetch_and_rank(
                         products = await search_products(query=fallback, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
                     if products:
                         break
+        if not products and query.lower() in ("cosmetics", "cosmetic", "makeup", "beauty"):
+            for fallback in ("cosmetics", "makeup", "beauty", "skincare"):
+                if fallback != query.lower():
+                    if use_aggregator:
+                        products = await _fetch_via_aggregator(fallback, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
+                    else:
+                        products = await search_products(query=fallback, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
+                    if products:
+                        break
 
     if not products:
         return []
 
     # Phase 3: Dynamic metadata enrichment (experience_tags via LLM when missing)
-    if settings.metadata_enrichment_enabled:
+    if getattr(settings, "metadata_enrichment_enabled", True):
         products = await enrich_products_middleware(products, enabled=True)
 
     if product_mix:

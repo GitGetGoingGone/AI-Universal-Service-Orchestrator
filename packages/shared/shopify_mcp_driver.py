@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,7 @@ def _extract_products_from_mcp_response(data: Any, slug: str, price_premium: flo
 def _map_shopify_product(raw: Dict[str, Any], slug: str, price_premium: float) -> Dict[str, Any]:
     """Map Shopify product/variant to normalized dict for UCPProduct."""
     # Shopify product shape: id, title, body_html, variants: [{id, price, ...}], images: [{src}]
+    # Also: product_id, title, description, image_url, price_range: {min, max, currency} (Storefront API / MCP)
     pid = str(raw.get("id", raw.get("variant_id", raw.get("product_id", ""))))
     if pid and not str(pid).startswith("gid:"):
         ext_id = f"shopify_{slug}_{pid}"
@@ -122,7 +123,7 @@ def _map_shopify_product(raw: Dict[str, Any], slug: str, price_premium: float) -
     if description and len(description) > 2000:
         description = description[:2000] + "..."
 
-    # Price: variants[0].price or top-level price
+    # Price: variants[0].price, top-level price, or price_range.min/max (Storefront/MCP shape)
     price_val = None
     variants = raw.get("variants", [])
     if variants and isinstance(variants, list) and len(variants) > 0:
@@ -145,16 +146,34 @@ def _map_shopify_product(raw: Dict[str, Any], slug: str, price_premium: float) -
             except (TypeError, ValueError):
                 pass
     if price_val is None:
+        pr = raw.get("price_range")
+        if isinstance(pr, dict):
+            for k in ("min", "max"):
+                v = pr.get(k)
+                if v is not None:
+                    try:
+                        price_val = float(v)
+                        break
+                    except (TypeError, ValueError):
+                        pass
+    if price_val is None:
         price_val = 0.0
 
     # Apply premium
     if price_premium and price_premium > 0:
         price_val = price_val * (1 + price_premium / 100.0)
 
-    # Image
+    # Currency: price_range.currency or top-level
+    currency = "USD"
+    if isinstance(raw.get("price_range"), dict) and raw["price_range"].get("currency"):
+        currency = str(raw["price_range"]["currency"])
+    elif raw.get("currency"):
+        currency = str(raw.get("currency", "USD"))
+
+    # Image: image_url (MCP/Storefront), images[0].src, or image
     images = raw.get("images", [])
-    image_url = None
-    if images and isinstance(images, list) and len(images) > 0:
+    image_url = raw.get("image_url")
+    if not image_url and images and isinstance(images, list) and len(images) > 0:
         img = images[0]
         if isinstance(img, dict) and img.get("src"):
             image_url = img["src"]
@@ -170,7 +189,7 @@ def _map_shopify_product(raw: Dict[str, Any], slug: str, price_premium: float) -
         "title": title,
         "description": description,
         "price": price_val,
-        "currency": str(raw.get("currency", "USD")),
+        "currency": currency,
         "image_url": image_url,
         "partner_id": None,
         "capabilities": [],
@@ -258,7 +277,7 @@ class ShopifyMCPDriver:
                     )
                 return products
 
-            results: List[List[Dict[str, Any]]] = await asyncio.gather(
+            results: List[Union[List[Dict[str, Any]], BaseException]] = await asyncio.gather(
                 *[_fetch_one(ep) for ep in endpoints[:10]],
                 return_exceptions=True,
             )
