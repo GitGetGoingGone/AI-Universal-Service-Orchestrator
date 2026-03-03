@@ -37,6 +37,9 @@ class Settings:
     # Portal/public URL for UCP continue_url (e.g. https://your-portal.vercel.app)
     portal_public_url: str = get_env("PORTAL_PUBLIC_URL") or get_env("DISCOVERY_PUBLIC_URL") or ""
 
+    # Metadata enrichment: assign experience_tags via LLM when missing (Phase 3)
+    metadata_enrichment_enabled: bool = (get_env("METADATA_ENRICHMENT_ENABLED") or "true").strip().lower() != "false"
+
     # Exclusive Gateway: mask product ids returned to clients (uso_*); mapping stored for checkout
     id_masking_enabled: bool = (get_env("ID_MASKING_ENABLED") or "false").strip().lower() == "true"
 

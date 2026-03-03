@@ -15,6 +15,9 @@ __all__ = [
     "search_products",
     "get_distinct_experience_tags",
     "get_internal_agent_urls",
+    "get_shopify_mcp_endpoints",
+    "onboard_shopify_curated_partner",
+    "get_partner_agent_slug_map",
     "resolve_masked_id",
     "mask_product_id",
     "mask_products",
@@ -41,6 +44,14 @@ __all__ = [
     "get_agent_action_models",
     "upsert_products_from_legacy",
     "get_platform_manifest_config",
+    "create_or_get_experience_session",
+    "get_experience_session_by_thread",
+    "get_experience_session_legs",
+    "upsert_experience_session_leg",
+    "update_experience_session_leg_status",
+    "create_experience_session_leg_override",
+    "list_experience_sessions_admin",
+    "get_experience_session_admin",
 ]
 
 _client: Optional[Client] = None
@@ -246,31 +257,249 @@ async def get_internal_agent_urls(capability: Optional[str] = None) -> List[str]
         return []
 
 
-def _mask_id_insert(internal_product_id: str, partner_id: Optional[str], source: Optional[str]) -> Optional[str]:
-    """Insert one mapping and return masked_id. Caller holds sync DB."""
+async def get_shopify_mcp_endpoints(capability: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Return Shopify MCP endpoints with slug and price_premium_percent for ShopifyMCPDriver.
+    Each entry: { "mcp_endpoint": str, "slug": str, "price_premium_percent": float, "shop_url": str }.
+    """
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        q = client.table("shopify_curated_partners").select(
+            "mcp_endpoint, shop_url, price_premium_percent, internal_agent_registry_id"
+        )
+        result = q.execute()
+        reg_ids = [r["internal_agent_registry_id"] for r in (result.data or []) if r.get("internal_agent_registry_id")]
+        reg_map: Dict[str, Dict[str, Any]] = {}
+        if reg_ids:
+            reg_res = client.table("internal_agent_registry").select("id, display_name, capability, enabled").in_("id", reg_ids).execute()
+            for r in (reg_res.data or []):
+                reg_map[str(r.get("id", ""))] = r
+        data = _table_data(result.data)
+        import re
+        out: List[Dict[str, Any]] = []
+        for row in data:
+            reg_id = row.get("internal_agent_registry_id")
+            reg = reg_map.get(str(reg_id), {}) if reg_id else {}
+            if not reg.get("enabled", True):
+                continue
+            if capability and str(capability).strip() and reg.get("capability") != str(capability).strip():
+                continue
+            display_name = (reg.get("display_name") or row.get("shop_url", "") or "shopify").strip()
+            s = str(display_name).strip().lower()
+            s = re.sub(r"[^a-z0-9]+", "_", s)
+            slug = (s.strip("_") or "shopify")[:64]
+            mcp = (row.get("mcp_endpoint") or "").strip()
+            if not mcp:
+                continue
+            out.append({
+                "mcp_endpoint": mcp,
+                "slug": slug,
+                "price_premium_percent": float(row.get("price_premium_percent") or 0),
+                "shop_url": str(row.get("shop_url", "")).strip(),
+            })
+        return out
+    except Exception:
+        return []
+
+
+async def onboard_shopify_curated_partner(
+    shop_url: str,
+    mcp_endpoint: str,
+    display_name: str,
+    supported_capabilities: List[str],
+    available_to_customize: bool = False,
+    price_premium_percent: float = 0.0,
+    access_token: Optional[str] = None,
+    access_token_vault_ref: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Create or update partner, internal_agent_registry, and shopify_curated_partners.
+    Stores access_token in Vault via insert_shopify_token RPC when provided.
+    """
+    client = get_supabase()
+    if not client:
+        return {"error": "Database not configured", "partner_id": None, "registry_id": None}
+
+    vault_ref = access_token_vault_ref
+    if access_token and not vault_ref:
+        try:
+            secret_name = f"shopify_{shop_url.replace('.', '_')}_{uuid_module.uuid4().hex[:8]}"
+            r = client.rpc("insert_shopify_token", {"secret_name": secret_name, "secret_value": access_token}).execute()
+            if r.data is not None:
+                vault_ref = str(r.data) if not isinstance(r.data, dict) else str(r.data.get("id", r.data))
+        except Exception as e:
+            return {"error": f"Failed to store token in Vault: {e}", "partner_id": None, "registry_id": None}
+
+    if not vault_ref and access_token:
+        return {"error": "Vault storage failed; no vault_ref returned", "partner_id": None, "registry_id": None}
+
+    try:
+        existing = client.table("shopify_curated_partners").select("id, partner_id, internal_agent_registry_id").eq("shop_url", shop_url).execute()
+        existing_row = _table_row(existing.data) if existing.data else None
+
+        partner_id: Optional[str] = None
+        registry_id: Optional[str] = None
+
+        if existing_row:
+            partner_id = str(existing_row.get("partner_id", "")) if existing_row.get("partner_id") else None
+            registry_id = str(existing_row.get("internal_agent_registry_id", "")) if existing_row.get("internal_agent_registry_id") else None
+
+        if not partner_id:
+            p_ins = client.table("partners").insert({
+                "business_name": display_name,
+                "contact_email": f"shopify-{shop_url}@uso.local",
+                "verification_status": "verified",
+                "trust_score": 80,
+                "is_active": True,
+            }).execute()
+            partner_data = _table_data(p_ins.data)
+            partner_id = str(partner_data[0]["id"]) if partner_data else None
+            if not partner_id:
+                return {"error": "Failed to create partner", "partner_id": None, "registry_id": None}
+
+        base_url = mcp_endpoint.rstrip("/").rsplit("/", 1)[0] if "/" in mcp_endpoint else mcp_endpoint
+
+        if not registry_id:
+            reg_ins = client.table("internal_agent_registry").insert({
+                "capability": "discovery",
+                "base_url": base_url,
+                "display_name": display_name,
+                "enabled": True,
+                "transport_type": "SHOPIFY",
+                "available_to_customize": available_to_customize,
+                "metadata": {"shop_url": shop_url, "mcp_endpoint": mcp_endpoint, "capabilities": supported_capabilities},
+            }).execute()
+            reg_data = _table_data(reg_ins.data)
+            registry_id = str(reg_data[0]["id"]) if reg_data else None
+            if not registry_id:
+                return {"error": "Failed to create registry entry", "partner_id": partner_id, "registry_id": None}
+        else:
+            client.table("internal_agent_registry").update({
+                "display_name": display_name,
+                "available_to_customize": available_to_customize,
+                "metadata": {"shop_url": shop_url, "mcp_endpoint": mcp_endpoint, "capabilities": supported_capabilities},
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", registry_id).execute()
+
+        scp_payload: Dict[str, Any] = {
+            "partner_id": partner_id,
+            "internal_agent_registry_id": registry_id,
+            "shop_url": shop_url,
+            "mcp_endpoint": mcp_endpoint,
+            "supported_capabilities": supported_capabilities,
+            "price_premium_percent": price_premium_percent,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if vault_ref:
+            scp_payload["access_token_vault_ref"] = vault_ref
+
+        if existing_row:
+            client.table("shopify_curated_partners").update(scp_payload).eq("shop_url", shop_url).execute()
+        else:
+            scp_payload.pop("updated_at", None)
+            client.table("shopify_curated_partners").insert(scp_payload).execute()
+
+        return {"partner_id": partner_id, "registry_id": registry_id, "shop_url": shop_url}
+    except Exception as e:
+        return {"error": str(e), "partner_id": None, "registry_id": None}
+
+
+def _mask_id_insert(
+    internal_product_id: str,
+    partner_id: Optional[str],
+    source: Optional[str],
+    agent_slug: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Insert one mapping and return masked_id.
+    When agent_slug provided: uso_{agent_slug}_{short_id}; else legacy uso_{24hex}.
+    """
     client = get_supabase()
     if not client:
         return None
-    masked_id = "uso_" + str(uuid_module.uuid4()).replace("-", "")[:24]
+    short_uid = str(uuid_module.uuid4()).replace("-", "")[:16]
+    if agent_slug:
+        slug_safe = "".join(c for c in str(agent_slug) if c.isalnum() or c == "_")[:64] or "discovery"
+        masked_id = f"uso_{slug_safe}_{short_uid}"
+    else:
+        masked_id = "uso_" + short_uid + str(uuid_module.uuid4()).replace("-", "")[:8]
+    payload: Dict[str, Any] = {
+        "masked_id": masked_id,
+        "internal_product_id": str(internal_product_id),
+        "partner_id": str(partner_id) if partner_id else None,
+        "source": str(source) if source else None,
+    }
+    if agent_slug:
+        payload["agent_slug"] = str(agent_slug)[:64]
     try:
-        client.table("id_masking_map").insert({
-            "masked_id": masked_id,
-            "internal_product_id": str(internal_product_id),
-            "partner_id": str(partner_id) if partner_id else None,
-            "source": str(source) if source else None,
-        }).execute()
+        client.table("id_masking_map").insert(payload).execute()
         return masked_id
     except Exception:
         return None
+
+
+async def get_partner_agent_slug_map(partner_ids: List[str]) -> Dict[str, str]:
+    """
+    Batch lookup agent_slug for partner_ids.
+    Shopify partners: slug from shopify_curated_partners + internal_agent_registry (display_name).
+    Regular partners: slug from partners.business_name sanitized.
+    """
+    if not partner_ids:
+        return {}
+    client = get_supabase()
+    if not client:
+        return {}
+    partner_ids = [str(p).strip() for p in partner_ids if p]
+    if not partner_ids:
+        return {}
+    out: Dict[str, str] = {}
+    import re
+    try:
+        # Shopify: partner_id -> slug via shopify_curated_partners + registry
+        scp = client.table("shopify_curated_partners").select(
+            "partner_id, internal_agent_registry_id"
+        ).in_("partner_id", partner_ids).execute()
+        reg_ids = list({r["internal_agent_registry_id"] for r in (scp.data or []) if r.get("internal_agent_registry_id")})
+        reg_map: Dict[str, str] = {}
+        if reg_ids:
+            reg_res = client.table("internal_agent_registry").select(
+                "id, display_name"
+            ).in_("id", reg_ids).execute()
+            for r in (reg_res.data or []):
+                dn = (r.get("display_name") or "").strip()
+                s = re.sub(r"[^a-z0-9]+", "_", dn.lower())
+                reg_map[str(r.get("id", ""))] = (s.strip("_") or "shopify")[:64]
+        for r in (scp.data or []):
+            pid = str(r.get("partner_id", ""))
+            reg_id = str(r.get("internal_agent_registry_id", ""))
+            if pid and reg_id and reg_map.get(reg_id):
+                out[pid] = reg_map[reg_id]
+        # Regular partners: business_name -> slug
+        remaining = [p for p in partner_ids if p not in out]
+        if remaining:
+            p_res = client.table("partners").select(
+                "id, business_name"
+            ).in_("id", remaining).execute()
+            for r in (p_res.data or []):
+                pid = str(r.get("id", ""))
+                bn = (r.get("business_name") or "").strip()
+                s = re.sub(r"[^a-z0-9]+", "_", bn.lower())
+                out[pid] = (s.strip("_") or "partner")[:64]
+    except Exception:
+        pass
+    return out
 
 
 async def mask_product_id(
     internal_product_id: str,
     partner_id: Optional[str] = None,
     source: Optional[str] = None,
+    agent_slug: Optional[str] = None,
 ) -> Optional[str]:
     """Create masked id for internal product; store mapping. Returns uso_* id or None."""
-    return _mask_id_insert(internal_product_id, partner_id, source)
+    return _mask_id_insert(internal_product_id, partner_id, source, agent_slug)
 
 
 def resolve_masked_id(masked_id: str) -> Optional[tuple]:
@@ -313,10 +542,15 @@ def resolve_masked_id(masked_id: str) -> Optional[tuple]:
         return None
 
 
-async def mask_products(products: List[Dict[str, Any]], source: str = "local") -> List[Dict[str, Any]]:
+async def mask_products(
+    products: List[Dict[str, Any]],
+    source: str = "local",
+    agent_slug_map: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
     """
     Replace each product's id with a masked id (uso_*); store mapping.
     Removes partner_id from each product so internal identifiers are not exposed.
+    When agent_slug_map is None, looks up slugs from partner_id via get_partner_agent_slug_map.
     Returns new list of product dicts (shallow copy with id/partner_id updated).
     """
     if not products:
@@ -324,6 +558,9 @@ async def mask_products(products: List[Dict[str, Any]], source: str = "local") -
     client = get_supabase()
     if not client:
         return products
+    if agent_slug_map is None:
+        partner_ids = list({str(p.get("partner_id", "")) for p in products if p.get("partner_id")})
+        agent_slug_map = await get_partner_agent_slug_map(partner_ids)
     out = []
     for p in products:
         internal_id = str(p.get("id", ""))
@@ -331,7 +568,8 @@ async def mask_products(products: List[Dict[str, Any]], source: str = "local") -
             out.append(dict(p))
             continue
         partner_id = p.get("partner_id")
-        masked = _mask_id_insert(internal_id, partner_id, source)
+        agent_slug = agent_slug_map.get(str(partner_id or "")) if partner_id else None
+        masked = _mask_id_insert(internal_id, partner_id, source, agent_slug)
         if masked:
             new_p = {k: v for k, v in p.items() if k != "partner_id"}
             new_p["id"] = masked
@@ -604,6 +842,7 @@ async def add_product_to_bundle(
     product_id: str,
     user_id: Optional[str] = None,
     bundle_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Add product to bundle. Creates new draft bundle if bundle_id not provided.
@@ -666,6 +905,15 @@ async def add_product_to_bundle(
 
             client.table("bundles").update({"total_price": total}).eq("id", bundle_id).execute()
 
+            if thread_id and partner_id:
+                session = await create_or_get_experience_session(thread_id, user_id)
+                if session:
+                    await upsert_experience_session_leg(
+                        str(session["id"]),
+                        str(partner_id),
+                        product_id,
+                        status="ready",
+                    )
             return {
                 "bundle_id": bundle_id,
                 "product_added": product.get("name"),
@@ -705,6 +953,15 @@ async def add_product_to_bundle(
                 "price": price,
             }).execute()
 
+            if thread_id and partner_id:
+                session = await create_or_get_experience_session(thread_id, user_id)
+                if session:
+                    await upsert_experience_session_leg(
+                        str(session["id"]),
+                        str(partner_id),
+                        product_id,
+                        status="ready",
+                    )
             return {
                 "bundle_id": new_bundle_id,
                 "product_added": product.get("name"),
@@ -720,6 +977,7 @@ async def add_products_to_bundle_bulk(
     user_id: Optional[str] = None,
     bundle_id: Optional[str] = None,
     fulfillment_details: Optional[Dict[str, Any]] = None,
+    thread_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Add multiple products to a bundle in one call.
@@ -741,6 +999,7 @@ async def add_products_to_bundle_bulk(
             product_id=product_id,
             user_id=user_id if i == 0 and not bundle_id else None,
             bundle_id=bundle_id,
+            thread_id=thread_id,
         )
         if not result:
             continue
@@ -1132,6 +1391,235 @@ async def replace_product_in_bundle(
         "total_price": add_result.get("total_price"),
         "currency": add_result.get("currency", "USD"),
     }
+
+
+# --- Experience Sessions (Phase 4) ---
+
+
+async def create_or_get_experience_session(
+    thread_id: str,
+    user_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Create or return existing experience session for thread_id."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        existing = (
+            client.table("experience_sessions")
+            .select("*")
+            .eq("thread_id", str(thread_id))
+            .limit(1)
+            .execute()
+        )
+        row = _table_row(existing.data)
+        if row:
+            return row
+        user_uuid = None
+        if user_id:
+            try:
+                user_uuid = str(uuid_module.UUID(str(user_id)))
+            except (ValueError, TypeError):
+                pass
+        ins = client.table("experience_sessions").insert({
+            "thread_id": str(thread_id),
+            "user_id": user_uuid,
+            "status": "active",
+        }).execute()
+        return _table_row(ins.data)
+    except Exception:
+        return None
+
+
+async def get_experience_session_by_thread(thread_id: str) -> Optional[Dict[str, Any]]:
+    """Get experience session by thread_id."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("experience_sessions")
+            .select("*")
+            .eq("thread_id", str(thread_id))
+            .limit(1)
+            .execute()
+        )
+        return _table_row(result.data)
+    except Exception:
+        return None
+
+
+async def get_experience_session_legs(session_id: str) -> List[Dict[str, Any]]:
+    """Get legs for experience session with partner names joined."""
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        result = (
+            client.table("experience_session_legs")
+            .select("id, partner_id, product_id, status, shopify_draft_order_id, created_at, updated_at")
+            .eq("experience_session_id", str(session_id))
+            .order("created_at")
+            .execute()
+        )
+        legs = _table_data(result.data)
+        if not legs:
+            return []
+        partner_ids = list({str(l["partner_id"]) for l in legs if l.get("partner_id")})
+        partners = await get_partners_by_ids(partner_ids)
+        out = []
+        for l in legs:
+            row = dict(l)
+            p = partners.get(str(l.get("partner_id", ""))) if l.get("partner_id") else None
+            row["partner_name"] = p.get("business_name") or p.get("seller_name") if p else None
+            out.append(row)
+        return out
+    except Exception:
+        return []
+
+
+async def upsert_experience_session_leg(
+    session_id: str,
+    partner_id: str,
+    product_id: str,
+    status: str = "ready",
+) -> Optional[Dict[str, Any]]:
+    """Create or update leg for session/partner/product. product_id is masked (uso_*)."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        existing = (
+            client.table("experience_session_legs")
+            .select("id")
+            .eq("experience_session_id", session_id)
+            .eq("partner_id", partner_id)
+            .eq("product_id", product_id)
+            .limit(1)
+            .execute()
+        )
+        row = _table_row(existing.data)
+        now = datetime.now(timezone.utc).isoformat()
+        if row:
+            client.table("experience_session_legs").update({
+                "status": status,
+                "updated_at": now,
+            }).eq("id", row["id"]).execute()
+            return {"id": row["id"], "status": status}
+        ins = client.table("experience_session_legs").insert({
+            "experience_session_id": session_id,
+            "partner_id": partner_id,
+            "product_id": product_id,
+            "status": status,
+        }).execute()
+        r = _table_row(ins.data)
+        return r
+    except Exception:
+        return None
+
+
+async def update_experience_session_leg_status(
+    leg_id: str,
+    new_status: str,
+    admin_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Update leg status and record override audit."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        leg = (
+            client.table("experience_session_legs")
+            .select("id, status")
+            .eq("id", leg_id)
+            .limit(1)
+            .execute()
+        )
+        row = _table_row(leg.data)
+        if not row:
+            return None
+        old_status = row.get("status", "pending")
+        now = datetime.now(timezone.utc).isoformat()
+        client.table("experience_session_legs").update({
+            "status": new_status,
+            "updated_at": now,
+        }).eq("id", leg_id).execute()
+        client.table("experience_session_leg_overrides").insert({
+            "leg_id": leg_id,
+            "admin_id": admin_id,
+            "old_status": old_status,
+            "new_status": new_status,
+        }).execute()
+        return {"id": leg_id, "status": new_status}
+    except Exception:
+        return None
+
+
+async def create_experience_session_leg_override(
+    leg_id: str, admin_id: str, old_status: str, new_status: str
+) -> bool:
+    """Insert override audit row."""
+    client = get_supabase()
+    if not client:
+        return False
+    try:
+        client.table("experience_session_leg_overrides").insert({
+            "leg_id": leg_id,
+            "admin_id": admin_id,
+            "old_status": old_status,
+            "new_status": new_status,
+        }).execute()
+        return True
+    except Exception:
+        return False
+
+
+async def list_experience_sessions_admin(
+    thread_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """List experience sessions for admin with optional filters."""
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        q = client.table("experience_sessions").select("*")
+        if thread_id:
+            q = q.eq("thread_id", thread_id)
+        if user_id:
+            q = q.eq("user_id", user_id)
+        if status:
+            q = q.eq("status", status)
+        result = q.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+        return _table_data(result.data)
+    except Exception:
+        return []
+
+
+async def get_experience_session_admin(session_id: str) -> Optional[Dict[str, Any]]:
+    """Get experience session by id for admin (with legs)."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = (
+            client.table("experience_sessions")
+            .select("*")
+            .eq("id", session_id)
+            .limit(1)
+            .execute()
+        )
+        session = _table_row(result.data)
+        if not session:
+            return None
+        legs = await get_experience_session_legs(session_id)
+        session["legs"] = legs
+        return session
+    except Exception:
+        return None
 
 
 # --- Module 3: AI-First Discoverability ---

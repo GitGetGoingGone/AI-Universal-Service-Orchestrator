@@ -170,6 +170,78 @@ async def create_checkout_session_from_order_route(body: CheckoutSessionFromOrde
         raise HTTPException(status_code=503, detail=str(e))
 
 
+class ShopifyDraftPrecheckBody(BaseModel):
+    """Request body for Shopify draft order pre-check."""
+
+    shop_url: str
+    access_token: str
+    line_items: list[dict]
+    shipping_address: dict | None = None
+    email: str | None = None
+    phone: str | None = None
+    name: str | None = None
+
+
+@router.post("/shopify-draft/precheck")
+async def shopify_draft_precheck(body: ShopifyDraftPrecheckBody):
+    """
+    Create Shopify draft order (status=draft); return TCO.
+    Use before charging to show user exact tax+shipping.
+    line_items: [{ "variant_id": 123, "quantity": 1 }] or [{ "title": "...", "price": "10.00", "quantity": 1 }]
+    """
+    from shopify_draft import create_draft_order_precheck
+
+    try:
+        result = await create_draft_order_precheck(
+            shop_url=body.shop_url,
+            access_token=body.access_token,
+            line_items=body.line_items,
+            shipping_address=body.shipping_address,
+            email=body.email,
+            name=body.name,
+            phone=body.phone,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+class ShopifyDraftCompleteBody(BaseModel):
+    """Request body for completing a Shopify draft order (settlement)."""
+
+    shop_url: str
+    access_token: str
+    draft_order_id: str
+    payment_pending: bool = False
+
+
+@router.post("/shopify-draft/complete")
+async def shopify_draft_complete(body: ShopifyDraftCompleteBody):
+    """
+    Complete Shopify draft order after Stripe charge succeeds.
+    Creates the order in Shopify. Use payment_pending=false when payment is confirmed.
+    """
+    from shopify_draft import complete_draft_order
+
+    try:
+        result = await complete_draft_order(
+            shop_url=body.shop_url,
+            access_token=body.access_token,
+            draft_order_id=body.draft_order_id,
+            payment_pending=body.payment_pending,
+        )
+        if result.get("error"):
+            raise HTTPException(
+                status_code=502,
+                detail=result["error"],
+            )
+        return {"order_id": result.get("order_id"), "ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 class ConfirmPaymentBody(BaseModel):
     """Confirm payment for order (demo mode only)."""
 

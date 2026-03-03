@@ -166,12 +166,60 @@ function EngagementChoiceRenderer({
   );
 }
 
-function ExperienceSessionRenderer({ data }: { data: Record<string, unknown> }) {
+type ExperienceLeg = {
+  id?: string;
+  partner_name?: string | null;
+  product_id?: string;
+  status?: string;
+};
+type ExperienceSessionData = {
+  id?: string;
+  thread_id?: string;
+  status?: string;
+  legs?: ExperienceLeg[];
+};
+
+function ExperienceSessionRenderer({ data }: { data: ExperienceSessionData }) {
+  const legs = (data?.legs ?? []) as ExperienceLeg[];
+  if (legs.length === 0) {
+    return (
+      <div className="my-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
+        <span className="font-medium">Experience Session</span>
+        <p className="mt-1">
+          Status: <span className="font-mono">{data?.status ?? "active"}</span>
+        </p>
+        <p className="text-xs mt-2 text-gray-500">No legs yet. Add products to your bundle to see progress.</p>
+      </div>
+    );
+  }
   return (
     <div className="my-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
-      <pre className="whitespace-pre-wrap">
-        {JSON.stringify(data, null, 2)}
-      </pre>
+      <span className="font-medium">Experience Session</span>
+      <p className="mt-1 text-xs">
+        Status: <span className="font-mono">{data?.status ?? "active"}</span>
+      </p>
+      <ul className="mt-3 space-y-2">
+        {legs.map((leg, i) => (
+          <li key={leg.id ?? i} className="flex items-center gap-2">
+            <span
+              className={`inline-flex h-2 w-2 rounded-full ${
+                leg.status === "committed"
+                  ? "bg-green-500"
+                  : leg.status === "in_customization"
+                    ? "bg-amber-500 animate-pulse"
+                    : leg.status === "ready"
+                      ? "bg-blue-500"
+                      : "bg-gray-400"
+              }`}
+              aria-hidden
+            />
+            <span className="font-medium text-gray-800 dark:text-gray-200">
+              {leg.partner_name ?? "Partner"}
+            </span>
+            <span className="text-xs text-gray-500">— {leg.status ?? "pending"}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

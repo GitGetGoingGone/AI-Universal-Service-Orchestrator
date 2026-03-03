@@ -34,6 +34,19 @@ class ManifestIngestBody(BaseModel):
     validate_acp: bool = False  # If true and manifest_type=acp, only cache ACP-compliant products
 
 
+class ShopifyPartnerOnboardBody(BaseModel):
+    """Request to onboard a curated Shopify partner (MCP)."""
+
+    shop_url: str
+    access_token: Optional[str] = None
+    access_token_vault_ref: Optional[str] = None
+    mcp_endpoint: str
+    supported_capabilities: List[str] = []
+    display_name: str
+    available_to_customize: bool = False
+    price_premium_percent: float = 0.0
+
+
 @router.post("/manifest/ingest")
 async def ingest_manifest(body: ManifestIngestBody):
     """
@@ -245,3 +258,32 @@ async def legacy_ingest(
 async def legacy_column_map():
     """Return default column mapping for legacy formats."""
     return {"column_map": DEFAULT_COLUMN_MAP}
+
+
+@router.put("/partners")
+async def onboard_shopify_partner(body: ShopifyPartnerOnboardBody):
+    """
+    Onboard a curated Shopify partner. Creates/updates partner, internal_agent_registry,
+    and shopify_curated_partners. Access token stored in Supabase Vault when access_token provided.
+    """
+    from db import get_supabase, onboard_shopify_curated_partner
+
+    if not body.access_token and not body.access_token_vault_ref:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either access_token or access_token_vault_ref (if token already in Vault)",
+        )
+    if not body.shop_url or not body.mcp_endpoint:
+        raise HTTPException(status_code=400, detail="shop_url and mcp_endpoint are required")
+
+    result = await onboard_shopify_curated_partner(
+        shop_url=body.shop_url.strip().lower().replace("https://", "").replace("http://", "").rstrip("/"),
+        mcp_endpoint=body.mcp_endpoint.strip().rstrip("/"),
+        display_name=body.display_name.strip() or body.shop_url,
+        supported_capabilities=body.supported_capabilities or [],
+        available_to_customize=body.available_to_customize,
+        price_premium_percent=float(body.price_premium_percent) if body.price_premium_percent is not None else 0.0,
+        access_token=body.access_token,
+        access_token_vault_ref=body.access_token_vault_ref,
+    )
+    return result

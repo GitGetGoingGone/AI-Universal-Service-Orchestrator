@@ -272,11 +272,13 @@ class DiscoveryAggregator:
         local_db_driver: Optional[LocalDBDriver] = None,
         ucp_driver: Optional[UCPManifestDriver] = None,
         mcp_driver: Optional[MCPDriver] = None,
+        shopify_mcp_driver: Optional[Any] = None,
         timeout_ms: int = 5000,
     ):
         self._local = local_db_driver
         self._ucp = ucp_driver
         self._mcp = mcp_driver
+        self._shopify_mcp = shopify_mcp_driver
         self._timeout_ms = max(500, min(60000, timeout_ms))
 
     async def search(
@@ -315,6 +317,12 @@ class DiscoveryAggregator:
             tasks.append(
                 asyncio.create_task(
                     self._mcp.search(query=query, limit=limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
+                )
+            )
+        if self._shopify_mcp:
+            tasks.append(
+                asyncio.create_task(
+                    self._shopify_mcp.search(query=query, limit=limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
                 )
             )
         if not tasks:

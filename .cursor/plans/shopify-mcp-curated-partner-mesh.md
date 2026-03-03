@@ -12,14 +12,27 @@
 
 ---
 
+## Implementation Status
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| **1** Hybrid Registry | ✅ Done | Migration `20250129000000_hybrid_registry_shopify.sql`, Admin `PUT /api/v1/admin/partners`, `get_shopify_mcp_endpoints()`, `onboard_shopify_curated_partner()` |
+| **2** Async MCP Scout | ✅ Done | `ShopifyMCPDriver` in `packages/shared/shopify_mcp_driver.py`, Scout wired, 3s timeout. Streaming: deferred (requires new API contract) |
+| **3** Metadata Enricher | ✅ Done | `middleware/metadata_enricher.py`, integrated in `scout_engine` before ranking, `METADATA_ENRICHMENT_ENABLED` config |
+| **4** Masking + Experience Session | ✅ Done | `_mask_id_insert` with `agent_slug` (`uso_{slug}_{short_id}`), `get_partner_agent_slug_map`, experience_sessions migration, DB helpers, user API `GET /api/v1/experience-sessions`, Portal admin page + leg override + message/remind stubs, `ExperienceSessionRenderer` in GatewayPartRenderers, `thread_id` on add-to-bundle |
+| **5** Payment (Shopify Draft) | ✅ Done | `StandardizedShipping` in `packages/shared/schemas.py`, `shopify_draft.py` (precheck, complete, `get_shopify_partner_credentials`), migration `get_shopify_token` RPC, `POST /shopify-draft/precheck`, `POST /shopify-draft/complete`. Refund/leg update on complete failure: to be wired in Stripe webhook |
+| **6** Data Hygiene | ✅ Done | `raw_shopify_variant_ids` in `STRIP_KEYS` |
+
+---
+
 ## Current State Summary
 
-- **Registry**: `internal_agent_registry` (base_url, display_name, capability, enabled); no transport type
-- **Discovery**: [packages/shared/discovery_aggregator.py](packages/shared/discovery_aggregator.py) - LocalDBDriver, UCPManifestDriver, MCPDriver (placeholder); parallel via `asyncio.gather`, 5s timeout
-- **Masking**: [services/discovery-service/db.py](services/discovery-service/db.py) - `uso_` + random 24 chars; `id_masking_map` stores mapping
-- **Data hygiene**: [packages/shared/ucp_public_product.py](packages/shared/ucp_public_product.py) - strips `experience_tags`, `partner_id`, `internal_notes`; `STRIP_KEYS` - add `raw_shopify_variant_ids` if needed
-- **Orders**: `order_legs` has status (pending); `bundle_legs` has leg_type; no `experience_session` tables
-- **Payment**: Stripe Checkout (redirect); no Shopify Draft Order integration
+- **Registry**: `internal_agent_registry` (base_url, display_name, capability, enabled, transport_type, available_to_customize, metadata)
+- **Discovery**: [packages/shared/discovery_aggregator.py](packages/shared/discovery_aggregator.py) - LocalDBDriver, UCPManifestDriver, ShopifyMCPDriver; parallel via `asyncio.gather`, 3s timeout
+- **Masking**: [services/discovery-service/db.py](services/discovery-service/db.py) - `uso_{agent_slug}_{short_id}` or legacy `uso_<hex>`; `id_masking_map` with `agent_slug`, `expires_at`
+- **Data hygiene**: [packages/shared/ucp_public_product.py](packages/shared/ucp_public_product.py) - strips `experience_tags`, `partner_id`, `internal_notes`, `raw_shopify_variant_ids`
+- **Experience sessions**: `experience_sessions`, `experience_session_legs`, `experience_session_leg_overrides` tables; user and admin APIs; Portal page with leg override
+- **Payment**: Stripe Checkout; Shopify Draft Order precheck and complete in [services/payment-service/shopify_draft.py](services/payment-service/shopify_draft.py)
 
 ---
 

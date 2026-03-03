@@ -28,6 +28,7 @@ STRIP_KEYS = frozenset({
     "experience_tags",
     "partner_id",
     "internal_notes",
+    "raw_shopify_variant_ids",
 })
 
 

@@ -10,6 +10,7 @@ from packages.shared.discovery_aggregator import (
     MCPDriver,
     UCPManifestDriver,
 )
+from packages.shared.shopify_mcp_driver import ShopifyMCPDriver
 from packages.shared.ranking import sort_products_by_rank
 
 from db import (
@@ -20,8 +21,10 @@ from db import (
     get_partner_ratings_map,
     get_partners_by_ids,
     get_platform_config_ranking,
+    get_shopify_mcp_endpoints,
     search_products,
 )
+from middleware.metadata_enricher import enrich_products as enrich_products_middleware
 from semantic_search import semantic_search
 
 
@@ -160,10 +163,17 @@ async def _fetch_via_aggregator(
         async def _get_partner_urls():
             return internal_urls
         ucp_driver = UCPManifestDriver(get_partner_manifest_urls=_get_partner_urls)
+    shopify_mcp_driver = None
+    shopify_endpoints = await get_shopify_mcp_endpoints(capability="discovery")
+    if shopify_endpoints:
+        async def _get_shopify_endpoints():
+            return shopify_endpoints
+        shopify_mcp_driver = ShopifyMCPDriver(get_shopify_endpoints=_get_shopify_endpoints, timeout=3.0)
     aggregator = DiscoveryAggregator(
         local_db_driver=local_driver,
         ucp_driver=ucp_driver,
         mcp_driver=None,
+        shopify_mcp_driver=shopify_mcp_driver,
         timeout_ms=timeout_ms,
     )
     ucp_products = await aggregator.search(
@@ -246,6 +256,10 @@ async def _fetch_and_rank(
 
     if not products:
         return []
+
+    # Phase 3: Dynamic metadata enrichment (experience_tags via LLM when missing)
+    if settings.metadata_enrichment_enabled:
+        products = await enrich_products_middleware(products, enabled=True)
 
     if product_mix:
         product_ids = [str(p.get("id", "")) for p in products if p.get("id")]

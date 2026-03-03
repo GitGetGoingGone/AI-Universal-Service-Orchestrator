@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { name, api_type, base_url, api_key } = body;
+    const { name, api_type, base_url, api_key, extra_config } = body;
 
     if (!name || !api_type) {
       return NextResponse.json(

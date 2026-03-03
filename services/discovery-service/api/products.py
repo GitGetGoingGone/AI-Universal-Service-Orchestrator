@@ -60,6 +60,7 @@ class AddToBundleBody(BaseModel):
     product_id: str
     user_id: Optional[str] = None
     bundle_id: Optional[str] = None
+    thread_id: Optional[str] = None  # For experience_session leg tracking
 
 
 class AddBulkBody(BaseModel):
@@ -68,6 +69,7 @@ class AddBulkBody(BaseModel):
     product_ids: list[str]
     user_id: Optional[str] = None
     bundle_id: Optional[str] = None
+    thread_id: Optional[str] = None  # For experience_session leg tracking
     pickup_time: Optional[str] = None
     pickup_address: Optional[str] = None
     delivery_address: Optional[str] = None
@@ -472,6 +474,7 @@ async def add_to_bundle_bulk(request: Request, body: AddBulkBody):
         user_id=body.user_id,
         bundle_id=body.bundle_id,
         fulfillment_details=fulfillment,
+        thread_id=body.thread_id,
     )
     if not result:
         raise HTTPException(status_code=400, detail="Failed to add products to bundle (products not found or error)")
