@@ -7,6 +7,8 @@ import { UserButton } from "@clerk/nextjs";
 const NAV_ITEMS = [
   { href: "/platform", label: "Dashboard", description: "Platform metrics and overview" },
   { href: "/platform/partners", label: "Partners", description: "Manage partner accounts and onboarding" },
+  { href: "/platform/partners/ucp", label: "UCP Partners", description: "Stores with UCP manifest; add via manifest JSON or base URL" },
+  { href: "/platform/partners/shopify", label: "Shopify Partners", description: "Curated Shopify MCP partners; edit premium and details" },
   { href: "/platform/orders", label: "Orders", description: "List of orders placed" },
   { href: "/platform/experience-sessions", label: "Experience Sessions", description: "Bundle sessions and legs by thread" },
   { href: "/platform/escalations", label: "Escalations", description: "Support escalations and assignments" },

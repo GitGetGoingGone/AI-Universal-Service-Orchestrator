@@ -28,13 +28,24 @@ def _slug_from_shop_url(shop_url: str) -> str:
 def _extract_products_from_mcp_response(data: Any, slug: str, price_premium: float) -> List[Dict[str, Any]]:
     """
     Extract product list from MCP tools/call response.
-    Handles: result.content[].text (JSON), result.content[].products, result.products, etc.
+    Handles: result.content[].text (JSON), result.content[].products, result.products,
+    data.products, data.data.products, result as array, and JSON-RPC error (logged).
     """
     out: List[Dict[str, Any]] = []
     if not data or not isinstance(data, dict):
         return out
 
-    # Direct products/items
+    # JSON-RPC error: log and return empty
+    err = data.get("error")
+    if isinstance(err, dict):
+        logger.warning(
+            "Shopify MCP JSON-RPC error: code=%s message=%s",
+            err.get("code"),
+            err.get("message", err.get("data", "")),
+        )
+        return out
+
+    # Direct products/items at top level
     items = data.get("products") or data.get("items") or data.get("content")
     if isinstance(items, list):
         for it in items:
@@ -53,17 +64,31 @@ def _extract_products_from_mcp_response(data: Any, slug: str, price_premium: flo
                     pass
         return out
 
+    # data.data.products (some APIs nest under data)
+    inner = data.get("data")
+    if isinstance(inner, dict):
+        inner_items = inner.get("products") or inner.get("items")
+        if isinstance(inner_items, list):
+            for p in inner_items:
+                if isinstance(p, dict):
+                    out.append(_map_shopify_product(p, slug, price_premium))
+            return out
+
     # JSON-RPC result wrapper
     result = data.get("result")
     if isinstance(result, dict):
         return _extract_products_from_mcp_response(result, slug, price_premium)
     if isinstance(result, list):
+        # Direct array of product objects
         for r in result:
             if isinstance(r, dict):
-                out.extend(_extract_products_from_mcp_response(r, slug, price_premium))
+                if r.get("products") is not None or r.get("content") is not None or r.get("result") is not None:
+                    out.extend(_extract_products_from_mcp_response(r, slug, price_premium))
+                else:
+                    out.append(_map_shopify_product(r, slug, price_premium))
         return out
 
-    # content array with text
+    # content array with text (MCP content blocks)
     content = data.get("content")
     if isinstance(content, list):
         for c in content:
@@ -202,16 +227,36 @@ class ShopifyMCPDriver:
                     },
                 }
                 headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "USO-Orchestrator/1.0 (Shopify MCP)"}
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    r = await client.post(mcp_url, json=payload, headers=headers)
+                try:
+                    async with httpx.AsyncClient(timeout=self._timeout) as client:
+                        r = await client.post(mcp_url, json=payload, headers=headers)
+                except Exception as e:
+                    logger.warning("Shopify MCP request failed %s: %s", mcp_url, e)
+                    return []
                 if r.status_code != 200:
-                    logger.debug("Shopify MCP %s returned %s", mcp_url, r.status_code)
+                    logger.warning(
+                        "Shopify MCP %s returned %s; body snippet: %s",
+                        mcp_url,
+                        r.status_code,
+                        (r.text or "")[:300],
+                    )
                     return []
                 try:
                     data = r.json()
-                except Exception:
+                except Exception as e:
+                    logger.warning("Shopify MCP %s non-JSON response: %s", mcp_url, (r.text or "")[:200])
                     return []
-                return _extract_products_from_mcp_response(data, slug, premium)
+                products = _extract_products_from_mcp_response(data, slug, premium)
+                if not products:
+                    err = data.get("error") if isinstance(data, dict) else None
+                    err_msg = err.get("message", str(err)) if isinstance(err, dict) else None
+                    logger.info(
+                        "Shopify MCP %s returned 200 but no products extracted. keys=%s%s",
+                        mcp_url,
+                        list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+                        f" error={err_msg}" if err_msg else "",
+                    )
+                return products
 
             results: List[List[Dict[str, Any]]] = await asyncio.gather(
                 *[_fetch_one(ep) for ep in endpoints[:10]],

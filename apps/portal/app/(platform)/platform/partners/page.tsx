@@ -16,6 +16,9 @@ export default async function PartnersPage() {
           <Button asChild variant="outline" size="sm">
             <Link href="/platform/partners/new">New partner</Link>
           </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/platform/partners/ucp-new">Add UCP partner</Link>
+          </Button>
           <Button asChild size="sm">
             <Link href="/platform/partners/shopify-new">Add Shopify partner</Link>
           </Button>

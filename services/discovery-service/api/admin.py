@@ -47,6 +47,18 @@ class ShopifyPartnerOnboardBody(BaseModel):
     price_premium_percent: float = 0.0
 
 
+class UCPPartnerOnboardBody(BaseModel):
+    """Request to onboard a UCP-only partner (manifest JSON or manual base_url)."""
+
+    base_url: Optional[str] = None
+    display_name: Optional[str] = None
+    manifest_json: Optional[str] = None
+    price_premium_percent: float = 0.0
+    available_to_customize: bool = False
+    access_token: Optional[str] = None
+    access_token_vault_ref: Optional[str] = None
+
+
 @router.post("/manifest/ingest")
 async def ingest_manifest(body: ManifestIngestBody):
     """
@@ -282,3 +294,126 @@ async def onboard_shopify_partner(body: ShopifyPartnerOnboardBody):
         access_token_vault_ref=body.access_token_vault_ref,
     )
     return result
+
+
+@router.post("/ucp-partners")
+async def onboard_ucp_partner_endpoint(body: UCPPartnerOnboardBody):
+    """
+    Onboard a UCP-only partner. Provide either manifest_json (paste UCP manifest) or base_url.
+    display_name is optional; derived from manifest or base_url if omitted.
+    """
+    import json
+    from db import onboard_ucp_partner as db_onboard_ucp, _base_url_from_manifest_json
+
+    base_url: Optional[str] = body.base_url and body.base_url.strip() or None
+    display_name: Optional[str] = body.display_name and body.display_name.strip() or None
+
+    if body.manifest_json and body.manifest_json.strip():
+        try:
+            manifest = json.loads(body.manifest_json.strip())
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid manifest JSON: {e}")
+        derived = _base_url_from_manifest_json(manifest)
+        if derived:
+            base_url = base_url or derived
+        if not display_name and isinstance(manifest, dict):
+            display_name = (manifest.get("name") or manifest.get("display_name") or "").strip() or None
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Provide either base_url or valid manifest_json with an endpoint")
+    result = await db_onboard_ucp(
+        base_url=base_url,
+        display_name=display_name or base_url,
+        price_premium_percent=float(body.price_premium_percent) if body.price_premium_percent is not None else 0.0,
+        available_to_customize=body.available_to_customize,
+        access_token=body.access_token,
+        access_token_vault_ref=body.access_token_vault_ref,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result["error"])
+    return result
+
+
+@router.get("/ucp-partners")
+async def list_ucp_partners():
+    """List UCP-only partners from internal_agent_registry (transport_type=UCP)."""
+    from db import get_supabase
+
+    client = get_supabase()
+    if not client:
+        return {"ucp_partners": []}
+    try:
+        result = (
+            client.table("internal_agent_registry")
+            .select("id, base_url, display_name, enabled, available_to_customize, price_premium_percent, access_token_vault_ref, created_at, updated_at")
+            .eq("transport_type", "UCP")
+            .order("display_name")
+            .execute()
+        )
+        data = result.data if isinstance(result.data, list) else []
+        for row in data:
+            if isinstance(row, dict) and "access_token_vault_ref" in row:
+                row["has_token"] = bool(row.get("access_token_vault_ref"))
+        return {"ucp_partners": data}
+    except Exception:
+        return {"ucp_partners": []}
+
+
+class UCPPartnerPatchBody(BaseModel):
+    """Update UCP partner display_name, enabled, price_premium_percent, available_to_customize, optional access_token."""
+
+    display_name: Optional[str] = None
+    enabled: Optional[bool] = None
+    price_premium_percent: Optional[float] = None
+    available_to_customize: Optional[bool] = None
+    access_token: Optional[str] = None
+
+
+@router.patch("/ucp-partners/{registry_id}")
+async def patch_ucp_partner(registry_id: str, body: UCPPartnerPatchBody):
+    """Update a UCP partner's display_name, enabled, price_premium_percent, available_to_customize, or optional access_token."""
+    from db import get_supabase
+    from datetime import datetime, timezone
+    import uuid as uuid_module
+
+    client = get_supabase()
+    if not client:
+        raise HTTPException(status_code=503, detail="Database not configured")
+    updates: Dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if body.display_name is not None:
+        updates["display_name"] = str(body.display_name).strip() or None
+    if body.enabled is not None:
+        updates["enabled"] = bool(body.enabled)
+    if body.price_premium_percent is not None:
+        updates["price_premium_percent"] = float(body.price_premium_percent)
+    if body.available_to_customize is not None:
+        updates["available_to_customize"] = bool(body.available_to_customize)
+
+    if body.access_token is not None:
+        try:
+            row = (
+                client.table("internal_agent_registry")
+                .select("base_url")
+                .eq("id", registry_id)
+                .eq("transport_type", "UCP")
+                .limit(1)
+                .execute()
+            )
+            data = row.data if isinstance(row.data, list) else []
+            base_url = data[0].get("base_url", "") if data else ""
+            secret_name = f"ucp_{base_url.replace('https://', '').replace('http://', '').replace('/', '_')}_{uuid_module.uuid4().hex[:8]}"
+            r = client.rpc("insert_shopify_token", {"secret_name": secret_name, "secret_value": body.access_token}).execute()
+            if r.data is not None:
+                vault_ref = str(r.data) if not isinstance(r.data, dict) else str(r.data.get("id", r.data))
+                updates["access_token_vault_ref"] = vault_ref
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to store token: {e}")
+
+    if len(updates) <= 1:
+        return {"id": registry_id, "updated": False}
+    try:
+        client.table("internal_agent_registry").update(updates).eq("id", registry_id).eq(
+            "transport_type", "UCP"
+        ).execute()
+        return {"id": registry_id, "updated": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -15,6 +15,7 @@ __all__ = [
     "search_products",
     "get_distinct_experience_tags",
     "get_internal_agent_urls",
+    "onboard_ucp_partner",
     "get_shopify_mcp_endpoints",
     "onboard_shopify_curated_partner",
     "get_partner_agent_slug_map",
@@ -236,17 +237,128 @@ async def get_distinct_experience_tags() -> List[str]:
         return []
 
 
+def _base_url_from_manifest_json(manifest: Dict[str, Any]) -> Optional[str]:
+    """
+    Derive base URL from UCP manifest JSON.
+    Expects ucp.services["dev.ucp.shopping"].rest.endpoint (e.g. https://store.com/api/v1/ucp)
+    or similar; returns origin (e.g. https://store.com).
+    """
+    try:
+        ucp = manifest.get("ucp", manifest)
+        if not isinstance(ucp, dict):
+            return None
+        services = ucp.get("services", {})
+        if not isinstance(services, dict):
+            return None
+        dev = services.get("dev.ucp.shopping", services)
+        if isinstance(dev, dict):
+            dev = dev.get("rest", dev)
+        if not isinstance(dev, dict):
+            return None
+        endpoint = dev.get("endpoint", dev.get("catalog", ""))
+        if not endpoint or not isinstance(endpoint, str):
+            return None
+        endpoint = endpoint.strip().rstrip("/")
+        if not endpoint.startswith("http"):
+            endpoint = "https://" + endpoint
+        from urllib.parse import urlparse
+        parsed = urlparse(endpoint)
+        base = f"{parsed.scheme or 'https'}://{parsed.netloc}"
+        return base.rstrip("/") if base else None
+    except Exception:
+        return None
+
+
+async def onboard_ucp_partner(
+    base_url: str,
+    display_name: str,
+    price_premium_percent: float = 0.0,
+    available_to_customize: bool = False,
+    access_token: Optional[str] = None,
+    access_token_vault_ref: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Add or update a UCP partner in internal_agent_registry.
+    Discovery will fetch /.well-known/ucp.json from base_url for catalog.
+    Optional: price_premium_percent, available_to_customize, access_token (stored in Vault).
+    """
+    client = get_supabase()
+    if not client:
+        return {"error": "Database not configured", "registry_id": None}
+    base_url = str(base_url).strip().rstrip("/")
+    if not base_url:
+        return {"error": "base_url required", "registry_id": None}
+    if not base_url.startswith("http"):
+        base_url = "https://" + base_url
+    display_name = (display_name or base_url).strip()
+
+    vault_ref = access_token_vault_ref
+    if access_token and not vault_ref:
+        try:
+            secret_name = f"ucp_{base_url.replace('https://', '').replace('http://', '').replace('/', '_')}_{uuid_module.uuid4().hex[:8]}"
+            r = client.rpc("insert_shopify_token", {"secret_name": secret_name, "secret_value": access_token}).execute()
+            if r.data is not None:
+                vault_ref = str(r.data) if not isinstance(r.data, dict) else str(r.data.get("id", r.data))
+        except Exception as e:
+            return {"error": f"Failed to store token in Vault: {e}", "registry_id": None}
+
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        existing = (
+            client.table("internal_agent_registry")
+            .select("id")
+            .eq("base_url", base_url)
+            .eq("transport_type", "UCP")
+            .limit(1)
+            .execute()
+        )
+        row = _table_row(existing.data)
+        payload: Dict[str, Any] = {
+            "display_name": display_name,
+            "price_premium_percent": float(price_premium_percent),
+            "available_to_customize": bool(available_to_customize),
+            "updated_at": now,
+        }
+        if vault_ref:
+            payload["access_token_vault_ref"] = vault_ref
+        if row:
+            client.table("internal_agent_registry").update(payload).eq("id", row["id"]).execute()
+            return {"registry_id": str(row["id"]), "base_url": base_url}
+        ins_payload: Dict[str, Any] = {
+            "capability": "discovery",
+            "base_url": base_url,
+            "display_name": display_name,
+            "enabled": True,
+            "transport_type": "UCP",
+            "price_premium_percent": float(price_premium_percent),
+            "available_to_customize": bool(available_to_customize),
+        }
+        if vault_ref:
+            ins_payload["access_token_vault_ref"] = vault_ref
+        ins = client.table("internal_agent_registry").insert(ins_payload).execute()
+        reg_data = _table_data(ins.data)
+        registry_id = str(reg_data[0]["id"]) if reg_data else None
+        return {"registry_id": registry_id, "base_url": base_url}
+    except Exception as e:
+        return {"error": str(e), "registry_id": None}
+
+
 async def get_internal_agent_urls(capability: Optional[str] = None) -> List[str]:
     """
-    Return list of internal Business Agent base URLs from the private registry.
+    Return list of internal Business Agent base URLs for UCP manifest discovery.
+    Only returns rows with transport_type = 'UCP' (or null for backward compat).
     Used only server-side by Scout; never expose these URLs in responses.
-    If capability is set, return URLs for that capability only; otherwise all enabled.
     """
     client = get_supabase()
     if not client:
         return []
     try:
-        q = client.table("internal_agent_registry").select("base_url").eq("enabled", True)
+        q = (
+            client.table("internal_agent_registry")
+            .select("base_url")
+            .eq("enabled", True)
+            .or_("transport_type.eq.UCP,transport_type.is.null")
+        )
         if capability and str(capability).strip():
             q = q.eq("capability", str(capability).strip())
         result = q.execute()
