@@ -268,11 +268,6 @@ async def onboard_shopify_partner(body: ShopifyPartnerOnboardBody):
     """
     from db import get_supabase, onboard_shopify_curated_partner
 
-    if not body.access_token and not body.access_token_vault_ref:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either access_token or access_token_vault_ref (if token already in Vault)",
-        )
     if not body.shop_url or not body.mcp_endpoint:
         raise HTTPException(status_code=400, detail="shop_url and mcp_endpoint are required")
 
