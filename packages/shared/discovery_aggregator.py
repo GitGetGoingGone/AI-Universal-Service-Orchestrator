@@ -89,12 +89,42 @@ def _normalize_to_ucp_product(raw: Dict[str, Any], source: str = "DB") -> UCPPro
     else:
         meta = {}
 
+    price = raw.get("price")
+    if price is not None:
+        try:
+            price = float(price)
+        except (TypeError, ValueError):
+            price = 0.0
+    else:
+        offers = raw.get("offers")
+        if isinstance(offers, dict) and offers.get("price") is not None:
+            try:
+                price = float(offers["price"])
+            except (TypeError, ValueError):
+                price = 0.0
+        else:
+            price = 0.0
+    if price == 0.0 and isinstance(raw.get("price_range"), dict):
+        pr = raw["price_range"]
+        for k in ("min", "max"):
+            v = pr.get(k)
+            if v is not None:
+                try:
+                    price = float(v)
+                    break
+                except (TypeError, ValueError):
+                    pass
+
+    currency = str(raw.get("currency", raw.get("offers", {}).get("priceCurrency", "USD") if isinstance(raw.get("offers"), dict) else "USD"))
+    if currency == "USD" and isinstance(raw.get("price_range"), dict) and raw["price_range"].get("currency"):
+        currency = str(raw["price_range"]["currency"])
+
     return UCPProduct(
         id=str(raw.get("id", "")),
         name=str(raw.get("name", raw.get("title", ""))),
         description=str(raw.get("description", "")),
-        price=float(raw.get("price", raw.get("offers", {}).get("price", 0) if isinstance(raw.get("offers"), dict) else 0)),
-        currency=str(raw.get("currency", raw.get("offers", {}).get("priceCurrency", "USD") if isinstance(raw.get("offers"), dict) else "USD")),
+        price=float(price),
+        currency=currency,
         partner_id=str(raw["partner_id"]) if raw.get("partner_id") else None,
         source=source,
         capabilities=caps,

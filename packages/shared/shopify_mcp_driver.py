@@ -28,25 +28,59 @@ def _slug_from_shop_url(shop_url: str) -> str:
 def _extract_products_from_mcp_response(data: Any, slug: str, price_premium: float) -> List[Dict[str, Any]]:
     """
     Extract product list from MCP tools/call response.
-    Handles: result.content[].text (JSON), result.content[].products, result.products,
-    data.products, data.data.products, result as array, and JSON-RPC error (logged).
+
+    Known shape (Kylie/Shopify search_shop_catalog):
+    - Top level: result.content[].text (JSON-RPC) or content[].text (Playground).
+    - Parsed text: { "products": [ { "product_id", "title", "description", "url", "image_url", "price_range": { "min", "max", "currency" }, ... } ], "pagination", "available_filters", "instructions" }.
+    - Each product uses product_id (not id), title (not name), and price_range with string min/max.
+
+    Also handles: result wrapper, data.data.products, top-level products/items, and JSON-RPC error.
     """
     out: List[Dict[str, Any]] = []
     if not data or not isinstance(data, dict):
         return out
 
-    # JSON-RPC error: log and return empty
+    # JSON-RPC error: log and return empty (use debug for auth failures to reduce noise)
     err = data.get("error")
     if isinstance(err, dict):
-        logger.warning(
-            "Shopify MCP JSON-RPC error: code=%s message=%s",
-            err.get("code"),
-            err.get("message", err.get("data", "")),
-        )
+        msg = err.get("message", err.get("data", ""))
+        code = err.get("code")
+        if code == -32000 and "auth" in str(msg).lower():
+            logger.debug("Shopify MCP auth error (partner may require token or be UCP-only): code=%s message=%s", code, msg)
+        else:
+            logger.warning(
+                "Shopify MCP JSON-RPC error: code=%s message=%s",
+                code,
+                msg,
+            )
         return out
 
-    # Direct products/items at top level
-    items = data.get("products") or data.get("items") or data.get("content")
+    # content[] with type/text (known shape: content[0].text is JSON string with "products" key)
+    content = data.get("content")
+    if isinstance(content, list):
+        for c in content:
+            if isinstance(c, dict) and "text" in c:
+                try:
+                    parsed = json.loads(c["text"])
+                    if isinstance(parsed, dict) and "products" in parsed:
+                        for p in parsed.get("products") or []:
+                            if isinstance(p, dict):
+                                out.append(_map_shopify_product(p, slug, price_premium))
+                        if out:
+                            return out
+                    out.extend(_extract_products_from_mcp_response(parsed, slug, price_premium))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            elif isinstance(c, dict) and ("products" in c or "items" in c):
+                lst = c.get("products") or c.get("items") or []
+                for p in lst:
+                    if isinstance(p, dict):
+                        out.append(_map_shopify_product(p, slug, price_premium))
+        if out:
+            return out
+
+    # Direct products/items at top level (do NOT use data.content here; it's blocks, not product list)
+    items = data.get("products") or data.get("items")
     if isinstance(items, list):
         for it in items:
             if isinstance(it, dict):
@@ -79,30 +113,12 @@ def _extract_products_from_mcp_response(data: Any, slug: str, price_premium: flo
     if isinstance(result, dict):
         return _extract_products_from_mcp_response(result, slug, price_premium)
     if isinstance(result, list):
-        # Direct array of product objects
         for r in result:
             if isinstance(r, dict):
                 if r.get("products") is not None or r.get("content") is not None or r.get("result") is not None:
                     out.extend(_extract_products_from_mcp_response(r, slug, price_premium))
                 else:
                     out.append(_map_shopify_product(r, slug, price_premium))
-        return out
-
-    # content array with text (MCP content blocks)
-    content = data.get("content")
-    if isinstance(content, list):
-        for c in content:
-            if isinstance(c, dict) and "text" in c:
-                try:
-                    parsed = json.loads(c["text"])
-                    out.extend(_extract_products_from_mcp_response(parsed, slug, price_premium))
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            elif isinstance(c, dict) and ("products" in c or "items" in c):
-                lst = c.get("products") or c.get("items") or []
-                for p in lst:
-                    if isinstance(p, dict):
-                        out.append(_map_shopify_product(p, slug, price_premium))
         return out
 
     return out
