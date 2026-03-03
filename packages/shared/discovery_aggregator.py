@@ -250,6 +250,10 @@ class UCPManifestDriver:
 
                     if mcp_endpoint:
                         products_raw = await self._search_via_mcp(mcp_endpoint, query, limit, slug)
+                        if not products_raw and "/api/ucp/mcp" in (mcp_endpoint or ""):
+                            host = base.replace("http://", "").replace("https://", "").split("/")[0]
+                            fallback_mcp = f"https://{host}/api/mcp"
+                            products_raw = await self._search_via_mcp(fallback_mcp, query, limit, slug)
                         if products_raw:
                             for raw in products_raw[:limit]:
                                 p = _normalize_to_ucp_product(raw, "UCP")
