@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -89,7 +90,14 @@ async def get_experience_categories() -> List[str]:
     Fetch available experience categories from Discovery (GET /api/v1/experience-categories).
     Used to pre-fill intent resolve so the LLM knows available tags for theme bundles.
     Returns empty list if Discovery is unavailable or endpoint errors.
+    Cached for 60s to avoid repeated GETs when many chat requests hit resolve_intent.
     """
+    _EXP_CAT_CACHE_TTL_SEC = 60
+    now = time.monotonic()
+    cache = getattr(get_experience_categories, "_cache", None)
+    if cache is not None and (now - getattr(get_experience_categories, "_cache_ts", 0)) < _EXP_CAT_CACHE_TTL_SEC:
+        return list(cache)
+
     url = f"{settings.discovery_service_url}/api/v1/experience-categories"
     path = "/api/v1/experience-categories"
     headers = _gateway_headers_for_discovery("GET", path)
@@ -101,10 +109,15 @@ async def get_experience_categories() -> List[str]:
         inner = data.get("data") or data
         cats = inner.get("experience_categories")
         if isinstance(cats, list):
-            return [str(t).strip() for t in cats if t and str(t).strip()]
+            result = [str(t).strip() for t in cats if t and str(t).strip()]
+            setattr(get_experience_categories, "_cache", result)
+            setattr(get_experience_categories, "_cache_ts", now)
+            return result
         return []
     except Exception as e:
         logger.debug("Could not fetch experience categories from Discovery: %s", e)
+        if cache is not None:
+            return list(cache)
         return []
 
 

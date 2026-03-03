@@ -153,7 +153,7 @@ async def _fetch_via_aggregator(
 ) -> List[Dict[str, Any]]:
     """Fetch via DiscoveryAggregator (LocalDB + optional UCP from private registry) with timeout."""
     admin = await get_admin_orchestration_settings()  # type: ignore[reportGeneralTypeIssues]
-    timeout_ms = 5000
+    timeout_ms = 8000  # default 8s to reduce timeouts when UCP/MCP partners are slow
     if admin and isinstance(admin.get("discovery_timeout_ms"), (int, float)):
         timeout_ms = int(admin["discovery_timeout_ms"])
     local_driver = LocalDBDriver(search_products)

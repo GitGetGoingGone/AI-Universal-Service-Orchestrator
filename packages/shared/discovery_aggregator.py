@@ -359,7 +359,7 @@ class DiscoveryAggregator:
         ucp_driver: Optional[UCPManifestDriver] = None,
         mcp_driver: Optional[MCPDriver] = None,
         shopify_mcp_driver: Optional[Any] = None,
-        timeout_ms: int = 5000,
+        timeout_ms: int = 8000,
     ):
         self._local = local_db_driver
         self._ucp = ucp_driver
