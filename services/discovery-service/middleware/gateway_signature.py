@@ -11,8 +11,11 @@ from packages.shared.gateway_signature import verify_request, verify_request_no_
 
 logger = logging.getLogger(__name__)
 
-# Paths that never require Gateway signature (public)
+# Paths that never require Gateway signature (public or server-to-server admin)
 _PUBLIC_PREFIXES = ("/health", "/ready", "/.well-known/", "/openapi.json", "/docs", "/redoc")
+
+# Admin API: called by Portal/backends with Discovery URL; skip Gateway signature
+_ADMIN_PREFIX = "/api/v1/admin/"
 
 # UCP path prefix: always require signature when secret is configured
 _UCP_PATH_PREFIX = "/api/v1/ucp/"
@@ -27,6 +30,8 @@ async def gateway_signature_middleware(request: Request, call_next: Callable) ->
     for prefix in _PUBLIC_PREFIXES:
         if path.startswith(prefix):
             return await call_next(request)
+    if path.startswith(_ADMIN_PREFIX):
+        return await call_next(request)
 
     # UCP: always require signature when GATEWAY_INTERNAL_SECRET is set
     secret = getattr(settings, "gateway_internal_secret", "") or ""
