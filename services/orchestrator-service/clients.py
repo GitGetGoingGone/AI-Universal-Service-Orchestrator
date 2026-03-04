@@ -339,7 +339,9 @@ async def discover_products(
     experience_tag: Optional[str] = None,
     experience_tags: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Call Discovery service to find products by query. Retries on 429 (rate limit)."""
+    """Call Discovery service to find products by query. Retries on 429 (rate limit).
+    When the first response has 0 products for cosmetics-like queries, retries with fallback terms (makeup, beauty, skincare).
+    """
     url = f"{settings.discovery_service_url}/api/v1/discover"
     params: Dict[str, Any] = {"intent": query, "limit": limit}
     if location:
@@ -376,7 +378,30 @@ async def discover_products(
                 logger.warning("Discovery rate limited (429) after %s retries, returning empty", DISCOVERY_RETRY_ATTEMPTS)
                 return _empty_discovery_fallback(query)
             r.raise_for_status()
-            return r.json()
+            out = r.json()
+            # When Discovery returns 0 products for cosmetics-like query, retry with fallback terms (e.g. Kylie MCP may match "makeup"/"beauty")
+            data = out.get("data") or {}
+            count = data.get("count", len(data.get("products") or []))
+            if count == 0 and query and query.strip().lower() in ("cosmetics", "cosmetic", "makeup", "beauty"):
+                for fallback in ("makeup", "beauty", "skincare"):
+                    if fallback == query.strip().lower():
+                        continue
+                    try:
+                        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                            p2 = dict(params)
+                            p2["intent"] = fallback
+                            r2 = await client.get(url, params=p2, headers=headers)
+                            if r2.status_code != 200:
+                                continue
+                            out2 = r2.json()
+                            d2 = out2.get("data") or {}
+                            c2 = d2.get("count", len(d2.get("products") or []))
+                            if c2 > 0:
+                                logger.info("Discovery cosmetics fallback: query=%s -> %s returned %s products", query.strip(), fallback, c2)
+                                return out2
+                    except Exception as e:
+                        logger.debug("Discovery cosmetics fallback %s failed: %s", fallback, e)
+            return out
 
     return _empty_discovery_fallback(query)
 
