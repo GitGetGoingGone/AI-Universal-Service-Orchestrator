@@ -292,6 +292,7 @@ class UCPManifestDriver:
                             manifest_url = f"{origin}/.well-known/ucp"
                             r = await client.get(manifest_url, headers=headers)
                         if r.status_code != 200:
+                            logger.info("UCP driver: manifest failed for %s (status=%s)", origin, r.status_code)
                             continue
                         data = r.json()
                     catalog_url = None
@@ -312,6 +313,8 @@ class UCPManifestDriver:
                                     all_items.append(p)
                             logger.info("UCP driver: %s returned %s products for query=%s", origin, len(products_raw), query[:50] if query else "")
                             continue
+                        if not products_raw and query and query.strip():
+                            logger.info("UCP driver: MCP returned 0 products for %s query=%s", origin, query[:50])
                     if isinstance(ucp, dict):
                         services = ucp.get("services", {})
                         if isinstance(services, dict):

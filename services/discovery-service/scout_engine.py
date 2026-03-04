@@ -1,5 +1,6 @@
 """Unified discovery interface (Module 1: Scout Engine)."""
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from config import settings
@@ -14,18 +15,20 @@ from packages.shared.shopify_mcp_driver import ShopifyMCPDriver
 from packages.shared.ranking import sort_products_by_rank
 
 from db import (  # type: ignore[reportAttributeAccessIssue]
-    get_active_sponsorships,
-    get_admin_orchestration_settings,
-    get_composite_discovery_config,
-    get_internal_agent_urls,
-    get_partner_ratings_map,
-    get_partners_by_ids,
-    get_platform_config_ranking,
-    get_shopify_mcp_endpoints,
-    search_products,
+    get_active_sponsorships,  # type: ignore[reportAttributeAccessIssue]
+    get_admin_orchestration_settings,  # type: ignore[reportAttributeAccessIssue]
+    get_composite_discovery_config,  # type: ignore[reportAttributeAccessIssue]
+    get_internal_agent_urls,  # type: ignore[reportAttributeAccessIssue]
+    get_partner_ratings_map,  # type: ignore[reportAttributeAccessIssue]
+    get_partners_by_ids,  # type: ignore[reportAttributeAccessIssue]
+    get_platform_config_ranking,  # type: ignore[reportAttributeAccessIssue]
+    get_shopify_mcp_endpoints,  # type: ignore[reportAttributeAccessIssue]
+    search_products,  # type: ignore[reportAttributeAccessIssue]
 )
 from middleware.metadata_enricher import enrich_products as enrich_products_middleware
 from semantic_search import semantic_search
+
+logger = logging.getLogger(__name__)
 
 
 async def _apply_ranking(
@@ -160,9 +163,12 @@ async def _fetch_via_aggregator(
     ucp_driver = None
     internal_urls = await get_internal_agent_urls()
     if internal_urls:
+        logger.info("DiscoveryAggregator: using %s UCP partner URL(s) for query=%s", len(internal_urls), (query or "")[:80])
         async def _get_partner_urls():
             return internal_urls
         ucp_driver = UCPManifestDriver(get_partner_manifest_urls=_get_partner_urls)
+    else:
+        logger.info("DiscoveryAggregator: no UCP partners (get_internal_agent_urls returned empty) for query=%s", (query or "")[:80])
     shopify_mcp_driver = None
     shopify_endpoints = await get_shopify_mcp_endpoints(capability="discovery")
     if shopify_endpoints:
@@ -184,7 +190,10 @@ async def _fetch_via_aggregator(
         experience_tag=experience_tag,
         experience_tags=experience_tags,
     )
-    return [p.to_dict() for p in ucp_products]
+    out = [p.to_dict() for p in ucp_products]
+    if not out and query and query.strip():
+        logger.info("DiscoveryAggregator: 0 products for query=%s (check UCP partner URLs and manifest/MCP)", query.strip()[:80])
+    return out
 
 
 async def _fetch_and_rank(
