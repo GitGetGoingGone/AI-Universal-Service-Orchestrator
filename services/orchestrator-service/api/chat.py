@@ -26,6 +26,34 @@ from packages.shared.json_ld.error import error_ld
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
 
 
+def _effective_user_message(body: "ChatRequest") -> str:
+    """
+    Current-turn user message. Prefer the last user message in body.messages over body.text
+    so we never use a stale/wrong body.text (e.g. client sends "find flowers" in text but
+    the actual latest message in messages is "cosmetics").
+    """
+    text = (body.text or "").strip()
+    messages = body.messages or []
+    if not messages:
+        return text or "Show me how wonderful your platform is and all the categories"
+    for m in reversed(messages):
+        if (m.get("role") or "").strip().lower() != "user":
+            continue
+        content = m.get("content")
+        if content is None:
+            continue
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    t = part.get("text")
+                    if isinstance(t, str) and t.strip():
+                        return t.strip()
+        break
+    return text or "Show me how wonderful your platform is and all the categories"
+
+
 class ChatRequest(BaseModel):
     """Request body for chat (natural language)."""
 
@@ -46,6 +74,7 @@ class ChatRequest(BaseModel):
 async def _stream_chat_events(
     *,
     body: ChatRequest,
+    effective_user_message: str,
     agentic: bool,
     user_id: Optional[str],
     _resolve: Callable,
@@ -65,7 +94,7 @@ async def _stream_chat_events(
     async def run_loop() -> None:
         try:
             r = await run_agentic_loop(
-                body.text,
+                effective_user_message,
                 user_id=user_id,
                 limit=body.limit,
                 resolve_intent_fn=_resolve,
@@ -115,118 +144,122 @@ async def _stream_chat_events(
         yield f"event: error\ndata: {json.dumps({'error': result['error']})}\n\n"
         return
 
-    use_adaptive_cards = True
-    if adaptive_cards is not None:
-        use_adaptive_cards = adaptive_cards
-    else:
-        try:
-            from db import get_adaptive_cards_setting
-            use_adaptive_cards = await get_adaptive_cards_setting(
-                partner_id=body.partner_id,
-                user_id=user_id,
-            )
-        except Exception:
-            pass
-
-    adaptive_card = result.get("adaptive_card") if use_adaptive_cards else None
-    # Do NOT inject agent_reasoning into the card — it's internal and not user-facing
-
-    suggested_ctas_stream: List[Dict[str, str]] = []
-    if not use_adaptive_cards:
-        res_data = result.get("data") or {}
-        res_engagement = res_data.get("engagement") or {}
-        if res_engagement.get("suggested_bundle_options"):
-            suggested_ctas_stream.append({"label": "Add to bundle", "action": "add_to_bundle"})
-        if body.bundle_id:
-            suggested_ctas_stream.append({"label": "View bundle", "action": "view_bundle", "bundle_id": body.bundle_id})
-        if body.order_id or res_engagement.get("order_status"):
-            suggested_ctas_stream.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
-
-    # Use same LLM config as the loop (planner) so engagement gets a client when planner does
-    if isinstance(result, dict):
-        llm_config = result.pop("llm_config", None)  # remove so not logged/serialized (may contain api_key)
-    else:
-        llm_config = None
-    # Stream engagement LLM response (summary_delta events), then send done with full payload
-    planner_message = (result.get("planner_complete_message") or "").strip()
-    generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
-    engagement_debug: Optional[Dict[str, Any]] = None
-    summary_chunks: List[str] = []
-    if body.debug:
-        engagement_res = await generate_engagement_response(
-            body.text, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards, return_debug=True
-        )
-        if isinstance(engagement_res, tuple):
-            summary_sync, engagement_debug = engagement_res
-            engagement_debug = engagement_debug if isinstance(engagement_debug, dict) else {}
+    try:
+        use_adaptive_cards = True
+        if adaptive_cards is not None:
+            use_adaptive_cards = adaptive_cards
         else:
-            summary_sync = engagement_res
-            engagement_debug = {}
-        if summary_sync is not None:
-            summary_chunks = [summary_sync]
-        if engagement_debug and summary_sync is None:
-            engagement_debug = engagement_debug | {"response_received": ""}
-        _log_prompt_trace(
-            intent_request=_intent_request_for_trace(body),
-            intent_response=_intent_response_from_result(result),
-            engagement_debug=engagement_debug,
-            agent_reasoning=_agent_reasoning_from_result(result),
+            try:
+                from db import get_adaptive_cards_setting
+                use_adaptive_cards = await get_adaptive_cards_setting(
+                    partner_id=body.partner_id,
+                    user_id=user_id,
+                )
+            except Exception:
+                pass
+
+        adaptive_card = result.get("adaptive_card") if use_adaptive_cards else None
+        # Do NOT inject agent_reasoning into the card — it's internal and not user-facing
+
+        suggested_ctas_stream: List[Dict[str, str]] = []
+        if not use_adaptive_cards:
+            res_data = result.get("data") or {}
+            res_engagement = res_data.get("engagement") or {}
+            if res_engagement.get("suggested_bundle_options"):
+                suggested_ctas_stream.append({"label": "Add to bundle", "action": "add_to_bundle"})
+            if body.bundle_id:
+                suggested_ctas_stream.append({"label": "View bundle", "action": "view_bundle", "bundle_id": body.bundle_id})
+            if body.order_id or res_engagement.get("order_status"):
+                suggested_ctas_stream.append({"label": "Proceed to payment", "action": "proceed_to_payment"})
+
+        # Use same LLM config as the loop (planner) so engagement gets a client when planner does
+        if isinstance(result, dict):
+            llm_config = result.pop("llm_config", None)  # remove so not logged/serialized (may contain api_key)
+        else:
+            llm_config = None
+        # Stream engagement LLM response (summary_delta events), then send done with full payload
+        planner_message = (result.get("planner_complete_message") or "").strip()
+        generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
+        engagement_debug: Optional[Dict[str, Any]] = None
+        summary_chunks: List[str] = []
+        if body.debug:
+            engagement_res = await generate_engagement_response(
+                effective_user_message, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards, return_debug=True
+            )
+            if isinstance(engagement_res, tuple):
+                summary_sync, engagement_debug = engagement_res
+                engagement_debug = engagement_debug if isinstance(engagement_debug, dict) else {}
+            else:
+                summary_sync = engagement_res
+                engagement_debug = {}
+            if summary_sync is not None:
+                summary_chunks = [summary_sync]
+            if engagement_debug and summary_sync is None:
+                engagement_debug = engagement_debug | {"response_received": ""}
+            _log_prompt_trace(
+                intent_request=_intent_request_for_trace(body),
+                intent_response=_intent_response_from_result(result),
+                engagement_debug=engagement_debug,
+                agent_reasoning=_agent_reasoning_from_result(result),
+                request_id=request_id,
+            )
+        else:
+            _log_prompt_trace(
+                intent_request=_intent_request_for_trace(body),
+                intent_response=_intent_response_from_result(result),
+                engagement_debug=None,
+                agent_reasoning=_agent_reasoning_from_result(result),
+                request_id=request_id,
+            )
+            async for delta in stream_engagement_response(
+                effective_user_message, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards
+            ):
+                summary_chunks.append(delta)
+                yield f"event: summary_delta\ndata: {json.dumps({'delta': delta})}\n\n"
+        summary = "".join(summary_chunks).strip() if summary_chunks else None
+        if not summary:
+            summary = planner_message if (planner_message and planner_message.lower() not in generic_messages) else _build_summary(result)
+            if body.debug and not engagement_debug:
+                engagement_debug = {
+                    "prompt_sent": "(engagement LLM failed or unavailable; used planner/template fallback)",
+                    "response_received": summary or "",
+                }
+        if not summary:
+            summary = "I'm here to help. What would you like to explore?"
+        response_data = chat_first_response(
+            data=result.get("data", {}),
+            machine_readable=result.get("machine_readable", {}),
+            adaptive_card=adaptive_card,
             request_id=request_id,
+            summary=summary or "I'm here to help. What would you like to explore?",
+            agent_reasoning=result.get("agent_reasoning", []),
+            suggested_ctas=suggested_ctas_stream if suggested_ctas_stream else None,
+            summary_format="markdown" if not use_adaptive_cards else None,
         )
-    else:
-        _log_prompt_trace(
-            intent_request=_intent_request_for_trace(body),
-            intent_response=_intent_response_from_result(result),
-            engagement_debug=None,
-            agent_reasoning=_agent_reasoning_from_result(result),
-            request_id=request_id,
-        )
-        async for delta in stream_engagement_response(
-            body.text, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards
-        ):
-            summary_chunks.append(delta)
-            yield f"event: summary_delta\ndata: {json.dumps({'delta': delta})}\n\n"
-    summary = "".join(summary_chunks).strip() if summary_chunks else None
-    if not summary:
-        summary = planner_message if (planner_message and planner_message.lower() not in generic_messages) else _build_summary(result)
-        if body.debug and not engagement_debug:
-            engagement_debug = {
-                "prompt_sent": "(engagement LLM failed or unavailable; used planner/template fallback)",
-                "response_received": summary or "",
+        if body.debug:
+            engagement_debug_or: Dict[str, Any] = engagement_debug if isinstance(engagement_debug, dict) else {}
+            prompt_sent_full = engagement_debug_or.get("prompt_sent") or ""
+            intent_request = _intent_request_for_trace(body)
+            response_data["prompt_trace"] = {
+                "request_payload": {
+                    "text": effective_user_message,
+                    "messages_count": len(body.messages or []),
+                    "limit": body.limit,
+                    "platform": body.platform,
+                },
+                "intent": {
+                    "request": intent_request,
+                    "response": _intent_response_from_result(result),
+                },
+                "engagement": engagement_debug_or,
+                "agent_reasoning": result.get("agent_reasoning") or [],
+                "prompt_sent": prompt_sent_full,
             }
-    if not summary:
-        summary = "I'm here to help. What would you like to explore?"
-    response_data = chat_first_response(
-        data=result.get("data", {}),
-        machine_readable=result.get("machine_readable", {}),
-        adaptive_card=adaptive_card,
-        request_id=request_id,
-        summary=summary or "I'm here to help. What would you like to explore?",
-        agent_reasoning=result.get("agent_reasoning", []),
-        suggested_ctas=suggested_ctas_stream if suggested_ctas_stream else None,
-        summary_format="markdown" if not use_adaptive_cards else None,
-    )
-    if body.debug:
-        engagement_debug_or: Dict[str, Any] = engagement_debug if isinstance(engagement_debug, dict) else {}
-        prompt_sent_full = engagement_debug_or.get("prompt_sent") or ""
-        intent_request = _intent_request_for_trace(body)
-        response_data["prompt_trace"] = {
-            "request_payload": {
-                "text": body.text,
-                "messages_count": len(body.messages or []),
-                "limit": body.limit,
-                "platform": body.platform,
-            },
-            "intent": {
-                "request": intent_request,
-                "response": _intent_response_from_result(result),
-            },
-            "engagement": engagement_debug_or,
-            "agent_reasoning": result.get("agent_reasoning") or [],
-            "prompt_sent": prompt_sent_full,
-        }
-    body_json = json.dumps(response_data, default=str)
-    yield f"event: done\ndata: {body_json}\n\n"
+        body_json = json.dumps(response_data, default=str)
+        yield f"event: done\ndata: {body_json}\n\n"
+    except Exception as e:
+        logger.exception("Stream engagement/done failed: %s", e)
+        yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
 
 @router.post("/chat")
@@ -329,9 +362,11 @@ async def chat(
         )
 
     if stream:
+        effective_message = _effective_user_message(body)
         return StreamingResponse(
             _stream_chat_events(
                 body=body,
+                effective_user_message=effective_message,
                 agentic=agentic,
                 user_id=user_id,
                 _resolve=_resolve,
@@ -349,8 +384,9 @@ async def chat(
         )
 
     try:
+        effective_message = _effective_user_message(body)
         result = await run_agentic_loop(
-            body.text,
+            effective_message,
             user_id=user_id,
             limit=body.limit,
             resolve_intent_fn=_resolve,
@@ -420,7 +456,7 @@ async def chat(
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
     engagement_res_ns = await generate_engagement_response(
-        body.text, result, llm_config=llm_config_ns, allow_markdown=not use_adaptive_cards, return_debug=True
+        effective_message, result, llm_config=llm_config_ns, allow_markdown=not use_adaptive_cards, return_debug=True
     )
     if isinstance(engagement_res_ns, tuple):
         summary, engagement_debug_ns = engagement_res_ns
@@ -458,7 +494,7 @@ async def chat(
         engagement_debug_ns_or: Dict[str, Any] = engagement_debug_ns
         prompt_sent_full_ns = engagement_debug_ns_or.get("prompt_sent") or ""
         response_data_ns["prompt_trace"] = {
-            "request_payload": {"text": body.text, "messages_count": len(body.messages or []), "limit": body.limit, "platform": body.platform},
+            "request_payload": {"text": effective_message, "messages_count": len(body.messages or []), "limit": body.limit, "platform": body.platform},
             "intent": {"request": _intent_request_for_trace(body), "response": _intent_response_from_result(result)},
             "engagement": engagement_debug_ns_or,
             "agent_reasoning": result.get("agent_reasoning") or [],
@@ -516,7 +552,7 @@ def _agent_reasoning_from_result(result: Dict[str, Any]) -> List[str]:
 
 def _intent_request_for_trace(body: ChatRequest) -> Dict[str, Any]:
     """Build full intent request payload for prompt_trace (what we send to resolve_intent)."""
-    out: Dict[str, Any] = {"text": body.text}
+    out: Dict[str, Any] = {"text": _effective_user_message(body)}
     messages = body.messages or []
     if messages:
         out["messages_count"] = len(messages)
