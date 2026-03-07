@@ -166,6 +166,7 @@ def _build_context(result: Dict[str, Any]) -> str:
         product_list = products.get("products") if isinstance(products, dict) else []
         cat_names = [c.get("query", "") for c in categories if isinstance(c, dict) and c.get("query")]
         suggested_bundles = engagement.get("suggested_bundle_options") or []
+        product_ids: List[str] = []
         if suggested_bundles:
             # Concierge Narrative: bundle with product features from UCPProduct schema (groundedness)
             opt = suggested_bundles[0]
@@ -174,6 +175,7 @@ def _build_context(result: Dict[str, Any]) -> str:
                 opt = None
         else:
             opt = None
+        product_data_str = ""
         if suggested_bundles and opt:
             product_names = opt.get("product_names") or []
             total_price = opt.get("total_price")
@@ -261,10 +263,25 @@ def _build_context(result: Dict[str, Any]) -> str:
         else:
             # No products yet: either present themed ideas (from bundle_options above) or gather details
             if isinstance(bundle_opts, list) and bundle_opts:
-                parts.append(
-                    "User asked for themed ideas or suggestions. You MUST present 2–3+ themed experience options listed above (each with its description). "
-                    "Let the user choose — never pick or default to one option. Then ask for date and area so you can tailor the chosen experience. Do NOT list individual products yet."
-                )
+                # Config-driven narrative: use no_products_instruction from experience_flow_rules if a rule matches
+                intent_data = {
+                    "experience_name": intent.get("experience_name") or exp_name,
+                    "search_queries": intent.get("search_queries") or ([intent.get("search_query")] if intent.get("search_query") else []),
+                }
+                try:
+                    from api.admin import get_experience_flow_rules  # type: ignore[reportMissingImports]
+                    from .experience_flow import get_no_products_instruction
+                    flow_rules = get_experience_flow_rules()
+                    custom_instruction = get_no_products_instruction(intent_data, flow_rules)
+                except Exception:
+                    custom_instruction = None
+                if custom_instruction:
+                    parts.append(custom_instruction)
+                else:
+                    parts.append(
+                        "User asked for themed ideas or suggestions. You MUST present 2–3+ themed experience options listed above (each with its description). "
+                        "Let the user choose — never pick or default to one option. Then ask for date and area so you can tailor the chosen experience. Do NOT list individual products yet."
+                    )
             else:
                 parts.append(
                     f"User asked for experience: {exp_name}. Categories they want: {', '.join(cat_names) or 'products'}. "

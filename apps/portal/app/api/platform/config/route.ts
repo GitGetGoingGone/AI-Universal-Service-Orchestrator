@@ -71,6 +71,8 @@ export async function PATCH(request: Request) {
       updates.sponsorship_pricing = body.sponsorship_pricing;
     if (body.composite_discovery_config != null)
       updates.composite_discovery_config = body.composite_discovery_config;
+    if (body.retry_phrases !== undefined)
+      updates.retry_phrases = Array.isArray(body.retry_phrases) ? body.retry_phrases : [];
     if (body.enable_composite_bundle_suggestion != null)
       updates.enable_composite_bundle_suggestion = Boolean(body.enable_composite_bundle_suggestion);
     if (body.force_model_based_intent != null)

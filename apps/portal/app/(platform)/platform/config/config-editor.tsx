@@ -155,7 +155,13 @@ type Config = {
     products_per_category?: number;
     sponsorship_enabled?: boolean;
     product_mix?: Array<{ sort: string; limit: number; pct: number }>;
+    experience_flow_rules?: Array<{
+      experience_keywords?: string[];
+      skip_date_area_probe?: boolean;
+      no_products_instruction?: string;
+    }>;
   };
+  retry_phrases?: string[];
   enable_composite_bundle_suggestion?: boolean;
   force_model_based_intent?: boolean;
   upsell_surge_rules?: {
@@ -413,7 +419,9 @@ export function ConfigEditor() {
               { sort: "popularity", limit: 10, pct: 10 },
               { sort: "sponsored", limit: 10, pct: 10 },
             ],
+            experience_flow_rules: [],
           },
+          retry_phrases: Array.isArray(data.retry_phrases) ? data.retry_phrases : [],
           enable_composite_bundle_suggestion: data.enable_composite_bundle_suggestion ?? true,
           force_model_based_intent: data.force_model_based_intent ?? false,
           upsell_surge_rules: data.upsell_surge_rules ?? { enabled: false, upsell_rules: [], surge_rules: [], promo_rules: [] },
@@ -543,6 +551,7 @@ export function ConfigEditor() {
           ranking_edge_cases: config.ranking_edge_cases,
           sponsorship_pricing: config.sponsorship_pricing,
           composite_discovery_config: config.composite_discovery_config,
+          retry_phrases: (config.retry_phrases ?? []).filter((p) => typeof p === "string" && p.trim().length > 0),
           enable_composite_bundle_suggestion: config.enable_composite_bundle_suggestion,
           force_model_based_intent: config.force_model_based_intent,
           upsell_surge_rules: config.upsell_surge_rules,
@@ -2204,6 +2213,160 @@ export function ConfigEditor() {
                   <p className="text-xs text-amber-600 mt-1">Percentages sum to {total}% (should be 100%)</p>
                 ) : null;
               })()}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Experience flow rules</label>
+              <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-2">
+                Match experience types by keywords; skip date/area probe and/or set custom “no products yet” instructions. First matching rule wins.
+              </p>
+              {(config.composite_discovery_config?.experience_flow_rules ?? []).map((rule, i) => (
+                <div key={i} className="mb-4 p-3 rounded border border-[rgb(var(--color-border))] space-y-2">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-medium text-[rgb(var(--color-text-secondary))]">Rule {i + 1}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfig((c) => ({
+                          ...c,
+                          composite_discovery_config: {
+                            ...c.composite_discovery_config,
+                            experience_flow_rules: (c.composite_discovery_config?.experience_flow_rules ?? []).filter((_, j) => j !== i),
+                          },
+                        }))
+                      }
+                      className="text-red-500 hover:underline text-sm"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[rgb(var(--color-text-secondary))] mb-1">Keywords (comma-separated, e.g. gift, custom gift)</label>
+                    <input
+                      type="text"
+                      value={(rule.experience_keywords ?? []).join(", ")}
+                      onChange={(e) => {
+                        const keywords = e.target.value.split(",").map((k) => k.trim()).filter(Boolean);
+                        setConfig((c) => ({
+                          ...c,
+                          composite_discovery_config: {
+                            ...c.composite_discovery_config,
+                            experience_flow_rules: (c.composite_discovery_config?.experience_flow_rules ?? []).map((r, j) =>
+                              j === i ? { ...r, experience_keywords: keywords } : r
+                            ),
+                          },
+                        }));
+                      }}
+                      placeholder="gift, custom gift"
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id={`ef-skip-probe-${i}`}
+                      checked={rule.skip_date_area_probe ?? false}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          composite_discovery_config: {
+                            ...c.composite_discovery_config,
+                            experience_flow_rules: (c.composite_discovery_config?.experience_flow_rules ?? []).map((r, j) =>
+                              j === i ? { ...r, skip_date_area_probe: e.target.checked } : r
+                            ),
+                          },
+                        }))
+                      }
+                      className="rounded border border-[rgb(var(--color-border))]"
+                    />
+                    <label htmlFor={`ef-skip-probe-${i}`} className="text-sm">
+                      Skip date/area probe (show products first)
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[rgb(var(--color-text-secondary))] mb-1">No products yet instruction (optional)</label>
+                    <textarea
+                      value={rule.no_products_instruction ?? ""}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          composite_discovery_config: {
+                            ...c.composite_discovery_config,
+                            experience_flow_rules: (c.composite_discovery_config?.experience_flow_rules ?? []).map((r, j) =>
+                              j === i ? { ...r, no_products_instruction: e.target.value.trim() || undefined } : r
+                            ),
+                          },
+                        }))
+                      }
+                      placeholder="e.g. Present themed options; do not ask for date or area. Only ask for delivery when adding to bundle."
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                    />
+                  </div>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setConfig((c) => ({
+                    ...c,
+                    composite_discovery_config: {
+                      ...c.composite_discovery_config,
+                      experience_flow_rules: [...(c.composite_discovery_config?.experience_flow_rules ?? []), { experience_keywords: [], skip_date_area_probe: false }],
+                    },
+                  }))
+                }
+                className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+              >
+                + Add experience flow rule
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Retry phrases</label>
+              <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-2">
+                Optional phrases for re-engagement or probing (e.g. &quot;Want to try again?&quot;, &quot;Anything else I can help with?&quot;).
+              </p>
+              {(config.retry_phrases ?? []).map((phrase, i) => (
+                <div key={i} className="flex gap-2 items-center mb-2">
+                  <input
+                    type="text"
+                    value={phrase}
+                    onChange={(e) =>
+                      setConfig((c) => ({
+                        ...c,
+                        retry_phrases: (c.retry_phrases ?? []).map((p, j) => (j === i ? e.target.value : p)),
+                      }))
+                    }
+                    placeholder="e.g. Want to try again?"
+                    className="flex-1 px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfig((c) => ({
+                        ...c,
+                        retry_phrases: (c.retry_phrases ?? []).filter((_, j) => j !== i),
+                      }))
+                    }
+                    className="text-red-500 hover:underline text-sm"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setConfig((c) => ({
+                    ...c,
+                    retry_phrases: [...(c.retry_phrases ?? []), ""],
+                  }))
+                }
+                className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+              >
+                + Add retry phrase
+              </button>
             </div>
           </div>
         )}

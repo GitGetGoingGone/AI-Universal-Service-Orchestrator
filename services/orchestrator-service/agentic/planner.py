@@ -395,9 +395,19 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
                 exp_name_display = "baby shower or baby products experience"
             loc_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() == "location" and _is_valid_loc(e.get("value"))), None) or fc.get("discover_location")
             time_val = next((e.get("value") for e in entities if isinstance(e, dict) and (e.get("type") or "").lower() in ("time", "date") and e.get("value")), None) or fc.get("discover_date")
+            # Config-driven: skip date/area probe when a matching experience_flow_rule has skip_date_area_probe
+            try:
+                from api.admin import get_experience_flow_rules  # type: ignore[reportMissingImports]
+                from .experience_flow import should_skip_date_area_probe
+                flow_rules = get_experience_flow_rules()
+                skip_probe = should_skip_date_area_probe(intent_data, flow_rules)
+            except Exception:
+                skip_probe = False
             # When user said "more options" / "show me more" etc., skip date/area probe and fetch products
             if intent_data.get("unrelated_to_probing"):
                 pass  # fall through to discover_composite below
+            elif skip_probe:
+                pass  # show products first per config; only ask for delivery when adding to bundle
             elif not has_location or not has_time:
                 # Concierge-style one-liner: acknowledge what we have, ask for the next missing piece
                 if has_time and has_location:

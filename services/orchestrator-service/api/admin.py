@@ -3,7 +3,7 @@
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -58,12 +58,30 @@ def _get_platform_config() -> Optional[Dict[str, Any]]:
 
 
 def get_composite_discovery_config() -> Dict[str, Any]:
-    """Get composite_discovery_config from platform_config. Used for products_per_category, product_mix."""
+    """Get composite_discovery_config from platform_config. Used for products_per_category, product_mix, experience_flow_rules."""
     cfg = _get_platform_config()
     cdc = (cfg or {}).get("composite_discovery_config")
     if isinstance(cdc, dict):
         return cdc
     return {"products_per_category": 5, "sponsorship_enabled": True}
+
+
+def get_experience_flow_rules() -> List[Dict[str, Any]]:
+    """Get experience_flow_rules from composite_discovery_config. Used for config-driven probe and narrative behavior."""
+    cdc = get_composite_discovery_config()
+    rules = cdc.get("experience_flow_rules")
+    if isinstance(rules, list):
+        return [r for r in rules if isinstance(r, dict)]
+    return []
+
+
+def get_retry_phrases() -> List[str]:
+    """Get retry_phrases from platform_config. Used for probing or re-engagement (e.g. follow-up prompts)."""
+    cfg = _get_platform_config()
+    phrases = (cfg or {}).get("retry_phrases")
+    if isinstance(phrases, list):
+        return [str(p).strip() for p in phrases if p]
+    return []
 
 
 def get_upsell_surge_rules() -> Dict[str, Any]:
@@ -335,17 +353,25 @@ async def test_interaction(body: TestInteractionBody) -> Dict[str, Any]:
 
 @router.get("/platform-config")
 async def get_platform_config() -> Dict[str, Any]:
-    """Get platform config (SLA, buffer, approval thresholds)."""
+    """Get platform config (SLA, buffer, approval thresholds, experience_flow_rules, retry_phrases)."""
     cfg = _get_platform_config()
     if not cfg:
         return {}
-    return {
+    out: Dict[str, Any] = {
         "sla_response_time_ms": cfg.get("sla_response_time_ms", 3000),
         "sla_availability_pct": float(cfg.get("sla_availability_pct", 99.5)),
         "requires_human_approval_over_cents": cfg.get("requires_human_approval_over_cents", 20000),
         "delivery_buffer_minutes": cfg.get("delivery_buffer_minutes", 15),
         "kill_switch_active": cfg.get("kill_switch_active", False),
     }
+    # Admin config: experience flow rules (composite discovery behavior by experience type)
+    try:
+        out["experience_flow_rules"] = get_experience_flow_rules()
+    except Exception:
+        out["experience_flow_rules"] = []
+    # Admin config: retry phrases (e.g. for probing or re-engagement)
+    out["retry_phrases"] = get_retry_phrases()
+    return out
 
 
 def is_kill_switch_active() -> bool:
