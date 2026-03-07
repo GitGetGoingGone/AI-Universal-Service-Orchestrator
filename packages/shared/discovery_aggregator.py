@@ -8,7 +8,7 @@ Normalizes all responses into UCPProduct schema (capabilities, features) to prev
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, Union
 from urllib.parse import urlparse
 
 from .discovery import is_browse_query
@@ -180,7 +180,11 @@ class UCPManifestDriver:
     like https://kyliecosmetics.com/.well-known/ucp still resolve to https://kyliecosmetics.com/.well-known/ucp.
     """
 
-    def __init__(self, get_partner_manifest_urls: Optional[Callable[[], Awaitable[List[str]]]] = None):
+    def __init__(self, get_partner_manifest_urls: Optional[Callable[[], Awaitable[List[Union[str, Dict[str, Any]]]]]] = None):
+        """
+        get_partner_manifest_urls: async callable returning list of base URLs (str) or
+        list of dicts with "base_url" and optional "access_token" for MCP Bearer auth.
+        """
         self._get_urls = get_partner_manifest_urls
 
     @staticmethod
@@ -232,8 +236,11 @@ class UCPManifestDriver:
             mcp_url = "https://" + mcp_url[7:]
         return mcp_url, rest_url
 
-    async def _search_via_mcp(self, mcp_endpoint: str, query: str, limit: int, slug: str) -> List[Dict[str, Any]]:
-        """Call MCP tools/call search_shop_catalog at mcp_endpoint; return list of product dicts."""
+    async def _search_via_mcp(
+        self, mcp_endpoint: str, query: str, limit: int, slug: str, access_token: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Call MCP tools/call search_shop_catalog at mcp_endpoint; return list of product dicts.
+        When access_token is set, sends Authorization: Bearer <token> (e.g. for Kylie UCP)."""
         try:
             from .shopify_mcp_driver import _extract_products_from_mcp_response
         except ImportError:
@@ -246,10 +253,15 @@ class UCPManifestDriver:
             "method": "tools/call",
             "params": {
                 "name": "search_shop_catalog",
-                "arguments": {"query": query or "products"},
+                "arguments": {
+                    "query": query or "products",
+                    "context": "USO Discovery",
+                },
             },
         }
         headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "USO-Orchestrator/1.0 (UCP+MCP)"}
+        if access_token and access_token.strip():
+            headers["Authorization"] = f"Bearer {access_token.strip()}"
         logger.info("UCP MCP request: POST url=%s query=%s", mcp_endpoint, (query or "products")[:50])
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -290,10 +302,24 @@ class UCPManifestDriver:
             urls = await self._get_urls()
             if not urls:
                 return []
-            logger.info("UCP partner base URLs: %s", urls[:10])
+            # Normalize: list of str -> (base_url, None); list of dict -> (base_url, access_token)
+            partners: List[tuple] = []
+            for item in urls[:5]:
+                if isinstance(item, dict):
+                    bu = (item.get("base_url") or "").strip()
+                    token = item.get("access_token")
+                    if bu:
+                        partners.append((bu, token if token and str(token).strip() else None))
+                else:
+                    bu = str(item).strip()
+                    if bu:
+                        partners.append((bu, None))
+            if not partners:
+                return []
+            logger.info("UCP partner base URLs: %s", [p[0] for p in partners])
             all_items: List[UCPProduct] = []
             headers = {"Accept": "application/json", "User-Agent": "USO-Orchestrator/1.0 (UCP Discovery)"}
-            for base_url in urls[:5]:
+            for base_url, access_token in partners:
                 try:
                     origin = self._origin(base_url)
                     if not origin:
@@ -324,11 +350,11 @@ class UCPManifestDriver:
                     slug = origin.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "_")[:64]
 
                     if mcp_endpoint:
-                        products_raw = await self._search_via_mcp(mcp_endpoint, query, limit, slug)
+                        products_raw = await self._search_via_mcp(mcp_endpoint, query, limit, slug, access_token=access_token)
                         if not products_raw and "/api/ucp/mcp" in (mcp_endpoint or ""):
                             host = origin.replace("http://", "").replace("https://", "").split("/")[0]
                             fallback_mcp = f"https://{host}/api/mcp"
-                            products_raw = await self._search_via_mcp(fallback_mcp, query, limit, slug)
+                            products_raw = await self._search_via_mcp(fallback_mcp, query, limit, slug, access_token=None)
                         if products_raw:
                             for raw in products_raw[:limit]:
                                 p = _normalize_to_ucp_product(raw, "UCP")

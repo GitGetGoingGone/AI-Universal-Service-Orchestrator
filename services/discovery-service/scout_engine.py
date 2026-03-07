@@ -18,7 +18,7 @@ from db import (  # type: ignore[reportAttributeAccessIssue]
     get_active_sponsorships,  # type: ignore[reportAttributeAccessIssue]
     get_admin_orchestration_settings,  # type: ignore[reportAttributeAccessIssue]
     get_composite_discovery_config,  # type: ignore[reportAttributeAccessIssue]
-    get_internal_agent_urls,  # type: ignore[reportAttributeAccessIssue]
+    get_ucp_partners_with_tokens,  # type: ignore[reportAttributeAccessIssue]
     get_partner_ratings_map,  # type: ignore[reportAttributeAccessIssue]
     get_partners_by_ids,  # type: ignore[reportAttributeAccessIssue]
     get_platform_config_ranking,  # type: ignore[reportAttributeAccessIssue]
@@ -190,14 +190,14 @@ async def _fetch_via_aggregator(
         timeout_ms = max(8000, v) if v == 5000 else v
     local_driver = LocalDBDriver(search_products)
     ucp_driver = None
-    internal_urls = await get_internal_agent_urls()
-    if internal_urls:
-        logger.info("DiscoveryAggregator: using %s UCP partner URL(s) for query=%s", len(internal_urls), (query or "")[:80])
+    internal_partners = await get_ucp_partners_with_tokens()
+    if internal_partners:
+        logger.info("DiscoveryAggregator: using %s UCP partner URL(s) for query=%s", len(internal_partners), (query or "")[:80])
         async def _get_partner_urls():
-            return internal_urls
+            return internal_partners
         ucp_driver = UCPManifestDriver(get_partner_manifest_urls=_get_partner_urls)
     else:
-        logger.info("DiscoveryAggregator: no UCP partners (get_internal_agent_urls returned empty) for query=%s", (query or "")[:80])
+        logger.info("DiscoveryAggregator: no UCP partners (get_ucp_partners_with_tokens returned empty) for query=%s", (query or "")[:80])
     shopify_mcp_driver = None
     shopify_endpoints = await get_shopify_mcp_endpoints(capability="discovery")
     if shopify_endpoints:

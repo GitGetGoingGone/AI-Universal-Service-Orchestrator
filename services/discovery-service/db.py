@@ -15,6 +15,7 @@ __all__ = [
     "search_products",
     "get_distinct_experience_tags",
     "get_internal_agent_urls",
+    "get_ucp_partners_with_tokens",
     "onboard_ucp_partner",
     "get_shopify_mcp_endpoints",
     "onboard_shopify_curated_partner",
@@ -369,6 +370,47 @@ async def get_internal_agent_urls(capability: Optional[str] = None) -> List[str]
         return []
 
 
+async def get_ucp_partners_with_tokens(capability: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Return UCP partners with optional access token for MCP auth.
+    Each entry: { "base_url": str, "access_token": str | None }.
+    When access_token_vault_ref is set, resolves token via get_shopify_token RPC (same vault).
+    Used by Scout so MCP requests can send Authorization: Bearer when partner requires it.
+    """
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        q = (
+            client.table("internal_agent_registry")
+            .select("base_url, access_token_vault_ref")
+            .eq("enabled", True)
+            .or_("transport_type.eq.UCP,transport_type.is.null")
+        )
+        if capability and str(capability).strip():
+            q = q.eq("capability", str(capability).strip())
+        result = q.execute()
+        data = _table_data(result.data)
+        out: List[Dict[str, Any]] = []
+        for r in data:
+            base_url = (r.get("base_url") or "").strip()
+            if not base_url:
+                continue
+            vault_ref = r.get("access_token_vault_ref")
+            access_token: Optional[str] = None
+            if vault_ref and str(vault_ref).strip():
+                try:
+                    rpc = client.rpc("get_shopify_token", {"vault_ref": str(vault_ref).strip()}).execute()
+                    if rpc.data is not None and isinstance(rpc.data, str) and rpc.data.strip():
+                        access_token = rpc.data.strip()
+                except Exception:
+                    pass
+            out.append({"base_url": base_url, "access_token": access_token})
+        return out
+    except Exception:
+        return []
+
+
 async def get_shopify_mcp_endpoints(capability: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Return Shopify MCP endpoints with slug and price_premium_percent for ShopifyMCPDriver.
@@ -382,13 +424,13 @@ async def get_shopify_mcp_endpoints(capability: Optional[str] = None) -> List[Di
             "mcp_endpoint, shop_url, price_premium_percent, internal_agent_registry_id"
         )
         result = q.execute()
-        reg_ids = [r["internal_agent_registry_id"] for r in (result.data or []) if r.get("internal_agent_registry_id")]
+        data = _table_data(result.data)
+        reg_ids = [r.get("internal_agent_registry_id") for r in data if r.get("internal_agent_registry_id")]
         reg_map: Dict[str, Dict[str, Any]] = {}
         if reg_ids:
             reg_res = client.table("internal_agent_registry").select("id, display_name, capability, enabled").in_("id", reg_ids).execute()
-            for r in (reg_res.data or []):
+            for r in _table_data(reg_res.data):
                 reg_map[str(r.get("id", ""))] = r
-        data = _table_data(result.data)
         import re
         out: List[Dict[str, Any]] = []
         for row in data:
@@ -573,17 +615,18 @@ async def get_partner_agent_slug_map(partner_ids: List[str]) -> Dict[str, str]:
         scp = client.table("shopify_curated_partners").select(
             "partner_id, internal_agent_registry_id"
         ).in_("partner_id", partner_ids).execute()
-        reg_ids = list({r["internal_agent_registry_id"] for r in (scp.data or []) if r.get("internal_agent_registry_id")})
+        scp_data = _table_data(scp.data)
+        reg_ids = list({str(r.get("internal_agent_registry_id", "")) for r in scp_data if r.get("internal_agent_registry_id")})
         reg_map: Dict[str, str] = {}
         if reg_ids:
             reg_res = client.table("internal_agent_registry").select(
                 "id, display_name"
             ).in_("id", reg_ids).execute()
-            for r in (reg_res.data or []):
+            for r in _table_data(reg_res.data):
                 dn = (r.get("display_name") or "").strip()
                 s = re.sub(r"[^a-z0-9]+", "_", dn.lower())
                 reg_map[str(r.get("id", ""))] = (s.strip("_") or "shopify")[:64]
-        for r in (scp.data or []):
+        for r in scp_data:
             pid = str(r.get("partner_id", ""))
             reg_id = str(r.get("internal_agent_registry_id", ""))
             if pid and reg_id and reg_map.get(reg_id):
@@ -594,7 +637,7 @@ async def get_partner_agent_slug_map(partner_ids: List[str]) -> Dict[str, str]:
             p_res = client.table("partners").select(
                 "id, business_name"
             ).in_("id", remaining).execute()
-            for r in (p_res.data or []):
+            for r in _table_data(p_res.data):
                 pid = str(r.get("id", ""))
                 bn = (r.get("business_name") or "").strip()
                 s = re.sub(r"[^a-z0-9]+", "_", bn.lower())
