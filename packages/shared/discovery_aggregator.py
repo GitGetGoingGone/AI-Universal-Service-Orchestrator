@@ -250,12 +250,18 @@ class UCPManifestDriver:
             },
         }
         headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "USO-Orchestrator/1.0 (UCP+MCP)"}
+        logger.info("UCP MCP request: POST url=%s query=%s", mcp_endpoint, (query or "products")[:50])
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 r = await client.post(mcp_endpoint, json=payload, headers=headers)
         except Exception as e:
-            logger.debug("UCP MCP request failed %s: %s", mcp_endpoint, e)
+            logger.info("UCP MCP request failed: url=%s error=%s", mcp_endpoint, e)
             return []
+        try:
+            resp_body = r.text[:500] if r.text else ""
+        except Exception:
+            resp_body = ""
+        logger.info("UCP MCP response: url=%s status=%s content_length=%s body_preview=%s", mcp_endpoint, r.status_code, len(r.text or ""), resp_body)
         if r.status_code != 200:
             logger.info("UCP driver: MCP request to %s returned status=%s", mcp_endpoint, r.status_code)
             return []
@@ -266,6 +272,8 @@ class UCPManifestDriver:
         out = _extract_products_from_mcp_response(data, slug, 0.0)
         if not out and data and isinstance(data, dict) and not data.get("error"):
             logger.info("UCP driver: MCP 200 but 0 products extracted from %s (response keys: %s)", mcp_endpoint, list(data.keys())[:10])
+        else:
+            logger.info("UCP MCP response summary: url=%s products_extracted=%s", mcp_endpoint, len(out))
         return out
 
     async def search(
@@ -282,6 +290,7 @@ class UCPManifestDriver:
             urls = await self._get_urls()
             if not urls:
                 return []
+            logger.info("UCP partner base URLs: %s", urls[:10])
             all_items: List[UCPProduct] = []
             headers = {"Accept": "application/json", "User-Agent": "USO-Orchestrator/1.0 (UCP Discovery)"}
             for base_url in urls[:5]:
@@ -293,16 +302,20 @@ class UCPManifestDriver:
                     manifest_url = f"{origin}/.well-known/ucp.json"
                     async with httpx.AsyncClient(timeout=3.0) as client:
                         r = await client.get(manifest_url, headers=headers)
+                        logger.info("UCP manifest request: GET url=%s status=%s", manifest_url, r.status_code)
                         if r.status_code != 200:
                             manifest_url = f"{origin}/.well-known/ucp"
                             r = await client.get(manifest_url, headers=headers)
+                            logger.info("UCP manifest request: GET url=%s status=%s", manifest_url, r.status_code)
                         if r.status_code != 200 and base_url != origin and base_url.startswith(origin):
                             manifest_url = base_url.rstrip("/")
                             r = await client.get(manifest_url, headers=headers)
+                            logger.info("UCP manifest request: GET url=%s status=%s", manifest_url, r.status_code)
                         if r.status_code != 200:
                             logger.info("UCP driver: manifest failed for %s (status=%s)", origin, r.status_code)
                             continue
                         data = r.json()
+                    logger.info("UCP manifest response: url=%s status=200 keys=%s", manifest_url, list(data.keys())[:15] if isinstance(data, dict) else "n/a")
                     catalog_url = None
                     ucp = data.get("ucp", data)
                     mcp_endpoint, rest_endpoint = self._parse_shopping_transport(ucp, origin) if isinstance(ucp, dict) else (None, None)
@@ -350,9 +363,12 @@ class UCPManifestDriver:
                         for path in catalog_paths:
                             url = f"{catalog_base.rstrip('/')}{path}"
                             r = await client.get(url, params={"q": query, "limit": limit}, headers=headers)
+                            logger.info("UCP REST catalog request: GET url=%s params=q=%s,limit=%s status=%s", url, (query or "")[:30], limit, r.status_code)
                             if r.status_code == 200:
                                 try:
                                     cat = r.json()
+                                    item_count = len(cat.get("items", cat.get("products", [])) if isinstance(cat, dict) else [])
+                                    logger.info("UCP REST catalog response: url=%s status=200 items_count=%s", url, item_count)
                                     break
                                 except Exception:
                                     pass
