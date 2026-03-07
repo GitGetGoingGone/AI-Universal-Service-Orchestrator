@@ -200,13 +200,23 @@ async def _search_products_by_capability(
     exclude_partner_id: Optional[str] = None,
     experience_tags_filter: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Return products whose capabilities JSONB array contains the given capability (e.g. 'flowers')."""
+    """Return products whose capabilities JSONB array contains the given capability (e.g. 'flowers').
+    Use a single token for capability: multi-word values (e.g. 'birthday gifts') can produce
+    malformed array literals in Postgres; we use the first word only for the contains filter.
+    """
+    cap_clean = (capability or "").strip().lower()
+    if not cap_clean:
+        return []
+    # Avoid 400: Supabase/PostgREST serializes .contains("capabilities", ["birthday gifts"]) as
+    # capabilities=cs.{birthday gifts} which Postgres rejects. Use first word only for containment.
+    if " " in cap_clean:
+        cap_clean = cap_clean.split()[0]
     try:
         q = (
             client.table("products")
             .select(f"{select_cols}, sold_count")
             .is_("deleted_at", "null")
-            .contains("capabilities", [capability.lower()])
+            .contains("capabilities", [cap_clean])
         )
         if partner_id:
             q = q.eq("partner_id", partner_id)

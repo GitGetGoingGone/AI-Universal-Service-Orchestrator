@@ -275,6 +275,8 @@ class UCPManifestDriver:
             resp_body = ""
         logger.info("UCP MCP response: url=%s status=%s content_length=%s body_preview=%s", mcp_endpoint, r.status_code, len(r.text or ""), resp_body)
         if r.status_code != 200:
+            if r.status_code == 401 and "/api/ucp/mcp" in (mcp_endpoint or ""):
+                logger.info("UCP driver: MCP 401 on %s (invalid/missing token); will try fallback /api/mcp without auth", mcp_endpoint)
             logger.info("UCP driver: MCP request to %s returned status=%s", mcp_endpoint, r.status_code)
             return []
         try:

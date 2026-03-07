@@ -94,10 +94,23 @@ def _build_context(result: Dict[str, Any]) -> str:
                     "• Luxury Date Night: Premium dinner and limo, with optional flowers.",
                 ])
         if theme_entries:
+            # When a flow rule says skip_date_area_probe (e.g. gift), do not ask for date/area in this line
+            try:
+                from api.admin import get_experience_flow_rules  # type: ignore[reportMissingImports]
+                from .experience_flow import match_intent_to_rule
+                _intent_for_rule = {"experience_name": intent.get("experience_name"), "search_queries": intent.get("search_queries") or ([intent.get("search_query")] if intent.get("search_query") else [])}
+                _rule = match_intent_to_rule(_intent_for_rule, get_experience_flow_rules())
+                _skip_date_area = bool(_rule and _rule.get("skip_date_area_probe"))
+            except Exception:
+                _skip_date_area = False
+            if _skip_date_area:
+                theme_suffix = "\nList each option with its description so the user can choose. Invite them to pick one so we can show product options. Do NOT ask for date or area."
+            else:
+                theme_suffix = "\nList each option with its description so the user can choose. After listing, invite them to pick one and share date/area. Do NOT say 'I'm thinking X' or suggest a single option."
             parts.append(
                 "Themed experience options — you MUST present ALL of these to the user (2–3+ options), never pick or default to one:\n"
                 + "\n".join(theme_entries)
-                + "\nList each option with its description so the user can choose. After listing, invite them to pick one and share date/area. Do NOT say 'I'm thinking X' or suggest a single option."
+                + theme_suffix
             )
 
     last_suggestion = result.get("last_suggestion")
@@ -282,11 +295,22 @@ def _build_context(result: Dict[str, Any]) -> str:
                         "User asked for themed ideas or suggestions. You MUST present 2–3+ themed experience options listed above (each with its description). "
                         "Let the user choose — never pick or default to one option. Then ask for date and area so you can tailor the chosen experience. Do NOT list individual products yet."
                     )
+                parts.append(
+                    "Do NOT invent experience names or options. Only use the themed options explicitly listed above in this prompt. "
+                    "If no themed options are listed above, do not make up options; instead probe for themes (e.g. occasion, recipient, style, price range) or suggest concrete ideas or categories we offer so they can narrow the search."
+                )
             else:
+                exp_cats = (intent.get("experience_categories") or engagement.get("experience_categories") or [])
+                exp_cats_str = ""
+                if isinstance(exp_cats, list) and exp_cats:
+                    exp_cats_str = ", ".join(str(c) for c in exp_cats[:12] if c)
                 parts.append(
                     f"User asked for experience: {exp_name}. Categories they want: {', '.join(cat_names) or 'products'}. "
-                    "You are a concierge — guide them through a structured flow to gather details for each category. Do NOT list products."
+                    "You are a concierge — guide them to narrow the search. Do NOT invent experience options (e.g. do not make up 'Gift of Culinary Delight' or similar). "
+                    "Probe for themes (e.g. occasion, recipient, style, price range) or suggest concrete ideas or categories we offer so they can pick one and we can search again. Do not ask for date or area unless the experience type clearly requires it for tailoring."
                 )
+                if exp_cats_str:
+                    parts.append(f"Available categories you can suggest to narrow the search: {exp_cats_str}. Invite them to pick one (e.g. 'We have X, Y, Z — which would you like to explore?').")
     else:
         product_list = products.get("products") if isinstance(products, dict) else []
         if not product_list and isinstance(products, list):
