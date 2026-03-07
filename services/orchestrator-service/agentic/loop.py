@@ -958,7 +958,24 @@ async def run_agentic_loop(
                 if not tool_args.get("budget_max") and intent_data:
                     tool_args["budget_max"] = _extract_budget(intent_data)
 
-                # External factors: MUST call get_weather and get_upcoming_occasions BEFORE discovery when location known
+                # When user clearly picked one theme (e.g. "I'd like to explore the Romantic Date Night"), use that option only
+                bundle_opts = tool_args.get("bundle_options") or []
+                if len(bundle_opts) >= 2:
+                    user_lower = (user_message or "").strip().lower()
+                    for opt in bundle_opts:
+                        if not isinstance(opt, dict):
+                            continue
+                        label = (opt.get("label") or "").strip().lower()
+                        if not label:
+                            continue
+                        # Match: user said the label, or a distinctive word from it (e.g. "romantic" in "Romantic Date Night")
+                        if label in user_lower:
+                            tool_args["bundle_options"] = [opt]
+                            break
+                        words = [w for w in label.split() if len(w) > 4]
+                        if words and any(w in user_lower for w in words):
+                            tool_args["bundle_options"] = [opt]
+                            break
                 loc = tool_args.get("location")
                 if loc and str(loc).strip():
                     if not engagement_data.get("weather"):
@@ -1271,14 +1288,49 @@ async def run_agentic_loop(
                 logger.debug("get_experience_categories for no-results fallback failed: %s", e)
 
     # Halt & Preview: when discover_composite completes with probing (no products yet), pass intent's
-    # bundle_options as suggested_bundle_options so the frontend renders thematic option cards
+    # bundle_options as suggested_bundle_options so the frontend renders thematic option cards.
+    # Skip this when a flow rule has skip_date_area_probe (e.g. gift): we're probing in chat, not showing option cards.
     if not engagement_data.get("suggested_bundle_options") and (intent_data or {}).get("intent_type") == "discover_composite":
-        intent_opts = (intent_data or {}).get("bundle_options") or []
-        if intent_opts:
-            engagement_data["suggested_bundle_options"] = [
-                {"option_label": o.get("label", f"Option {i+1}"), "description": o.get("description", "")}
-                for i, o in enumerate(intent_opts) if isinstance(o, dict)
-            ]
+        try:
+            from api.admin import get_experience_flow_rules  # type: ignore[reportMissingImports]
+            from .experience_flow import should_skip_date_area_probe
+            _rules = get_experience_flow_rules()
+            _intent = {"experience_name": (intent_data or {}).get("experience_name"), "search_queries": (intent_data or {}).get("search_queries") or []}
+            if should_skip_date_area_probe(_intent, _rules):
+                pass  # do not set suggested_bundle_options; avoid "Explore more options" cards while probing
+            else:
+                intent_opts = (intent_data or {}).get("bundle_options") or []
+                if intent_opts:
+                    opts_list = [
+                        {"option_label": o.get("label", f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you."}
+                        for i, o in enumerate(intent_opts) if isinstance(o, dict)
+                    ]
+                    # When intent returns only one date-night-like option, add fallback options so frontend shows 3 cards (matches prompt)
+                    exp_name = ((intent_data or {}).get("experience_name") or "").lower()
+                    sq = (intent_data or {}).get("search_queries") or []
+                    sq_str = " ".join(str(q).lower() for q in sq if q)
+                    if len(opts_list) == 1 and ("date" in exp_name or "night" in exp_name or any(c in sq_str for c in ("flowers", "dinner", "limo"))):
+                        opts_list.extend([
+                            {"option_label": "Casual Date Night", "description": "A laid-back evening with dinner and flowers, no limo."},
+                            {"option_label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers."},
+                        ])
+                    engagement_data["suggested_bundle_options"] = opts_list
+        except Exception:
+            intent_opts = (intent_data or {}).get("bundle_options") or []
+            if intent_opts:
+                opts_list = [
+                    {"option_label": o.get("label", f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you."}
+                    for i, o in enumerate(intent_opts) if isinstance(o, dict)
+                ]
+                exp_name = ((intent_data or {}).get("experience_name") or "").lower()
+                sq = (intent_data or {}).get("search_queries") or []
+                sq_str = " ".join(str(q).lower() for q in sq if q)
+                if len(opts_list) == 1 and ("date" in exp_name or "night" in exp_name or any(c in sq_str for c in ("flowers", "dinner", "limo"))):
+                    opts_list.extend([
+                        {"option_label": "Casual Date Night", "description": "A laid-back evening with dinner and flowers, no limo."},
+                        {"option_label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers."},
+                    ])
+                engagement_data["suggested_bundle_options"] = opts_list
 
     # Pass fulfillment context and missing required fields (configurable from admin/bundle/KB) so frontend can block checkout until provided
     required_fields_list = state.get("required_fulfillment_fields") or list(DEFAULT_FULFILLMENT_FIELDS)

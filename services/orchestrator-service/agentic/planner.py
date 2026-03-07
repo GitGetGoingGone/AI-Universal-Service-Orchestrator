@@ -409,31 +409,37 @@ def _fallback_plan(user_message: str, state: Dict[str, Any]) -> Dict[str, Any]:
             elif skip_probe:
                 pass  # show products first per config; only ask for delivery when adding to bundle
             elif not has_location or not has_time:
-                # Concierge-style one-liner: acknowledge what we have, ask for the next missing piece
-                if has_time and has_location:
-                    pass  # fall through to discover_composite
-                elif has_time and loc_val:
-                    pass
+                # If user message indicates they're selecting one of the theme options we showed, fetch products (don't repeat options)
+                user_lower = (user_message or "").strip().lower()
+                theme_selection_phrases = ("explore the", "i'd like to explore", "i would like to explore", "i want the", "the romantic", "the casual", "the luxury", "romantic date", "casual date", "luxury date", "that one", "this one", "the first", "the second", "the third")
+                if any(p in user_lower for p in theme_selection_phrases):
+                    pass  # user picked a theme; fall through to discover_composite to show products
                 else:
-                    bundle_opts = intent_data.get("bundle_options") or []
-                    opts_labels = [str(o.get("label", "")) for o in bundle_opts[:6] if isinstance(o, dict) and o.get("label")]
-                    opts_str = ", ".join(opts_labels) if len(opts_labels) >= 2 else None
-                    if time_val and loc_val:
-                        msg = f"Today it is! I'm planning your {plan_str} for {loc_val}. What neighborhood or area should I focus on?"
-                    elif time_val:
-                        msg = f"Today it is! I'm planning your {plan_str}. What neighborhood or area are we looking at?"
-                    elif loc_val:
-                        msg = f"I'm planning your {plan_str} for {loc_val}. What date are you thinking?"
+                    # Concierge-style one-liner: acknowledge what we have, ask for the next missing piece
+                    if has_time and has_location:
+                        pass  # fall through to discover_composite
+                    elif has_time and loc_val:
+                        pass
                     else:
-                        if opts_str:
-                            msg = f"I'd love to help you plan a perfect {exp_name_display}! Here are a few options: {opts_str}. Which speaks to you? What date are you planning for, and which area — e.g. downtown or a neighborhood?"
+                        bundle_opts = intent_data.get("bundle_options") or []
+                        opts_labels = [str(o.get("label", "")) for o in bundle_opts[:6] if isinstance(o, dict) and o.get("label")]
+                        opts_str = ", ".join(opts_labels) if len(opts_labels) >= 2 else None
+                        if time_val and loc_val:
+                            msg = f"Today it is! I'm planning your {plan_str} for {loc_val}. What neighborhood or area should I focus on?"
+                        elif time_val:
+                            msg = f"Today it is! I'm planning your {plan_str}. What neighborhood or area are we looking at?"
+                        elif loc_val:
+                            msg = f"I'm planning your {plan_str} for {loc_val}. What date are you thinking?"
                         else:
-                            msg = f"I'd love to help you plan a perfect {exp_name_display}! I'm thinking {plan_str}. What date are you planning for, and which area — e.g. downtown or a neighborhood?"
-                    return {
-                        "action": "complete",
-                        "message": msg,
-                        "reasoning": "Halt & Preview: location or time missing; concierge probe with proposed_plan.",
-                    }
+                            if opts_str:
+                                msg = f"I'd love to help you plan a perfect {exp_name_display}! Here are a few options: {opts_str}. Which speaks to you? What date are you planning for, and which area — e.g. downtown or a neighborhood?"
+                            else:
+                                msg = f"I'd love to help you plan a perfect {exp_name_display}! I'm thinking {plan_str}. What date are you planning for, and which area — e.g. downtown or a neighborhood?"
+                        return {
+                            "action": "complete",
+                            "message": msg,
+                            "reasoning": "Halt & Preview: location or time missing; concierge probe with proposed_plan.",
+                        }
             exp_name = intent_data.get("experience_name") or "experience"
             # Use merged location from entities or prior fulfillment_context
             loc = loc_val if _is_valid_loc(loc_val) else (fc.get("discover_location") or None)

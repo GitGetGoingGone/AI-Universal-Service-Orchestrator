@@ -311,6 +311,19 @@ def _build_context(result: Dict[str, Any]) -> str:
                 )
                 if exp_cats_str:
                     parts.append(f"Available categories you can suggest to narrow the search: {exp_cats_str}. Invite them to pick one (e.g. 'We have X, Y, Z — which would you like to explore?').")
+                    # When this is a gift-like flow (config rule), suggest only gift-relevant categories so we don't push hiking/date night
+                    try:
+                        from api.admin import get_experience_flow_rules  # type: ignore[reportMissingImports]
+                        from .experience_flow import match_intent_to_rule
+                        _id = {"experience_name": intent.get("experience_name"), "search_queries": intent.get("search_queries") or ([intent.get("search_query")] if intent.get("search_query") else [])}
+                        _r = match_intent_to_rule(_id, get_experience_flow_rules())
+                        if _r and _r.get("skip_date_area_probe"):
+                            parts.append(
+                                "User is in a gift flow. Suggest only gift-relevant categories (e.g. toys, books, games, jewelry, gifts, occasions). "
+                                "Do NOT suggest experience outings (e.g. hiking, camping, date night, nature tour) unless the user explicitly asked for that type of experience."
+                            )
+                    except Exception:
+                        pass
     else:
         product_list = products.get("products") if isinstance(products, dict) else []
         if not product_list and isinstance(products, list):
