@@ -278,7 +278,7 @@ async def onboard_shopify_partner(body: ShopifyPartnerOnboardBody):
     Onboard a curated Shopify partner. Creates/updates partner, internal_agent_registry,
     and shopify_curated_partners. Access token stored in Supabase Vault when access_token provided.
     """
-    from db import get_supabase, onboard_shopify_curated_partner
+    from db import get_supabase, onboard_shopify_curated_partner  # type: ignore[reportAttributeAccessIssue]
 
     if not body.shop_url or not body.mcp_endpoint:
         raise HTTPException(status_code=400, detail="shop_url and mcp_endpoint are required")
@@ -303,7 +303,7 @@ async def onboard_ucp_partner_endpoint(body: UCPPartnerOnboardBody):
     display_name is optional; derived from manifest or base_url if omitted.
     """
     import json
-    from db import onboard_ucp_partner as db_onboard_ucp, _base_url_from_manifest_json
+    from db import onboard_ucp_partner as db_onboard_ucp, _base_url_from_manifest_json  # type: ignore[reportAttributeAccessIssue]
 
     base_url: Optional[str] = body.base_url and body.base_url.strip() or None
     display_name: Optional[str] = body.display_name and body.display_name.strip() or None
@@ -358,6 +358,28 @@ async def list_ucp_partners():
         return {"ucp_partners": []}
 
 
+@router.get("/ucp-partners/status")
+async def ucp_partners_status():
+    """
+    Diagnostic: how many UCP partner URLs Scout uses for discovery.
+    Same source as get_internal_agent_urls() so you can verify Discovery sees your partners.
+    """
+    from db import get_internal_agent_urls  # type: ignore[reportAttributeAccessIssue]
+
+    urls = await get_internal_agent_urls()
+    # Mask for logs: show only scheme and host
+    masked = []
+    for u in urls:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(u)
+            host = parsed.netloc or u.split("/")[2] if u.startswith("http") else "***"
+            masked.append(f"{parsed.scheme or 'https'}://{host}")
+        except Exception:
+            masked.append("***")
+    return {"ucp_partner_count": len(urls), "ucp_origins_masked": masked}
+
+
 class UCPPartnerPatchBody(BaseModel):
     """Update UCP partner display_name, enabled, price_premium_percent, available_to_customize, optional access_token."""
 
@@ -399,7 +421,8 @@ async def patch_ucp_partner(registry_id: str, body: UCPPartnerPatchBody):
                 .execute()
             )
             data = row.data if isinstance(row.data, list) else []
-            base_url = data[0].get("base_url", "") if data else ""
+            first = data[0] if data else {}
+            base_url = str(first.get("base_url", "")) if isinstance(first, dict) else ""
             secret_name = f"ucp_{base_url.replace('https://', '').replace('http://', '').replace('/', '_')}_{uuid_module.uuid4().hex[:8]}"
             r = client.rpc("insert_shopify_token", {"secret_name": secret_name, "secret_value": body.access_token}).execute()
             if r.data is not None:
