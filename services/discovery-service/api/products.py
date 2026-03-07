@@ -1,5 +1,6 @@
 """Product discovery API - Chat-First with JSON-LD and Adaptive Cards."""
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -32,6 +33,7 @@ from packages.shared.adaptive_cards.base import create_card, text_block
 from packages.shared.ucp_public_product import filter_product_for_public
 
 router = APIRouter(prefix="/api/v1", tags=["Discover"])
+logger = logging.getLogger(__name__)
 
 
 def _product_for_public_response(product: dict) -> dict:
@@ -147,6 +149,7 @@ async def discover_products(
     Chat-First: Returns JSON-LD and Adaptive Card for AI agents.
     Optionally include partner KB articles (semantic match) via include_kb_articles=true.
     """
+    logger.info("UCP discover request: intent=%s limit=%s", intent, limit)
     products = await search(
         query=intent, limit=limit * 2 if budget_max else limit,
         partner_id=partner_id, exclude_partner_id=exclude_partner_id,
@@ -168,6 +171,8 @@ async def discover_products(
         products = filtered[:limit]
     else:
         products = products[:limit]
+
+    logger.info("UCP discover response: intent=%s result_count=%s", intent, len(products))
 
     # Multi-Agent encapsulation: do not expose experience_tags to Planner/UCP
     products_public = [_product_for_public_response(p) for p in products]

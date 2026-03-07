@@ -1,11 +1,17 @@
 """Discovery Service (Module 1) - FastAPI app with shared error handling."""
 
+import logging
 import sys
 from pathlib import Path
 
 # Add shared package and parent to path
 _root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_root))
+
+# Configure logging so INFO from scout_engine and discovery_aggregator is visible
+from config import settings
+_log_level = getattr(logging, (getattr(settings, "log_level", "INFO") or "INFO").upper(), logging.INFO)
+logging.basicConfig(level=_log_level, format="%(levelname)s: %(name)s - %(message)s")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
