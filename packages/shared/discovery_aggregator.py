@@ -265,7 +265,7 @@ class UCPManifestDriver:
             return []
         out = _extract_products_from_mcp_response(data, slug, 0.0)
         if not out and data and isinstance(data, dict) and not data.get("error"):
-            logger.debug("UCP driver: MCP 200 but 0 products extracted from %s (response keys: %s)", mcp_endpoint, list(data.keys())[:10])
+            logger.info("UCP driver: MCP 200 but 0 products extracted from %s (response keys: %s)", mcp_endpoint, list(data.keys())[:10])
         return out
 
     async def search(
