@@ -240,18 +240,19 @@ class UCPManifestDriver:
             logger.debug("shopify_mcp_driver not available for UCP MCP transport")
             return []
         import httpx
+        # Match UCP Playground: name + arguments with query (optional filters)
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
             "params": {
                 "name": "search_shop_catalog",
-                "arguments": {"query": query or "products", "filters": [{"available": True}]},
+                "arguments": {"query": query or "products"},
             },
         }
         headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "USO-Orchestrator/1.0 (UCP+MCP)"}
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 r = await client.post(mcp_endpoint, json=payload, headers=headers)
         except Exception as e:
             logger.debug("UCP MCP request failed %s: %s", mcp_endpoint, e)
@@ -433,6 +434,8 @@ class DiscoveryAggregator:
         if is_browse_query(query):
             query = ""
         timeout_sec = self._timeout_ms / 1000.0
+        # Cap UCP per-driver timeout so one slow partner doesn't block the whole aggregator
+        ucp_timeout_sec = min(timeout_sec, 5.0)
         tasks: List[asyncio.Task] = []
         if self._local:
             tasks.append(
@@ -448,11 +451,18 @@ class DiscoveryAggregator:
                 )
             )
         if self._ucp:
-            tasks.append(
-                asyncio.create_task(
-                    self._ucp.search(query=query, limit=limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id)
-                )
-            )
+            ucp_driver = self._ucp
+            async def _ucp_with_timeout():
+                try:
+                    return await asyncio.wait_for(
+                        ucp_driver.search(query=query, limit=limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id),
+                        timeout=ucp_timeout_sec,
+                    )
+                except asyncio.TimeoutError:
+                    logger.debug("UCP driver timed out after %.0fs", ucp_timeout_sec)
+                    return []
+
+            tasks.append(asyncio.create_task(_ucp_with_timeout()))
         if self._mcp:
             tasks.append(
                 asyncio.create_task(
