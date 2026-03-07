@@ -262,10 +262,14 @@ async def _fetch_and_rank(
         else:
             products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
     else:
-        # Try semantic search first when embedding is configured (then fall back to aggregator/text)
-        products = []
+        # Always run aggregator when enabled so UCP/Shopify MCP partners are included; merge with semantic if available.
+        products_agg: List[Dict[str, Any]] = []
+        if use_aggregator:
+            products_agg = await _fetch_via_aggregator(query, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags, exclude_tags)
+
+        products_semantic: List[Dict[str, Any]] = []
         if use_semantic and getattr(settings, "embedding_configured", False):
-            products = await semantic_search(
+            products_semantic = await semantic_search(
                 query=query,
                 limit=fetch_limit,
                 partner_id=partner_id,
@@ -273,18 +277,31 @@ async def _fetch_and_rank(
                 experience_tag=experience_tag,
                 experience_tags=experience_tags,
             )
-        if not products:
-            if use_aggregator:
-                products = await _fetch_via_aggregator(query, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags, exclude_tags)
-            else:
-                products = await search_products(
-                    query=query,
-                    limit=fetch_limit,
-                    partner_id=partner_id,
-                    exclude_partner_id=exclude_partner_id,
-                    experience_tag=experience_tag,
-                    experience_tags=experience_tags,
-                )
+
+        # Merge: semantic first (local DB matches), then aggregator (adds UCP/MCP not already present). Dedupe by id.
+        seen_ids: set = set()
+        products = []
+        for p in products_semantic:
+            pid = str(p.get("id", "")).strip()
+            if pid and pid not in seen_ids:
+                seen_ids.add(pid)
+                products.append(p)
+        for p in products_agg:
+            pid = str(p.get("id", "")).strip()
+            if pid and pid not in seen_ids:
+                seen_ids.add(pid)
+                products.append(p)
+
+        if not products and not use_aggregator:
+            products = await search_products(
+                query=query,
+                limit=fetch_limit,
+                partner_id=partner_id,
+                exclude_partner_id=exclude_partner_id,
+                experience_tag=experience_tag,
+                experience_tags=experience_tags,
+            )
+
         if not products and query.lower() in ("gifts", "gift"):
             for fallback in ("gift", "birthday", "present"):
                 if fallback != query.lower():

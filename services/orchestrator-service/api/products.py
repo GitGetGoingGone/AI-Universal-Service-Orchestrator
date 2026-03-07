@@ -92,6 +92,14 @@ async def add_to_bundle(body: AddToBundleBody):
 @router.post("/bundle/add-bulk")
 async def add_to_bundle_bulk(body: AddBulkBody):
     """Add multiple products to bundle. For Add curated bundle action."""
+    if not (body.product_ids or []):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "empty_bundle",
+                "message": "Cannot create a bundle with no products. Select at least one product to add.",
+            },
+        )
     if body.requires_fulfillment:
         required = body.fulfillment_fields or ["pickup_time", "pickup_address", "delivery_address"]
         missing = []

@@ -1090,6 +1090,7 @@ async def run_agentic_loop(
                     logger.debug("OrchestrationTrace product_discovery (composite) failed: %s", e)
                 # Use intent's bundle options when we have 1+; call LLM only when 0 to generate 2-4
                 intent_bundles = (products_data or {}).get("suggested_bundle_options") or []
+                intent_bundles = [b for b in intent_bundles if (b.get("product_ids") or [])]
                 if len(intent_bundles) >= 1:
                     engagement_data["suggested_bundle_options"] = intent_bundles
                     state["last_shown_bundle_label"] = intent_bundles[0].get("label") if intent_bundles else None
@@ -1133,6 +1134,8 @@ async def run_agentic_loop(
                                 rotate_tier=state.get("rotate_tier", False),
                                 last_shown_bundle_label=state.get("last_shown_bundle_label"),
                             )
+                            if options:
+                                options = [o for o in options if (o.get("product_ids") or [])]
                             if options:
                                 engagement_data["suggested_bundle_options"] = options
                                 state["last_shown_bundle_label"] = options[0].get("label") if options else None

@@ -169,12 +169,15 @@ def _build_context(result: Dict[str, Any]) -> str:
         if suggested_bundles:
             # Concierge Narrative: bundle with product features from UCPProduct schema (groundedness)
             opt = suggested_bundles[0]
-            product_names = opt.get("product_names") or []
             product_ids = opt.get("product_ids") or []
+            if not product_ids:
+                opt = None
+        else:
+            opt = None
+        if suggested_bundles and opt:
+            product_names = opt.get("product_names") or []
             total_price = opt.get("total_price")
             currency = opt.get("currency", "USD")
-            total_str = f"{currency} {float(total_price):.2f}" if total_price is not None else ""
-            # Build product data with features (from categories) so LLM only uses listed features
             id_to_product: Dict[str, Dict[str, Any]] = {}
             for c in categories:
                 if isinstance(c, dict):
@@ -196,12 +199,18 @@ def _build_context(result: Dict[str, Any]) -> str:
                 feats_str = ", ".join(str(f) for f in feats[:15]) if feats else "(no features listed)"
                 product_entries.append(f"{name} ({price_str}) — features: {feats_str}")
             product_data_str = "; ".join(product_entries) if product_entries else ", ".join(product_names)
+            if not product_entries:
+                opt = None
+        if suggested_bundles and opt:
             missing_ff = engagement.get("missing_fulfillment_fields") or []
             field_labels_ff = engagement.get("fulfillment_field_labels") or {
                 "pickup_time": "pickup time",
                 "pickup_address": "pickup address",
                 "delivery_address": "delivery address",
             }
+            total_price = opt.get("total_price")
+            currency = opt.get("currency", "USD")
+            total_str = f"{currency} {float(total_price):.2f}" if total_price is not None else ""
             need_ff_str = ", ".join(str(field_labels_ff.get(f, f.replace("_", " "))) for f in missing_ff)
             req_cta_line = (
                 f"REQUIRED before CTA: 'To place this order I'll need {need_ff_str} — you can share them in the chat now or when you tap Add this bundle.' "
@@ -1120,6 +1129,8 @@ Return JSON: {{ "options": [ {{ "label": "...", "description": "Fancy 1-2 senten
             valid = [str(i) for i in ids if str(i) in valid_ids]
             if num_cats > 0 and len(valid) < num_cats:
                 continue
+            if len(valid) == 0:
+                continue
             total = sum(price_map.get(i, 0) for i in valid)
             product_names = [name_map.get(i, "Item") for i in valid]
             currency = "USD"
@@ -1132,7 +1143,7 @@ Return JSON: {{ "options": [ {{ "label": "...", "description": "Fancy 1-2 senten
                 "description": str(opt.get("description", "")),
                 "product_ids": valid,
                 "product_names": product_names,
-                "total_price": float(opt.get("total_price", total)),
+                "total_price": round(total, 2),
                 "currency": currency,
             })
         return out
