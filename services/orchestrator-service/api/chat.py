@@ -22,6 +22,7 @@ from agentic.loop import run_agentic_loop
 from agentic.response import generate_engagement_response, stream_engagement_response
 from packages.shared.utils.api_response import chat_first_response, request_id_from_request
 from packages.shared.json_ld.error import error_ld
+from packages.shared.discovery import NO_USER_INPUT_FALLBACK_MESSAGE
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
 
@@ -35,7 +36,7 @@ def _effective_user_message(body: "ChatRequest") -> str:
     text = (body.text or "").strip()
     messages = body.messages or []
     if not messages:
-        return text or "Show me how wonderful your platform is and all the categories"
+        return text or NO_USER_INPUT_FALLBACK_MESSAGE
     for m in reversed(messages):
         if (m.get("role") or "").strip().lower() != "user":
             continue
@@ -51,7 +52,7 @@ def _effective_user_message(body: "ChatRequest") -> str:
                     if isinstance(t, str) and t.strip():
                         return t.strip()
         break
-    return text or "Show me how wonderful your platform is and all the categories"
+    return text or NO_USER_INPUT_FALLBACK_MESSAGE
 
 
 class ChatRequest(BaseModel):

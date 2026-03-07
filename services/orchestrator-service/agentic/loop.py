@@ -650,6 +650,13 @@ async def run_agentic_loop(
                     "confidence_score": 0.5,
                     "recommended_next_action": "complete_with_probing",
                 }
+            # When effective user message is the no-input fallback, treat as browse-only so we don't run discover with a specific query (e.g. flowers) on URL launch.
+            from packages.shared.discovery import NO_USER_INPUT_FALLBACK_MESSAGE
+            if (user_message or "").strip() == NO_USER_INPUT_FALLBACK_MESSAGE:
+                intent_data = dict(intent_data)
+                intent_data["intent_type"] = "browse"
+                intent_data["search_query"] = "browse"
+                intent_data["recommended_next_action"] = "complete_with_probing"
             state["last_tool_result"] = intent_result
             state["agent_reasoning"].append("Intent-first: resolved user message.")
             await _emit_thinking(on_thinking, "intent_resolved", intent_data or {}, thinking_messages or {})
@@ -868,10 +875,12 @@ async def run_agentic_loop(
             if tool_name == "discover_products":
                 tool_args = dict(tool_args)
                 tool_args.setdefault("limit", limit)
-                from packages.shared.discovery import fallback_search_query
+                from packages.shared.discovery import fallback_search_query, NO_USER_INPUT_FALLBACK_MESSAGE
                 current_q = (tool_args.get("query") or "").strip()
                 generic_for_discover = ("browse", "show", "options", "what", "looking", "stuff", "things", "got", "have", "find products", "find items", "find options", "")
-                if not current_q or current_q.lower() in generic_for_discover:
+                if (user_message or "").strip() == NO_USER_INPUT_FALLBACK_MESSAGE:
+                    tool_args["query"] = "browse"
+                elif not current_q or current_q.lower() in generic_for_discover:
                     tool_args["query"] = fallback_search_query(user_message)
                 if intent_data:
                     loc = _merged_location(intent_data, state)
@@ -1349,6 +1358,11 @@ async def _direct_flow(
     intent_type = intent_data.get("intent_type", "unknown")
     # Empty/generic → "browse" (Discovery returns sample products)
     search_query = intent_data.get("search_query") or "browse"
+    from packages.shared.discovery import NO_USER_INPUT_FALLBACK_MESSAGE
+    if (user_message or "").strip() == NO_USER_INPUT_FALLBACK_MESSAGE:
+        search_query = "browse"
+        intent_data = dict(intent_data)
+        intent_data["search_query"] = "browse"
 
     products_data = None
     adaptive_card = None

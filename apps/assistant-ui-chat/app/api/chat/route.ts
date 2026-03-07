@@ -82,23 +82,15 @@ export async function POST(req: Request) {
     }
 
     const messages = body.messages;
-    const userMessages = messages?.filter((m) => m.role === "user") ?? [];
-    const lastUser = userMessages.pop();
-    const fromContent = extractText(lastUser?.content);
-    const fromParts = extractText(lastUser?.parts);
-    // Never use a previous user message as the current turn text (would send wrong message, e.g. "find flowers" when user said "cosmetics")
-    const rawText =
+    // Use ONLY explicit current-turn input (body.text / body.input). When both are empty,
+    // use welcome fallback — do NOT use last user message from history, which would re-send
+    // an old message (e.g. "find flowers") when the user just opened the URL or restored a thread.
+    const explicitText =
       (typeof body.text === "string" && body.text.trim()) ||
       (typeof body.input === "string" && body.input.trim()) ||
-      fromContent ||
-      fromParts ||
-      (lastUser && typeof (lastUser as { content?: unknown }).content === "string"
-        ? ((lastUser as { content: string }).content || "").trim()
-        : "") ||
       "";
     const text =
-      rawText ||
-      "Show me how wonderful your platform is and all the categories";
+      explicitText || "Show me how wonderful your platform is and all the categories";
 
     // Normalize messages so content is always string (orchestrator expects this for recent_conversation)
     const normalizedMessages = messages?.map((m) => ({

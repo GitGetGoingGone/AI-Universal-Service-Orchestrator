@@ -240,7 +240,6 @@ class UCPManifestDriver:
             logger.debug("shopify_mcp_driver not available for UCP MCP transport")
             return []
         import httpx
-        # Match UCP Playground: name + arguments with query (optional filters)
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -258,12 +257,16 @@ class UCPManifestDriver:
             logger.debug("UCP MCP request failed %s: %s", mcp_endpoint, e)
             return []
         if r.status_code != 200:
+            logger.info("UCP driver: MCP request to %s returned status=%s", mcp_endpoint, r.status_code)
             return []
         try:
             data = r.json()
         except Exception:
             return []
-        return _extract_products_from_mcp_response(data, slug, 0.0)
+        out = _extract_products_from_mcp_response(data, slug, 0.0)
+        if not out and data and isinstance(data, dict) and not data.get("error"):
+            logger.debug("UCP driver: MCP 200 but 0 products extracted from %s (response keys: %s)", mcp_endpoint, list(data.keys())[:10])
+        return out
 
     async def search(
         self,
@@ -286,11 +289,15 @@ class UCPManifestDriver:
                     origin = self._origin(base_url)
                     if not origin:
                         continue
+                    # Try manifest: standard paths first, then exact base_url if it has a path (e.g. .../ucp)
                     manifest_url = f"{origin}/.well-known/ucp.json"
                     async with httpx.AsyncClient(timeout=3.0) as client:
                         r = await client.get(manifest_url, headers=headers)
                         if r.status_code != 200:
                             manifest_url = f"{origin}/.well-known/ucp"
+                            r = await client.get(manifest_url, headers=headers)
+                        if r.status_code != 200 and base_url != origin and base_url.startswith(origin):
+                            manifest_url = base_url.rstrip("/")
                             r = await client.get(manifest_url, headers=headers)
                         if r.status_code != 200:
                             logger.info("UCP driver: manifest failed for %s (status=%s)", origin, r.status_code)
@@ -299,6 +306,8 @@ class UCPManifestDriver:
                     catalog_url = None
                     ucp = data.get("ucp", data)
                     mcp_endpoint, rest_endpoint = self._parse_shopping_transport(ucp, origin) if isinstance(ucp, dict) else (None, None)
+                    if not mcp_endpoint and not rest_endpoint and isinstance(ucp, dict):
+                        logger.debug("UCP driver: no dev.ucp.shopping transport for %s (manifest may use different structure)", origin)
                     slug = origin.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "_")[:64]
 
                     if mcp_endpoint:
@@ -430,6 +439,7 @@ class DiscoveryAggregator:
         exclude_partner_id: Optional[str] = None,
         experience_tag: Optional[str] = None,
         experience_tags: Optional[List[str]] = None,
+        exclude_experience_tags: Optional[List[str]] = None,
     ) -> List[UCPProduct]:
         if is_browse_query(query):
             query = ""
@@ -497,4 +507,9 @@ class DiscoveryAggregator:
                 if isinstance(p, UCPProduct) and p.id:
                     merged[p.id] = p
         out = list(merged.values())[:limit]
+        # Config-driven exclusion: when caller passes exclude_experience_tags (from admin config), drop products that have any of those tags.
+        if exclude_experience_tags:
+            exclude_set = {str(t).strip().lower() for t in exclude_experience_tags if t and str(t).strip()}
+            if exclude_set:
+                out = [p for p in out if not any((tag or "").strip().lower() in exclude_set for tag in (p.experience_tags or []))]
         return out

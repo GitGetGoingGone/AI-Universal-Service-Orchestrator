@@ -31,6 +31,32 @@ from semantic_search import semantic_search
 logger = logging.getLogger(__name__)
 
 
+def _resolve_exclude_experience_tags(query: str, composite_discovery_config: Optional[Dict[str, Any]]) -> List[str]:
+    """
+    Resolve exclude_experience_tags from config. No hardcoded terms.
+    composite_discovery_config may contain:
+      query_exclusion_rules: [{"query_keywords": ["cosmetics", "makeup", ...], "exclude_tags": ["baby"]}, ...]
+    When query (normalized) matches a rule's query_keywords, returns that rule's exclude_tags.
+    """
+    if not query or not query.strip() or not composite_discovery_config:
+        return []
+    rules = composite_discovery_config.get("query_exclusion_rules")
+    if not isinstance(rules, list):
+        return []
+    q = query.strip().lower()
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        keywords = rule.get("query_keywords")
+        exclude_tags = rule.get("exclude_tags")
+        if not isinstance(keywords, list) or not isinstance(exclude_tags, list):
+            continue
+        keyword_set = {str(k).strip().lower() for k in keywords if k and str(k).strip()}
+        if not keyword_set or q in keyword_set or any(k in q for k in keyword_set):
+            return [str(t).strip() for t in exclude_tags if t and str(t).strip()]
+    return []
+
+
 async def _apply_ranking(
     products: List[Dict[str, Any]],
     experience_tag: Optional[str] = None,
@@ -153,6 +179,7 @@ async def _fetch_via_aggregator(
     exclude_partner_id: Optional[str],
     experience_tag: Optional[str] = None,
     experience_tags: Optional[List[str]] = None,
+    exclude_experience_tags: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Fetch via DiscoveryAggregator (LocalDB + optional UCP from private registry) with timeout."""
     admin = await get_admin_orchestration_settings()  # type: ignore[reportGeneralTypeIssues]
@@ -191,6 +218,7 @@ async def _fetch_via_aggregator(
         exclude_partner_id=exclude_partner_id,
         experience_tag=experience_tag,
         experience_tags=experience_tags,
+        exclude_experience_tags=exclude_experience_tags,
     )
     out = [p.to_dict() for p in ucp_products]
     if not out and query and query.strip():
@@ -221,14 +249,16 @@ async def _fetch_and_rank(
     admin = await get_admin_orchestration_settings()  # type: ignore[reportGeneralTypeIssues]
     use_aggregator = True  # DiscoveryAggregator is default; timeout from admin or 5000ms
 
+    exclude_tags = _resolve_exclude_experience_tags(query or "", cdc) if cdc else []
+
     if not query or not query.strip():
         if use_aggregator:
-            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
+            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags, exclude_tags)
         else:
             products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
     elif is_browse_query(query):
         if use_aggregator:
-            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
+            products = await _fetch_via_aggregator("", fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags, exclude_tags)
         else:
             products = await search_products(query="", limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
     else:
@@ -245,7 +275,7 @@ async def _fetch_and_rank(
             )
         if not products:
             if use_aggregator:
-                products = await _fetch_via_aggregator(query, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
+                products = await _fetch_via_aggregator(query, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags, exclude_tags)
             else:
                 products = await search_products(
                     query=query,
@@ -259,7 +289,7 @@ async def _fetch_and_rank(
             for fallback in ("gift", "birthday", "present"):
                 if fallback != query.lower():
                     if use_aggregator:
-                        products = await _fetch_via_aggregator(fallback, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
+                        products = await _fetch_via_aggregator(fallback, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags, exclude_tags)
                     else:
                         products = await search_products(query=fallback, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
                     if products:
@@ -268,7 +298,7 @@ async def _fetch_and_rank(
             for fallback in ("cosmetics", "makeup", "beauty", "skincare"):
                 if fallback != query.lower():
                     if use_aggregator:
-                        products = await _fetch_via_aggregator(fallback, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags)
+                        products = await _fetch_via_aggregator(fallback, fetch_limit, partner_id, exclude_partner_id, experience_tag, experience_tags, exclude_tags)
                     else:
                         products = await search_products(query=fallback, limit=fetch_limit, partner_id=partner_id, exclude_partner_id=exclude_partner_id, experience_tag=experience_tag, experience_tags=experience_tags)
                     if products:

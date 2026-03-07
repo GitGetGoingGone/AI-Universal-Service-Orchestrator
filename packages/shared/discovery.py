@@ -3,6 +3,10 @@
 import re
 from typing import Set
 
+# Message used when the client sends no real user input (empty thread or fallback).
+# When this is the effective user message, treat as browse-only so we don't run discover with a specific query (e.g. flowers).
+NO_USER_INPUT_FALLBACK_MESSAGE = "Show me how wonderful your platform is and all the categories"
+
 # Browse queries return catalog without semantic/text filter (sample products)
 BROWSE_QUERIES: Set[str] = {
     "sample",
