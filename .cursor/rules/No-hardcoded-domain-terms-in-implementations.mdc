@@ -1,0 +1,51 @@
+---
+description: Do not hardcode domain-specific terms (e.g. birthday, gifts, baby) in implementations or fixes
+alwaysApply: true
+---
+
+# No Hardcoded Domain Terms
+
+Do **not** hardcode domain-specific or example terms (e.g. "birthday", "gifts", "baby", "wedding") in code, prompts, configs, or fixes. Keep logic and data generic and driven by configuration or user/context input.
+
+## Rules
+
+- **Logic and branching**: Derive behavior from intent, config, or schema—not from string checks against example phrases.
+- **Prompts and examples**: Use placeholders, variables, or data from context; avoid baking in a single use case.
+- **Tests and fixtures**: Use parameterized or configurable data; avoid literal domain strings unless they come from test config.
+
+## Examples
+
+**❌ BAD — hardcoded domain terms**
+
+```python
+if "birthday" in intent or "gifts" in query:
+    return handle_gift_flow()
+```
+
+```typescript
+const defaultCategory = "baby";
+```
+
+```python
+# In a system prompt
+"You help users with birthday gifts and baby products."
+```
+
+**✅ GOOD — generic, data-driven**
+
+```python
+# Intent/category from resolver or config
+if intent_slug in configured_gift_flows:
+    return handle_flow(intent_slug)
+```
+
+```typescript
+const defaultCategory = config.defaultCategory ?? resolvedFromIntent();
+```
+
+```python
+# In a system prompt — driven by context/config
+"You help users with their requested category and intent."
+```
+
+When adding features or fixes, use schema/config/intent output instead of literal strings for domain concepts.

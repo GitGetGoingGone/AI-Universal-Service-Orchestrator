@@ -1349,46 +1349,20 @@ async def run_agentic_loop(
             except Exception as e:
                 logger.debug("get_experience_categories for no-results fallback failed: %s", e)
 
-    # Halt & Preview: when discover_composite completes with probing (no products yet), pass intent's
-    # bundle_options as suggested_bundle_options so the frontend renders thematic option cards.
-    # Skip this when a flow rule has skip_date_area_probe (e.g. gift): we're probing in chat, not showing option cards.
-    if not engagement_data.get("suggested_bundle_options") and (intent_data or {}).get("intent_type") == "discover_composite":
+    # Halt & Preview: when discover_composite has product results, pass intent's bundle_options as
+    # suggested_bundle_options (no hardcoded options; intent/LLM should return 3-5 tiers per prompt).
+    # Safeguard: only show when we have product results; skip when a flow rule has skip_date_area_probe.
+    _has_products = bool(products_data and (products_data.get("products") or (isinstance(products_data.get("data"), dict) and products_data.get("data", {}).get("products"))))
+    if not engagement_data.get("suggested_bundle_options") and (intent_data or {}).get("intent_type") == "discover_composite" and _has_products:
+        _intent = {"experience_name": (intent_data or {}).get("experience_name"), "search_queries": (intent_data or {}).get("search_queries") or []}
+        _skip_opts = False
         try:
             from api.admin import get_experience_flow_rules  # type: ignore[reportMissingImports]
             from .experience_flow import should_skip_date_area_probe
-            _rules = get_experience_flow_rules()
-            _intent = {"experience_name": (intent_data or {}).get("experience_name"), "search_queries": (intent_data or {}).get("search_queries") or []}
-            if should_skip_date_area_probe(_intent, _rules):
-                pass  # do not set suggested_bundle_options; avoid "Explore more options" cards while probing
-            else:
-                intent_opts = (intent_data or {}).get("bundle_options") or []
-                if intent_opts:
-                    exp_name_title = ((intent_data or {}).get("experience_name") or "experience").replace("_", " ").title()
-                    opts_list = [
-                        {"option_label": (o.get("label") or (exp_name_title if i == 0 else None) or f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you."}
-                        for i, o in enumerate(intent_opts) if isinstance(o, dict)
-                    ]
-                    # When intent returns only one date-night-like option, add fallback options so frontend shows 3 cards (matches prompt)
-                    exp_name = ((intent_data or {}).get("experience_name") or "").lower()
-                    sq = (intent_data or {}).get("search_queries") or []
-                    sq_str = " ".join(str(q).lower() for q in sq if q)
-                    if len(opts_list) == 1 and ("date" in exp_name or "night" in exp_name or any(c in sq_str for c in ("flowers", "dinner", "limo"))):
-                        opts_list.extend([
-                            {"option_label": "Casual Date Night", "description": "A laid-back evening with dinner and flowers, no limo."},
-                            {"option_label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers."},
-                        ])
-                    engagement_data["suggested_bundle_options"] = opts_list
-                    exp_name_title = ((intent_data or {}).get("experience_name") or "experience").replace("_", " ").title()
-                    state["last_shown_bundle_options"] = [{"label": (o.get("label") or (exp_name_title if i == 0 else None) or f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you.", "categories": o.get("categories") or []} for i, o in enumerate(intent_opts)]
-                    if len(opts_list) > len(intent_opts):
-                        state["last_shown_bundle_options"] = state.get("last_shown_bundle_options", []) + [
-                            {"label": "Casual Date Night", "description": "A laid-back evening with dinner and flowers, no limo.", "categories": ["flowers", "restaurant"]},
-                            {"label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers.", "categories": ["restaurant", "limo", "flowers"]},
-                        ]
-                    # #region agent log
-                    _debug_log("loop.py:halt_preview_opts", "Halt & Preview options (no product_ids)", {"opts_count": len(opts_list), "opts_labels": [o.get("option_label") for o in opts_list], "has_product_ids": False}, "H1")
-                    # #endregion
+            _skip_opts = should_skip_date_area_probe(_intent, get_experience_flow_rules())
         except Exception:
+            pass
+        if not _skip_opts:
             intent_opts = (intent_data or {}).get("bundle_options") or []
             if intent_opts:
                 exp_name_title = ((intent_data or {}).get("experience_name") or "experience").replace("_", " ").title()
@@ -1396,22 +1370,12 @@ async def run_agentic_loop(
                     {"option_label": (o.get("label") or (exp_name_title if i == 0 else None) or f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you."}
                     for i, o in enumerate(intent_opts) if isinstance(o, dict)
                 ]
-                exp_name = ((intent_data or {}).get("experience_name") or "").lower()
-                sq = (intent_data or {}).get("search_queries") or []
-                sq_str = " ".join(str(q).lower() for q in sq if q)
-                if len(opts_list) == 1 and ("date" in exp_name or "night" in exp_name or any(c in sq_str for c in ("flowers", "dinner", "limo"))):
-                    opts_list.extend([
-                        {"option_label": "Casual Date Night", "description": "A laid-back evening with dinner and flowers, no limo."},
-                        {"option_label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers."},
-                    ])
+                state["last_shown_bundle_options"] = [
+                    {"label": (o.get("label") or (exp_name_title if i == 0 else None) or f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you.", "categories": o.get("categories") or []}
+                    for i, o in enumerate(intent_opts) if isinstance(o, dict)
+                ]
                 engagement_data["suggested_bundle_options"] = opts_list
-                exp_name_title_ex = ((intent_data or {}).get("experience_name") or "experience").replace("_", " ").title()
-                state["last_shown_bundle_options"] = [{"label": (o.get("label") or (exp_name_title_ex if i == 0 else None) or f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you.", "categories": o.get("categories") or []} for i, o in enumerate(intent_opts)]
-                if len(opts_list) > len(intent_opts):
-                    state["last_shown_bundle_options"] = state.get("last_shown_bundle_options", []) + [
-                        {"label": "Casual Date Night", "description": "A laid-back evening with dinner and flowers, no limo.", "categories": ["flowers", "restaurant"]},
-                        {"label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers.", "categories": ["restaurant", "limo", "flowers"]},
-                    ]
+                _debug_log("loop.py:halt_preview_opts", "Halt & Preview options (from intent only)", {"opts_count": len(opts_list), "opts_labels": [o.get("option_label") for o in opts_list]}, "H1")
 
     # Pass fulfillment context and missing required fields (configurable from admin/bundle/KB) so frontend can block checkout until provided
     required_fields_list = state.get("required_fulfillment_fields") or list(DEFAULT_FULFILLMENT_FIELDS)

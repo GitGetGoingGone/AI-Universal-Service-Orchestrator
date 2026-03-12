@@ -200,6 +200,26 @@ type Config = {
     animation_speed_ms?: number;
   };
   thinking_messages?: Record<string, string>;
+  intent_heuristic_config?: {
+    probe_keywords?: string[];
+    unrelated_phrases?: string[];
+    open_ended_product_patterns?: string[];
+    date_time_words?: string[];
+    more_options_phrases?: string[];
+    composite_signals?: string[];
+    short_answer_exclude_words?: string[];
+    composite_patterns?: Array<{
+      pattern: string;
+      search_queries: string[];
+      experience_name: string;
+      proposed_plan: string[];
+    }>;
+    simple_discover_keywords?: string[];
+    discover_with_probe_keywords?: string[];
+    location_like_words?: string[];
+    remove_patterns?: Array<{ pattern: string; category_key: string }>;
+    cat_to_label?: Record<string, string>;
+  };
 };
 
 function upsellSurgeRulesWithDefaults(
@@ -216,6 +236,38 @@ function upsellSurgeRulesWithDefaults(
   };
 }
 
+function defaultIntentHeuristicConfig(): NonNullable<Config["intent_heuristic_config"]> {
+  return {
+    probe_keywords: ["budget", "dietary", "preferences", "location", "what date", "occasion", "add flowers", "add something", "?"],
+    unrelated_phrases: ["show more options", "more options", "other options", "different options", "you suggest", "suggest", "whatever", "anything"],
+    open_ended_product_patterns: ["what\\s+products?\\s+(do\\s+you\\s+)?have", "what\\s+do\\s+you\\s+have", "what('s|\\s+is)\\s+available", "show\\s+me\\s+(what('s|\\s+you\\s+have)|options|everything)", "what\\s+can\\s+you\\s+(do|offer|get)", "what\\s+options?\\s+(do\\s+you\\s+)?have", "what\\s+(do\\s+you\\s+)?(sell|offer)", "do\\s+you\\s+have\\s+(any\\s+)?(products?|options?)", "show\\s+(me\\s+)?(your\\s+)?(products?|stuff|things|catalog)", "list\\s+(all\\s+)?(your\\s+)?(products?|options?)"],
+    date_time_words: ["tomorrow", "today", "tonight", "this weekend", "this week", "next week", "next weekend", "friday", "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "anytime", "whenever", "flexible"],
+    more_options_phrases: ["more options", "other options", "different options", "any other", "do you have more", "show more", "got anything else", "anything else", "other choices", "alternatives"],
+    composite_signals: ["date night", "total:", "add this bundle", "add this", "curated", "option 1 of", "plan a perfect"],
+    short_answer_exclude_words: ["no", "any", "whatever", "surprise", "you choose"],
+    composite_patterns: [
+      { pattern: "date\\s*night|plan\\s*a\\s*date|romantic\\s*evening", search_queries: ["flowers", "dinner", "limo"], experience_name: "date night", proposed_plan: ["Flowers", "Dinner", "Limo"] },
+      { pattern: "birthday\\s*party|birthday\\s*celebration", search_queries: ["cake", "flowers", "gifts"], experience_name: "birthday party", proposed_plan: ["Cake", "Flowers", "Gifts"] },
+      { pattern: "picnic", search_queries: ["basket", "blanket", "food"], experience_name: "picnic", proposed_plan: ["Basket", "Blanket", "Food"] },
+      { pattern: "baby\\s*shower", search_queries: ["cake", "decorations", "gifts"], experience_name: "baby shower", proposed_plan: ["Cake", "Decorations", "Gifts"] },
+    ],
+    simple_discover_keywords: ["gift", "gifts"],
+    discover_with_probe_keywords: ["gift", "birthday"],
+    location_like_words: ["downtown", "midtown", "uptown", "dallas", "nyc", "brooklyn", "manhattan", "houston", "austin", "chicago", "la", "sf", "seattle", "boston", "miami", "near me", "around me", "here", "local"],
+    remove_patterns: [
+      { pattern: "\\bno\\s+limo\\b|remove\\s+(?:the\\s+)?limo|without\\s+(?:the\\s+)?limo|skip\\s+limo", category_key: "limo" },
+      { pattern: "\\bno\\s+flowers\\b|remove\\s+(?:the\\s+)?flowers|without\\s+flowers|skip\\s+flowers|don'?t\\s+want\\s+flowers", category_key: "flowers" },
+      { pattern: "\\bno\\s+dinner\\b|remove\\s+(?:the\\s+)?dinner|without\\s+dinner|skip\\s+dinner", category_key: "dinner" },
+      { pattern: "\\bno\\s+chocolates\\b|remove\\s+(?:the\\s+)?chocolates|without\\s+chocolates|skip\\s+chocolates", category_key: "chocolates" },
+      { pattern: "\\bno\\s+cake\\b|remove\\s+(?:the\\s+)?cake|without\\s+cake|skip\\s+cake", category_key: "cake" },
+      { pattern: "\\bno\\s+movies\\b|remove\\s+(?:the\\s+)?movies|without\\s+movies|skip\\s+movies", category_key: "movies" },
+      { pattern: "\\bno\\s+gifts\\b|remove\\s+(?:the\\s+)?gifts|without\\s+gifts", category_key: "gifts" },
+      { pattern: "\\bno\\s+decorations\\b|remove\\s+(?:the\\s+)?decorations|without\\s+decorations", category_key: "decorations" },
+    ],
+    cat_to_label: { limo: "Limo", flowers: "Flowers", dinner: "Dinner", chocolates: "Chocolates", cake: "Cake", movies: "Movies", gifts: "Gifts", decorations: "Decorations", basket: "Basket", blanket: "Blanket", food: "Food" },
+  };
+}
+
 export function ConfigEditor() {
   const [config, setConfig] = useState<Config>({});
   const [loading, setLoading] = useState(true);
@@ -229,8 +281,9 @@ export function ConfigEditor() {
   const [sponsorshipExpanded, setSponsorshipExpanded] = useState(true);
   const [compositeDiscoveryExpanded, setCompositeDiscoveryExpanded] = useState(true);
   const [upsellSurgeExpanded, setUpsellSurgeExpanded] = useState(false);
+  const [intentHeuristicsExpanded, setIntentHeuristicsExpanded] = useState(false);
   const [thinkingProgressExpanded, setThinkingProgressExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState<"general" | "llm" | "discovery" | "integrations" | "embeddings">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "llm" | "discovery" | "prompts" | "integrations" | "embeddings">("general");
   const [embeddingStatus, setEmbeddingStatus] = useState<{
     embedding_configured?: boolean;
     products?: { total: number; with_embedding: number; without_embedding: number };
@@ -422,6 +475,10 @@ export function ConfigEditor() {
             experience_flow_rules: [],
           },
           retry_phrases: Array.isArray(data.retry_phrases) ? data.retry_phrases : [],
+          intent_heuristic_config:
+            data.intent_heuristic_config && typeof data.intent_heuristic_config === "object"
+              ? data.intent_heuristic_config
+              : defaultIntentHeuristicConfig(),
           enable_composite_bundle_suggestion: data.enable_composite_bundle_suggestion ?? true,
           force_model_based_intent: data.force_model_based_intent ?? false,
           upsell_surge_rules: data.upsell_surge_rules ?? { enabled: false, upsell_rules: [], surge_rules: [], promo_rules: [] },
@@ -552,6 +609,7 @@ export function ConfigEditor() {
           sponsorship_pricing: config.sponsorship_pricing,
           composite_discovery_config: config.composite_discovery_config,
           retry_phrases: (config.retry_phrases ?? []).filter((p) => typeof p === "string" && p.trim().length > 0),
+          intent_heuristic_config: config.intent_heuristic_config ?? defaultIntentHeuristicConfig(),
           enable_composite_bundle_suggestion: config.enable_composite_bundle_suggestion,
           force_model_based_intent: config.force_model_based_intent,
           upsell_surge_rules: config.upsell_surge_rules,
@@ -571,8 +629,9 @@ export function ConfigEditor() {
 
   const TABS = [
     { id: "general" as const, label: "General", description: "Commission, discovery threshold, and feature flags" },
-    { id: "llm" as const, label: "LLM & AI", description: "Providers, image generation, model interactions" },
-    { id: "discovery" as const, label: "Discovery & Ranking", description: "Partner ranking, sponsorship, composite discovery" },
+    { id: "llm" as const, label: "LLM & AI", description: "Providers, image generation, model settings" },
+    { id: "discovery" as const, label: "Discovery & Ranking", description: "Partner ranking, sponsorship, composite discovery, intent heuristics vs LLM" },
+    { id: "prompts" as const, label: "Prompts", description: "System prompts per interaction type (intent, engagement, planner, etc.)" },
     { id: "integrations" as const, label: "Integrations", description: "External APIs for events, weather, web search" },
     { id: "embeddings" as const, label: "Embeddings", description: "Semantic search: product and KB article embedding status and backfill" },
   ];
@@ -803,22 +862,8 @@ export function ConfigEditor() {
       {activeTab === "llm" && (
         <div className="space-y-6">
           <p className="text-sm text-[rgb(var(--color-text-secondary))]">
-            LLM providers, image generation, model interactions, and creativity settings.
+            LLM providers, image generation, and creativity (temperature). Edit system prompts in the <strong>Prompts</strong> tab.
           </p>
-
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="force_model_intent"
-          checked={config.force_model_based_intent ?? false}
-          onChange={(e) =>
-            setConfig((c) => ({ ...c, force_model_based_intent: e.target.checked }))
-          }
-        />
-        <label htmlFor="force_model_intent" className="text-sm">
-          Force model-based intent (ChatGPT/Gemini) — Use LLM only for intent; no heuristic fallback. Ensures probing data (date, budget, preferences) are captured. Requires LLM configured and ChatGPT/Gemini to send <code className="text-xs">messages</code>.
-        </label>
-      </div>
 
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
@@ -1547,25 +1592,26 @@ export function ConfigEditor() {
         </div>
       )}
 
-      {activeTab === "llm" && (
-        <>
+      {activeTab === "prompts" && (
+        <div className="space-y-6">
+          <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+            System prompts per interaction type (intent, engagement, planner, etc.). These drive the <strong>LLM path</strong> when a provider is configured. Empty prompt uses code default. Use <strong>Try</strong> to test with the active model.
+          </p>
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
           onClick={() => setModelInteractionsExpanded((e) => !e)}
           className="flex items-center justify-between w-full text-left font-medium"
         >
-          Model Interactions
+          Model Interactions (prompts)
           <span className="text-sm text-[rgb(var(--color-text-secondary))]">
             {modelInteractionsExpanded ? "−" : "+"}
           </span>
         </button>
         {modelInteractionsExpanded && (
           <div className="mt-4 space-y-6">
-            <p className="text-sm text-[rgb(var(--color-text-secondary))]">
-              Edit system prompts per interaction type. Changes apply without redeployment. Empty prompt
-              uses code default. Use <strong>Try</strong> to test each interaction with the active model—verifies connection and helps tweak prompts.
-              For discover types, the test sends sample product data (Product data, Allowed CTAs) in the same format as real chat.
+            <p className="text-xs text-[rgb(var(--color-text-secondary))]">
+              For discover types, the test sends sample product data in the same format as real chat.
             </p>
             {modelInteractions.map((m) => (
               <div
@@ -1739,7 +1785,10 @@ export function ConfigEditor() {
           </div>
         )}
       </div>
+        </div>
+      )}
 
+      {activeTab === "llm" && (
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button
           type="button"
@@ -1784,7 +1833,6 @@ export function ConfigEditor() {
           </div>
         )}
       </div>
-        </>
       )}
 
       {activeTab === "discovery" && (
@@ -2367,6 +2415,470 @@ export function ConfigEditor() {
               >
                 + Add retry phrase
               </button>
+            </div>
+
+            <div className="border-t border-[rgb(var(--color-border))] pt-4 mt-4">
+              <p className="text-sm font-medium mb-2">Intent LLM (when provider is configured)</p>
+              <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-3">
+                When an LLM provider is active, intent is classified by the model. Edit the intent system prompt in the <strong>Prompts</strong> tab.
+              </p>
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="checkbox"
+                  id="force_model_intent"
+                  checked={config.force_model_based_intent ?? false}
+                  onChange={(e) =>
+                    setConfig((c) => ({ ...c, force_model_based_intent: e.target.checked }))
+                  }
+                  className="rounded border border-[rgb(var(--color-border))]"
+                />
+                <label htmlFor="force_model_intent" className="text-sm">
+                  Force model-based intent — Use LLM only; no heuristic fallback on failure. Ensures probing (date, budget) is captured.
+                </label>
+              </div>
+              <p className="text-sm font-medium mb-2">Intent heuristics (fallback only)</p>
+              <button
+                type="button"
+                onClick={() => setIntentHeuristicsExpanded((e) => !e)}
+                className="flex items-center justify-between w-full text-left font-medium"
+              >
+                Heuristic patterns (used when LLM is off or fails)
+                <span className="text-sm text-[rgb(var(--color-text-secondary))]">
+                  {intentHeuristicsExpanded ? "−" : "+"}
+                </span>
+              </button>
+              {intentHeuristicsExpanded && (
+                <div className="mt-4 space-y-4">
+                  <p className="text-sm text-[rgb(var(--color-text-secondary))]">
+                    These values drive the intent-service heuristic fallback when the LLM is not configured or fails. Update them to match your domain (e.g. replace example keywords like &quot;gift&quot;, &quot;birthday&quot; with your own). No hardcoding in code—all editable here.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Probe keywords</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      Phrases in the last bot message that indicate we asked for details (budget, location, date). One per line.
+                    </p>
+                    <textarea
+                      value={(config.intent_heuristic_config?.probe_keywords ?? []).join("\n")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            probe_keywords: e.target.value.split(/\n/).map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Open-ended product patterns (regex)</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      Regex patterns that mean &quot;what do you have&quot; — trigger browse/probe, not product search. One per line.
+                    </p>
+                    <textarea
+                      value={(config.intent_heuristic_config?.open_ended_product_patterns ?? []).join("\n")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            open_ended_product_patterns: e.target.value.split(/\n/).map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Date/time words</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      Words that indicate a date/time answer to probing. Comma or newline.
+                    </p>
+                    <textarea
+                      value={(config.intent_heuristic_config?.date_time_words ?? []).join(", ")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            date_time_words: e.target.value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">More options phrases</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      User says &quot;more options&quot; / &quot;other choices&quot; etc. Comma or newline.
+                    </p>
+                    <textarea
+                      value={(config.intent_heuristic_config?.more_options_phrases ?? []).join(", ")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            more_options_phrases: e.target.value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Composite signals</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      Phrases in last suggestion or assistant message that indicate composite context (e.g. &quot;date night&quot;, &quot;add this bundle&quot;). Comma or newline.
+                    </p>
+                    <textarea
+                      value={(config.intent_heuristic_config?.composite_signals ?? []).join(", ")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            composite_signals: e.target.value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Short answer exclude words</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      When user gives a short answer, treat as location only if it does not contain these. Comma or newline.
+                    </p>
+                    <input
+                      type="text"
+                      value={(config.intent_heuristic_config?.short_answer_exclude_words ?? []).join(", ")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            short_answer_exclude_words: e.target.value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Unrelated phrases</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      User replies that mean &quot;show other options&quot; instead of answering the probe (e.g. &quot;show more options&quot;, &quot;whatever&quot;). One per line.
+                    </p>
+                    <textarea
+                      value={(config.intent_heuristic_config?.unrelated_phrases ?? []).join("\n")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            unrelated_phrases: e.target.value.split(/\n/).map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Simple discover keywords</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      Keywords that imply a simple product search (go straight to discover, no composite probing). Comma-separated.
+                    </p>
+                    <input
+                      type="text"
+                      value={(config.intent_heuristic_config?.simple_discover_keywords ?? []).join(", ")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            simple_discover_keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      placeholder="e.g. gift, gifts"
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Discover with probe keywords</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      Keywords that imply discover but may need probing (e.g. date/area). Comma-separated.
+                    </p>
+                    <input
+                      type="text"
+                      value={(config.intent_heuristic_config?.discover_with_probe_keywords ?? []).join(", ")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            discover_with_probe_keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      placeholder="e.g. gift, birthday"
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Location-like words</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      Short answers that are treated as location only (not as product search). One per line or comma-separated.
+                    </p>
+                    <textarea
+                      value={(config.intent_heuristic_config?.location_like_words ?? []).join(", ")}
+                      onChange={(e) =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            location_like_words: e.target.value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+                          },
+                        }))
+                      }
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Composite patterns</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-2">
+                      Regex pattern + search categories + experience name + proposed_plan labels. When user message matches a pattern, intent is discover_composite.
+                    </p>
+                    {(config.intent_heuristic_config?.composite_patterns ?? []).map((cp, i) => (
+                      <div key={i} className="mb-3 p-3 rounded border border-[rgb(var(--color-border))] space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-medium text-[rgb(var(--color-text-secondary))]">Pattern {i + 1}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfig((c) => ({
+                                ...c,
+                                intent_heuristic_config: {
+                                  ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                                  composite_patterns: (c.intent_heuristic_config?.composite_patterns ?? []).filter((_, j) => j !== i),
+                                },
+                              }))
+                            }
+                            className="text-red-500 hover:underline text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="Regex pattern"
+                          value={cp.pattern}
+                          onChange={(e) =>
+                            setConfig((c) => ({
+                              ...c,
+                              intent_heuristic_config: {
+                                ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                                composite_patterns: (c.intent_heuristic_config?.composite_patterns ?? []).map((p, j) =>
+                                  j === i ? { ...p, pattern: e.target.value } : p
+                                ),
+                              },
+                            }))
+                          }
+                          className="w-full px-2 py-1.5 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm font-mono"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Search queries (comma)"
+                          value={(cp.search_queries ?? []).join(", ")}
+                          onChange={(e) =>
+                            setConfig((c) => ({
+                              ...c,
+                              intent_heuristic_config: {
+                                ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                                composite_patterns: (c.intent_heuristic_config?.composite_patterns ?? []).map((p, j) =>
+                                  j === i ? { ...p, search_queries: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : p
+                                ),
+                              },
+                            }))
+                          }
+                          className="w-full px-2 py-1.5 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Experience name"
+                            value={cp.experience_name ?? ""}
+                            onChange={(e) =>
+                              setConfig((c) => ({
+                                ...c,
+                                intent_heuristic_config: {
+                                  ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                                  composite_patterns: (c.intent_heuristic_config?.composite_patterns ?? []).map((p, j) =>
+                                    j === i ? { ...p, experience_name: e.target.value } : p
+                                  ),
+                                },
+                              }))
+                            }
+                            className="flex-1 px-2 py-1.5 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Proposed plan (comma)"
+                            value={(cp.proposed_plan ?? []).join(", ")}
+                            onChange={(e) =>
+                              setConfig((c) => ({
+                                ...c,
+                                intent_heuristic_config: {
+                                  ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                                  composite_patterns: (c.intent_heuristic_config?.composite_patterns ?? []).map((p, j) =>
+                                    j === i ? { ...p, proposed_plan: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : p
+                                  ),
+                                },
+                              }))
+                            }
+                            className="flex-1 px-2 py-1.5 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            composite_patterns: [...(c.intent_heuristic_config?.composite_patterns ?? []), { pattern: "", search_queries: [], experience_name: "", proposed_plan: [] }],
+                          },
+                        }))
+                      }
+                      className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                    >
+                      + Add composite pattern
+                    </button>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Remove patterns (refinement)</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-2">
+                      Regex + category_key for &quot;no X&quot; / &quot;remove X&quot; refinement. One row per pattern.
+                    </p>
+                    {(config.intent_heuristic_config?.remove_patterns ?? []).map((rp, i) => (
+                      <div key={i} className="flex gap-2 items-center mb-2">
+                        <input
+                          type="text"
+                          placeholder="Pattern (regex)"
+                          value={rp.pattern}
+                          onChange={(e) =>
+                            setConfig((c) => ({
+                              ...c,
+                              intent_heuristic_config: {
+                                ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                                remove_patterns: (c.intent_heuristic_config?.remove_patterns ?? []).map((p, j) =>
+                                  j === i ? { ...p, pattern: e.target.value } : p
+                                ),
+                              },
+                            }))
+                          }
+                          className="flex-1 px-2 py-1.5 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm font-mono"
+                        />
+                        <input
+                          type="text"
+                          placeholder="category_key"
+                          value={rp.category_key}
+                          onChange={(e) =>
+                            setConfig((c) => ({
+                              ...c,
+                              intent_heuristic_config: {
+                                ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                                remove_patterns: (c.intent_heuristic_config?.remove_patterns ?? []).map((p, j) =>
+                                  j === i ? { ...p, category_key: e.target.value } : p
+                                ),
+                              },
+                            }))
+                          }
+                          className="w-28 px-2 py-1.5 rounded border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfig((c) => ({
+                              ...c,
+                              intent_heuristic_config: {
+                                ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                                remove_patterns: (c.intent_heuristic_config?.remove_patterns ?? []).filter((_, j) => j !== i),
+                              },
+                            }))
+                          }
+                          className="text-red-500 hover:underline text-sm"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            remove_patterns: [...(c.intent_heuristic_config?.remove_patterns ?? []), { pattern: "", category_key: "" }],
+                          },
+                        }))
+                      }
+                      className="text-sm text-[rgb(var(--color-primary))] hover:underline"
+                    >
+                      + Add remove pattern
+                    </button>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Category to label (proposed_plan)</label>
+                    <p className="text-xs text-[rgb(var(--color-text-secondary))] mb-1">
+                      Map category key to human-readable label. One per line: key: Label (e.g. limo: Limo).
+                    </p>
+                    <textarea
+                      value={
+                        config.intent_heuristic_config?.cat_to_label
+                          ? Object.entries(config.intent_heuristic_config.cat_to_label)
+                              .map(([k, v]) => `${k}: ${v}`)
+                              .join("\n")
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const cat_to_label: Record<string, string> = {};
+                        e.target.value.split(/\n/).forEach((line) => {
+                          const idx = line.indexOf(":");
+                          if (idx > 0) {
+                            const k = line.slice(0, idx).trim();
+                            const v = line.slice(idx + 1).trim();
+                            if (k) cat_to_label[k] = v || k;
+                          }
+                        });
+                        setConfig((c) => ({
+                          ...c,
+                          intent_heuristic_config: {
+                            ...(c.intent_heuristic_config ?? defaultIntentHeuristicConfig()),
+                            cat_to_label,
+                          },
+                        }));
+                      }}
+                      rows={4}
+                      placeholder="limo: Limo\nflowers: Flowers"
+                      className="w-full px-3 py-2 rounded-md border border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))] text-sm font-mono"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

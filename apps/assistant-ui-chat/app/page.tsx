@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import {
   AssistantRuntimeProvider,
@@ -331,9 +332,9 @@ function ChatContent({
     <AssistantRuntimeProvider runtime={runtime}>
       <GatewayActionProvider onAction={handleAction}>
         <ThreadMetadataListener onMetadata={onThreadMetadata} />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col">
-            <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <ThreadPrimitive.Root className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto flex min-h-full max-w-2xl flex-col px-4 pb-4">
                 <AuiIf condition={(s) => s.thread.isEmpty}>
                   <div className="flex flex-1 flex-col items-center justify-center gap-6 py-12">
@@ -585,13 +586,13 @@ export default function ChatPage() {
   const initialBundleId = loadedThread?.id === threadId ? loadedThread.bundleId : null;
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
+    <div className="flex h-screen min-h-0 bg-[var(--background)]">
       <aside
-        className={`flex shrink-0 flex-col border-r border-[var(--border)] bg-[var(--sidebar)] text-[var(--sidebar-foreground)] transition-[width] duration-200 ease-out ${
+        className={`flex h-full min-h-0 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--sidebar)] text-[var(--sidebar-foreground)] transition-[width] duration-200 ease-out ${
           sidebarOpen ? "w-56" : "w-14"
         }`}
       >
-        <div className="flex h-14 min-w-0 flex-shrink-0 items-center gap-2 border-b border-[var(--border)] px-2">
+        <div className="flex h-14 min-h-14 shrink-0 items-center gap-2 border-b border-[var(--border)] px-2">
           <button
             type="button"
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -606,10 +607,9 @@ export default function ChatPage() {
               )}
             </svg>
           </button>
-          <span className={`truncate text-sm font-medium ${sidebarOpen ? "" : "hidden"}`}>Atreyai</span>
-          <span className={`text-sm font-semibold ${sidebarOpen ? "hidden" : ""}`} title="Atreyai">A</span>
+          {sidebarOpen && <span className="truncate text-sm font-medium">Atreyai</span>}
         </div>
-        <div className={`flex-1 overflow-y-auto p-2 ${sidebarOpen ? "" : "hidden"}`}>
+        <div className={`min-h-0 flex-1 overflow-y-auto p-2 ${sidebarOpen ? "" : "hidden"}`}>
           <button
             type="button"
             onClick={handleNewChat}
@@ -620,7 +620,7 @@ export default function ChatPage() {
             </svg>
             New chat
           </button>
-          <div className="mt-2 min-h-0 flex-1">
+          <div className="mt-2">
             <p className="mb-2 px-2 text-xs font-medium uppercase tracking-wider text-[var(--muted)]">Conversations</p>
             {loadingThread ? (
               <p className="px-3 py-2 text-sm text-[var(--muted)]">Loading…</p>
@@ -656,9 +656,36 @@ export default function ChatPage() {
               </ul>
             )}
           </div>
+          <div className="mt-auto border-t border-[var(--border)] pt-2">
+            <Link
+              href="/settings"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-white/10"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Settings
+            </Link>
+          </div>
         </div>
       </aside>
-      <div key={chatKey} className="flex min-w-0 flex-1 flex-col">
+      <div key={chatKey} className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {!sidebarOpen && (
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--background)] px-4">
+            <span className="text-sm font-semibold text-[var(--foreground)]">Atreyai</span>
+            <Link
+              href="/settings"
+              className="rounded p-2 text-[var(--muted)] hover:bg-[var(--border)]/50 hover:text-[var(--foreground)]"
+              aria-label="Settings"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </Link>
+          </div>
+        )}
         <ChatContent
           threadId={threadId}
           initialMessages={initialMessages}

@@ -77,6 +77,11 @@ export async function PATCH(request: Request) {
       updates.enable_composite_bundle_suggestion = Boolean(body.enable_composite_bundle_suggestion);
     if (body.force_model_based_intent != null)
       updates.force_model_based_intent = Boolean(body.force_model_based_intent);
+    if (body.intent_heuristic_config !== undefined)
+      updates.intent_heuristic_config =
+        body.intent_heuristic_config && typeof body.intent_heuristic_config === "object"
+          ? body.intent_heuristic_config
+          : null;
     if (body.upsell_surge_rules !== undefined)
       updates.upsell_surge_rules =
         body.upsell_surge_rules && typeof body.upsell_surge_rules === "object"
