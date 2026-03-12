@@ -736,6 +736,9 @@ export function ChatPage(props: ChatPageProps = {}) {
         if (bundleId) payload.bundle_id = bundleId;
         if (latestOrder?.id) payload.order_id = latestOrder.id;
         payload.stream = true;
+        // #region agent log
+        fetch('http://127.0.0.1:7758/ingest/0e999260-4313-4179-a62a-e39106c99b2e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb0131'},body:JSON.stringify({sessionId:'fb0131',location:'ChatPage.tsx:sendMessage',message:'Sending chat message',data:{hasBundleId:!!bundleId,bundleId:payload.bundle_id,messagesCount:payload.messages?.length,userMessage:userMessage.slice(0,80)},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
         if (wantTrace) payload.debug = true;
         // Refinement (e.g. "no limo") is restored server-side from thread DB; no need to send from client
 
@@ -1643,6 +1646,9 @@ export function ChatPage(props: ChatPageProps = {}) {
                               if (cta.action === "add_to_bundle") {
                                 const first = m.ctaContext?.suggested_bundle_options?.[0];
                                 const productIds = first?.product_ids;
+                                // #region agent log
+                                fetch('http://127.0.0.1:7758/ingest/0e999260-4313-4179-a62a-e39106c99b2e',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fb0131'},body:JSON.stringify({sessionId:'fb0131',location:'ChatPage.tsx:add_to_bundle_click',message:'Add to bundle CTA clicked',data:{hasProductIds:!!productIds?.length,productIdsCount:productIds?.length??0,hasBundleId:!!bundleId,firstOptionLabel:first?.option_label},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+                                // #endregion
                                 if (productIds?.length) {
                                   handleAction({ action: "add_bundle_bulk", product_ids: productIds, option_label: first?.option_label });
                                 } else if (bundleId) {

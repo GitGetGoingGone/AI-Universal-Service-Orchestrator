@@ -54,6 +54,15 @@ __all__ = [
     "create_experience_session_leg_override",
     "list_experience_sessions_admin",
     "get_experience_session_admin",
+    "get_partners_available_to_customize",
+    "get_partner_design_chat_url",
+    "transition_legs_to_in_customization",
+    "update_experience_session_leg_design_started",
+    "get_sla_legs_for_re_sourcing",
+    "create_sla_re_sourcing_pending",
+    "get_sla_re_sourcing_pending_by_thread",
+    "clear_sla_re_sourcing_pending",
+    "update_experience_session_customization_partner",
 ]
 
 _client: Optional[Client] = None
@@ -885,9 +894,30 @@ async def get_partner_ratings_map(partner_ids: List[str]) -> Dict[str, float]:
         return {}
 
 
+def _valid_uuids(ids: List[str]) -> List[str]:
+    """Filter to IDs that are valid UUIDs (product_sponsorships.product_id is UUID; UCP/Shopify gids are not)."""
+    out = []
+    for s in ids:
+        if not s or not isinstance(s, str):
+            continue
+        s = s.strip()
+        if not s:
+            continue
+        try:
+            uuid_module.UUID(s)
+            out.append(s)
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
 async def get_active_sponsorships(product_ids: List[str]) -> set:
-    """Get product IDs with active sponsorships (start_at <= now <= end_at, status=active)."""
+    """Get product IDs with active sponsorships (start_at <= now <= end_at, status=active).
+    Only queries for valid UUID product_ids; UCP/Shopify external IDs (e.g. gid://shopify/...) are skipped to avoid 400."""
     if not product_ids:
+        return set()
+    uuids = _valid_uuids(product_ids)
+    if not uuids:
         return set()
     client = get_supabase()
     if not client:
@@ -898,7 +928,7 @@ async def get_active_sponsorships(product_ids: List[str]) -> set:
         result = (
             client.table("product_sponsorships")
             .select("product_id")
-            .in_("product_id", product_ids)
+            .in_("product_id", uuids)
             .eq("status", "active")
             .lte("start_at", now)
             .gte("end_at", now)
@@ -1622,7 +1652,11 @@ async def get_experience_session_legs(session_id: str) -> List[Dict[str, Any]]:
     try:
         result = (
             client.table("experience_session_legs")
-            .select("id, partner_id, product_id, status, shopify_draft_order_id, created_at, updated_at")
+            .select(
+                "id, partner_id, product_id, status, shopify_draft_order_id, "
+                "external_order_id, external_reservation_id, vendor_type, allows_modification, "
+                "design_started_at, customization_partner_id, created_at, updated_at"
+            )
             .eq("experience_session_id", str(session_id))
             .order("created_at")
             .execute()
@@ -1785,6 +1819,243 @@ async def get_experience_session_admin(session_id: str) -> Optional[Dict[str, An
         return session
     except Exception:
         return None
+
+
+async def get_partners_available_to_customize(partner_ids: List[str]) -> set:
+    """Return set of partner_ids that have available_to_customize (via shopify_curated_partners -> internal_agent_registry)."""
+    if not partner_ids:
+        return set()
+    client = get_supabase()
+    if not client:
+        return set()
+    try:
+        result = (
+            client.table("shopify_curated_partners")
+            .select("partner_id, internal_agent_registry(available_to_customize)")
+            .in_("partner_id", partner_ids)
+            .execute()
+        )
+        out = set()
+        for row in _table_data(result.data):
+            reg = row.get("internal_agent_registry") if isinstance(row.get("internal_agent_registry"), dict) else {}
+            if reg.get("available_to_customize"):
+                out.add(str(row.get("partner_id", "")))
+        return out
+    except Exception:
+        return set()
+
+
+async def get_partner_design_chat_url(partner_id: str) -> Optional[str]:
+    """Get design_chat_url for partner (shopify_curated_partners.design_chat_url or internal_agent_registry.design_chat_url)."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        scp = (
+            client.table("shopify_curated_partners")
+            .select("design_chat_url, internal_agent_registry_id")
+            .eq("partner_id", partner_id)
+            .limit(1)
+            .execute()
+        )
+        row = _table_row(scp.data)
+        if row and row.get("design_chat_url"):
+            return str(row["design_chat_url"]).strip()
+        if row and row.get("internal_agent_registry_id"):
+            reg = (
+                client.table("internal_agent_registry")
+                .select("design_chat_url")
+                .eq("id", row["internal_agent_registry_id"])
+                .limit(1)
+                .execute()
+            )
+            r = _table_row(reg.data)
+            if r and r.get("design_chat_url"):
+                return str(r["design_chat_url"]).strip()
+        return None
+    except Exception:
+        return None
+
+
+async def transition_legs_to_in_customization(thread_id: str, order_id: str) -> int:
+    """After payment: set legs to in_customization when partner has available_to_customize. Returns count updated."""
+    client = get_supabase()
+    if not client:
+        return 0
+    try:
+        sess = (
+            client.table("experience_sessions")
+            .select("id")
+            .eq("thread_id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not sess.data or not sess.data[0]:
+            return 0
+        session_id = sess.data[0].get("id")
+        legs = (
+            client.table("experience_session_legs")
+            .select("id, partner_id")
+            .eq("experience_session_id", session_id)
+            .eq("status", "ready")
+            .execute()
+        )
+        if not legs.data:
+            return 0
+        partner_ids = list({str(l["partner_id"]) for l in legs.data if l.get("partner_id")})
+        customizable = await get_partners_available_to_customize(partner_ids)
+        now = datetime.now(timezone.utc).isoformat()
+        count = 0
+        for leg in legs.data:
+            if str(leg.get("partner_id", "")) in customizable:
+                client.table("experience_session_legs").update({
+                    "status": "in_customization",
+                    "updated_at": now,
+                }).eq("id", leg["id"]).execute()
+                count += 1
+        return count
+    except Exception:
+        return 0
+
+
+async def update_experience_session_leg_design_started(leg_id: str) -> bool:
+    """Set design_started_at and allows_modification=false (Point of No Return)."""
+    client = get_supabase()
+    if not client:
+        return False
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        client.table("experience_session_legs").update({
+            "design_started_at": now,
+            "allows_modification": False,
+            "updated_at": now,
+        }).eq("id", leg_id).execute()
+        return True
+    except Exception:
+        return False
+
+
+async def get_sla_legs_for_re_sourcing() -> List[Dict[str, Any]]:
+    """Find legs where SLA exceeded: ready/in_customization, partner has sla_response_hours, design_started_at NULL, re_sourcing_state not awaiting."""
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        from datetime import timedelta
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        legs = (
+            client.table("experience_session_legs")
+            .select("id, experience_session_id, partner_id, product_id, status, re_sourcing_state, created_at")
+            .in_("status", ["ready", "in_customization"])
+            .is_("design_started_at", "null")
+            .neq("re_sourcing_state", "awaiting_user_response")
+            .execute()
+        )
+        out = []
+        for leg in legs.data or []:
+            if leg.get("re_sourcing_state") == "awaiting_user_response":
+                continue
+            out.append(dict(leg))
+        return out
+    except Exception:
+        return []
+
+
+async def create_sla_re_sourcing_pending(leg_id: str, alternatives_snapshot: List[Dict[str, Any]]) -> Optional[str]:
+    """Create sla_re_sourcing_pending record. Returns id."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        result = client.table("sla_re_sourcing_pending").insert({
+            "experience_session_leg_id": leg_id,
+            "alternatives_snapshot": alternatives_snapshot,
+        }).execute()
+        row = result.data[0] if result.data else None
+        if row:
+            client.table("experience_session_legs").update({
+                "re_sourcing_state": "awaiting_user_response",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", leg_id).execute()
+        return str(row["id"]) if row else None
+    except Exception:
+        return None
+
+
+async def get_sla_re_sourcing_pending_by_thread(thread_id: str) -> Optional[Dict[str, Any]]:
+    """Get pending SLA re-sourcing for thread (session -> legs -> pending)."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        sess = (
+            client.table("experience_sessions")
+            .select("id")
+            .eq("thread_id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not sess.data or not sess.data[0]:
+            return None
+        session_id = sess.data[0].get("id")
+        legs = (
+            client.table("experience_session_legs")
+            .select("id")
+            .eq("experience_session_id", session_id)
+            .eq("re_sourcing_state", "awaiting_user_response")
+            .execute()
+        )
+        if not legs.data:
+            return None
+        leg_id = legs.data[0].get("id")
+        pending = (
+            client.table("sla_re_sourcing_pending")
+            .select("*")
+            .eq("experience_session_leg_id", leg_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return _table_row(pending.data)
+    except Exception:
+        return None
+
+
+async def clear_sla_re_sourcing_pending(leg_id: str) -> bool:
+    """Clear re_sourcing_state and delete pending record."""
+    client = get_supabase()
+    if not client:
+        return False
+    try:
+        client.table("experience_session_legs").update({
+            "re_sourcing_state": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", leg_id).execute()
+        client.table("sla_re_sourcing_pending").delete().eq("experience_session_leg_id", leg_id).execute()
+        return True
+    except Exception:
+        return False
+
+
+async def update_experience_session_customization_partner(
+    session_id: str,
+    customization_partner_id: Optional[str],
+) -> bool:
+    """Set customization_partner_id on experience session (hybrid customization)."""
+    client = get_supabase()
+    if not client:
+        return False
+    try:
+        update = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        if customization_partner_id:
+            update["customization_partner_id"] = customization_partner_id
+        else:
+            update["customization_partner_id"] = None
+        client.table("experience_sessions").update(update).eq("id", session_id).execute()
+        return True
+    except Exception:
+        return False
 
 
 # --- Module 3: AI-First Discoverability ---

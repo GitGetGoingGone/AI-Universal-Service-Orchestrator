@@ -3,9 +3,24 @@
 import asyncio
 import json
 import logging
+import os
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 logger = logging.getLogger(__name__)
+
+# #region agent log
+def _chat_debug_log(location: str, message: str, data: dict, hypothesis_id: str = ""):
+    try:
+        _base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        log_path = os.path.join(_base, ".cursor", "debug-fb0131.log")
+        payload = {"sessionId": "fb0131", "location": location, "message": message, "data": data, "timestamp": __import__("time").time() * 1000}
+        if hypothesis_id:
+            payload["hypothesisId"] = hypothesis_id
+        with open(log_path, "a") as f:
+            f.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+# #endregion
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
@@ -17,6 +32,10 @@ from clients import (
     start_orchestration,
     create_standing_intent_via_api,
     register_thread_mapping,
+    design_chat_active,
+    design_chat_proxy,
+    get_sla_re_sourcing_pending,
+    execute_sla_re_sourcing,
 )
 from agentic.loop import run_agentic_loop
 from agentic.response import generate_engagement_response, stream_engagement_response
@@ -25,6 +44,11 @@ from packages.shared.json_ld.error import error_ld
 from packages.shared.discovery import NO_USER_INPUT_FALLBACK_MESSAGE
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
+
+
+async def _stream_design_chat_response(response_text: str, request_id: str):
+    """Yield SSE events for design chat response (non-streaming partner response)."""
+    yield f"event: done\ndata: {json.dumps({'data': {'summary': response_text, 'engagement': {}}, 'metadata': {'request_id': request_id}})}\n\n"
 
 
 def _effective_user_message(body: "ChatRequest") -> str:
@@ -94,6 +118,9 @@ async def _stream_chat_events(
 
     async def run_loop() -> None:
         try:
+            # #region agent log
+            _chat_debug_log("chat.py:request", "Chat request received", {"bundle_id": body.bundle_id, "thread_id": body.thread_id, "messages_count": len(body.messages or []), "effective_message": effective_user_message[:80]}, "H2")
+            # #endregion
             r = await run_agentic_loop(
                 effective_user_message,
                 user_id=user_id,
@@ -166,7 +193,11 @@ async def _stream_chat_events(
         if not use_adaptive_cards:
             res_data = result.get("data") or {}
             res_engagement = res_data.get("engagement") or {}
-            if res_engagement.get("suggested_bundle_options"):
+            opts = res_engagement.get("suggested_bundle_options") or []
+            # #region agent log
+            _chat_debug_log("chat.py:suggested_ctas", "Building suggested CTAs", {"opts_count": len(opts), "first_has_product_ids": bool(opts[0].get("product_ids")) if opts else None, "adding_add_to_bundle": bool(opts)}, "H1")
+            # #endregion
+            if opts:
                 suggested_ctas_stream.append({"label": "Add to bundle", "action": "add_to_bundle"})
             if body.bundle_id:
                 suggested_ctas_stream.append({"label": "View bundle", "action": "view_bundle", "bundle_id": body.bundle_id})
@@ -335,7 +366,17 @@ async def chat(
             force_model=force_model,
         )
 
-    async def _discover(query: str, limit: int = 20, location: Optional[str] = None, partner_id: Optional[str] = None, exclude_partner_id: Optional[str] = None, budget_max: Optional[int] = None, experience_tag: Optional[str] = None, experience_tags: Optional[List[str]] = None):
+    async def _discover(
+        query: str,
+        limit: int = 20,
+        location: Optional[str] = None,
+        partner_id: Optional[str] = None,
+        exclude_partner_id: Optional[str] = None,
+        budget_max: Optional[int] = None,
+        experience_tag: Optional[str] = None,
+        experience_tags: Optional[List[str]] = None,
+        explore_more: bool = False,
+    ):
         # Use central Discovery REST so cosmetics fallback (makeup, beauty, skincare) runs when query is cosmetics-like
         return await discover_products(
             query=query,
@@ -346,6 +387,7 @@ async def chat(
             budget_max=budget_max,
             experience_tag=experience_tag,
             experience_tags=experience_tags,
+            explore_more=explore_more,
         )
 
     async def _create_standing_intent(
@@ -362,8 +404,70 @@ async def chat(
             user_id=user_id,
         )
 
+    effective_message = _effective_user_message(body)
+
+    # SLA re-sourcing confirmation: user said yes/switch and we have pending
+    if body.thread_id:
+        try:
+            pending = await get_sla_re_sourcing_pending(body.thread_id)
+            if pending:
+                msg_lower = effective_message.strip().lower()
+                confirm_words = ("yes", "switch", "switch to", "confirm", "ok", "sure", "do it")
+                if any(msg_lower.startswith(w) or msg_lower == w for w in confirm_words):
+                    alts = pending.get("alternatives_snapshot") or []
+                    if alts:
+                        alt = alts[0]
+                        result = await execute_sla_re_sourcing(
+                            leg_id=pending.get("experience_session_leg_id", ""),
+                            alternative_partner_id=alt.get("partner_id", ""),
+                            alternative_product_id=alt.get("id", ""),
+                            alternative_price=float(alt.get("price", 0)),
+                        )
+                        if result.get("success"):
+                            response_text = result.get("narrative", "Your experience has been moved.")
+                            if stream:
+                                return StreamingResponse(
+                                    _stream_design_chat_response(response_text, request_id),
+                                    media_type="text/event-stream",
+                                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+                                )
+                            return {
+                                "data": {"summary": response_text, "engagement": {}},
+                                "metadata": {"api_version": "v1", "request_id": request_id},
+                            }
+        except Exception as e:
+            if "404" not in str(e):
+                logger.warning("SLA re-sourcing check failed: %s", e)
+
+    # Design chat proxy: when thread has legs in in_customization, forward to partner
+    if body.thread_id:
+        try:
+            active = await design_chat_active(body.thread_id)
+            if active.get("active") and active.get("design_chat_url"):
+                proxy_result = await design_chat_proxy(
+                    thread_id=body.thread_id,
+                    user_message=effective_message,
+                    order_id=body.order_id,
+                )
+                response_text = proxy_result.get("response", "Your message was sent to the design team.")
+                if stream:
+                    return StreamingResponse(
+                        _stream_design_chat_response(response_text, request_id),
+                        media_type="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+                    )
+                return {
+                    "data": {
+                        "summary": response_text,
+                        "engagement": {"suggested_bundle_options": []},
+                        "design_chat": True,
+                    },
+                    "metadata": {"api_version": "v1", "request_id": request_id},
+                }
+        except Exception as e:
+            logger.warning("Design chat proxy check failed: %s", e)
+
     if stream:
-        effective_message = _effective_user_message(body)
         return StreamingResponse(
             _stream_chat_events(
                 body=body,
@@ -385,7 +489,6 @@ async def chat(
         )
 
     try:
-        effective_message = _effective_user_message(body)
         result = await run_agentic_loop(
             effective_message,
             user_id=user_id,

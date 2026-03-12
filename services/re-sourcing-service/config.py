@@ -17,7 +17,8 @@ def get_env(key: str, default: Optional[str] = None) -> Optional[str]:
 class Settings:
     supabase_url: str = get_env("SUPABASE_URL") or ""
     supabase_key: str = get_env("SUPABASE_SECRET_KEY") or get_env("SUPABASE_SERVICE_KEY") or ""
-    discovery_service_url: str = get_env("DISCOVERY_SERVICE_URL") or "http://localhost:8001"
+    discovery_service_url: str = get_env("DISCOVERY_SERVICE_URL") or "http://localhost:8000"
+    payment_service_url: str = get_env("PAYMENT_SERVICE_URL") or "http://localhost:8006"
 
     @property
     def supabase_configured(self) -> bool:

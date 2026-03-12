@@ -89,6 +89,43 @@ async def _apply_ranking(
     )
 
 
+def _blend_by_source(products: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    """
+    When we have products from multiple sources (DB vs UCP/MCP), build a list of up to `limit`
+    that includes a mix from each source so UCP/MCP options are shown (not only local DB).
+    If only one source, returns products[:limit]. Otherwise interleaves by source within rank order.
+    """
+    if not products or limit <= 0:
+        return products[:limit] if products else []
+    # Group by source: "DB" vs other (UCP, MCP)
+    by_source: Dict[str, List[Dict[str, Any]]] = {}
+    for p in products:
+        src = (p.get("source") or "DB").strip().upper()
+        if src not in by_source:
+            by_source[src] = []
+        by_source[src].append(p)
+    if len(by_source) <= 1:
+        return products[:limit]
+    # Two or more sources: interleave so user sees both local and MCP options
+    out: List[Dict[str, Any]] = []
+    keys = list(by_source.keys())
+    indices = {k: 0 for k in keys}
+    # Round-robin by source (DB first, then others) until we have limit
+    while len(out) < limit:
+        added = 0
+        for k in keys:
+            if len(out) >= limit:
+                break
+            idx = indices[k]
+            if idx < len(by_source[k]):
+                out.append(by_source[k][idx])
+                indices[k] = idx + 1
+                added += 1
+        if added == 0:
+            break
+    return out
+
+
 def _sort_products_by_slice(
     products: List[Dict[str, Any]],
     sort_type: str,
@@ -340,7 +377,9 @@ async def _fetch_and_rank(
         )
     # Use first tag for boost when multiple tags provided
     boost_tag = (experience_tags[0] if experience_tags else experience_tag) if (experience_tags or experience_tag) else None
-    return await _apply_ranking(products, experience_tag=boost_tag, experience_tag_boost_amount=experience_tag_boost_amount)
+    ranked = await _apply_ranking(products, experience_tag=boost_tag, experience_tag_boost_amount=experience_tag_boost_amount)
+    # Ensure UCP/MCP options are shown when available: blend by source so first page isn't only local DB
+    return _blend_by_source(ranked, limit)
 
 
 async def search(

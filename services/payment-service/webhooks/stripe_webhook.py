@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime, timezone
 
 import stripe
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -11,9 +12,29 @@ from db import (
     create_product_sponsorship,
     update_payment_status,
     update_order_payment_status,
+    get_experience_session_legs_by_thread,
+    update_experience_session_leg_external_order,
+    update_order_leg_external_order,
+    transition_legs_to_in_customization,
 )
+from packages.shared.commitment import get_provider
+from db import get_supabase
 
 logger = logging.getLogger(__name__)
+
+
+async def _link_order_to_session(thread_id: str, order_id: str) -> None:
+    """Link order_id to experience_session for SLA/re-sourcing."""
+    client = get_supabase()
+    if not client:
+        return
+    try:
+        client.table("experience_sessions").update({
+            "order_id": order_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("thread_id", thread_id).execute()
+    except Exception as e:
+        logger.warning("Failed to link order to session: %s", e)
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
@@ -69,6 +90,65 @@ async def stripe_webhook(request: Request):
                 charge_id = getattr(pi, "latest_charge", None)
                 await update_payment_status(pi.id, "succeeded", transaction_id=charge_id)
                 await update_order_payment_status(order_id, "paid")
+
+                # Commitment flow: complete drafts per vendor, update legs
+                if meta.get("commitment_flow") == "1":
+                    thread_id = meta.get("thread_id")
+                    breakdown_str = meta.get("commitment_breakdown")
+                    if thread_id and breakdown_str:
+                        try:
+                            breakdown = json.loads(breakdown_str)
+                            legs = await get_experience_session_legs_by_thread(thread_id)
+                            for partner_id, precheck_data in breakdown.items():
+                                if not isinstance(precheck_data, dict):
+                                    continue
+                                reservation_id = precheck_data.get("reservation_id")
+                                vendor_type = precheck_data.get("vendor_type", "local")
+                                if not reservation_id:
+                                    continue
+                                provider = get_provider(vendor_type) or get_provider("local")
+                                if not provider:
+                                    logger.warning("No provider for vendor_type=%s", vendor_type)
+                                    continue
+                                try:
+                                    result = await provider.complete(
+                                        partner_id=partner_id,
+                                        reservation_id=reservation_id,
+                                        payment_pending=False,
+                                    )
+                                    for leg in legs:
+                                        if str(leg.get("partner_id")) == str(partner_id):
+                                            await update_experience_session_leg_external_order(
+                                                leg["id"],
+                                                result.external_order_id,
+                                                reservation_id,
+                                                vendor_type,
+                                            )
+                                    await update_order_leg_external_order(
+                                        order_id, partner_id,
+                                        result.external_order_id,
+                                        reservation_id,
+                                        vendor_type,
+                                    )
+                                    logger.info(
+                                        "Commitment complete partner=%s external_order=%s",
+                                        partner_id, result.external_order_id,
+                                    )
+                                except Exception as e:
+                                    logger.exception(
+                                        "Commitment complete failed partner=%s: %s",
+                                        partner_id, e,
+                                    )
+
+                        except json.JSONDecodeError as e:
+                            logger.warning("Invalid commitment_breakdown JSON: %s", e)
+
+                        if thread_id:
+                            n = await transition_legs_to_in_customization(thread_id)
+                            if n > 0:
+                                logger.info("Transitioned %d legs to in_customization for thread %s", n, thread_id)
+                            await _link_order_to_session(thread_id, order_id)
+
                 logger.info("Payment succeeded for order %s", order_id)
     elif event.type == "payment_intent.payment_failed":
         pi = event.data.object

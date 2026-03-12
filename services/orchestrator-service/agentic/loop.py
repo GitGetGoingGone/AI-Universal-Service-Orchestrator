@@ -1,12 +1,27 @@
 """Agentic decision loop: Observe → Reason → Plan → Execute → Reflect."""
 
+import json
 import logging
+import os
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
 from clients import get_bundle_details, get_experience_categories, get_order_status, get_product_details
+
+# #region agent log
+def _debug_log(location: str, message: str, data: dict, hypothesis_id: str = ""):
+    try:
+        log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".cursor", "debug-fb0131.log")
+        payload = {"sessionId": "fb0131", "location": location, "message": message, "data": data, "timestamp": __import__("time").time() * 1000}
+        if hypothesis_id:
+            payload["hypothesisId"] = hypothesis_id
+        with open(log_path, "a") as f:
+            f.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+# #endregion
 from .planner import plan_next_action
 from .tools import execute_tool
 
@@ -160,8 +175,9 @@ async def _discover_composite(
     fulfillment_hints: Optional[Dict[str, str]] = None,
     theme_experience_tag: Optional[str] = None,
     theme_experience_tags: Optional[List[str]] = None,
+    explore_more: bool = False,
 ) -> Dict[str, Any]:
-    """Call discover_products per query, compose experience bundle. When bundle_options provided, build multiple bundles with prices. theme_experience_tag or theme_experience_tags filter/boost discovery (multi-tag = AND semantics)."""
+    """Call discover_products per query, compose experience bundle. When bundle_options provided, build multiple bundles with prices. theme_experience_tag or theme_experience_tags filter/boost discovery (multi-tag = AND semantics). When explore_more=True, request more options per category (e.g. from UCP/MCP)."""
     from packages.shared.adaptive_cards.experience_card import generate_experience_card
 
     categories: List[Dict[str, Any]] = []
@@ -180,6 +196,8 @@ async def _discover_composite(
             per_limit = min(5, max(3, limit // max(1, len(search_queries)))) if search_queries else limit
     except Exception:
         per_limit = min(5, max(3, limit // max(1, len(search_queries)))) if search_queries else limit
+    if explore_more:
+        per_limit = min(20, max(per_limit, 8))
 
     excluded_partners: List[str] = []
     category_products: Dict[str, List[Dict[str, Any]]] = {}  # query -> products
@@ -198,6 +216,7 @@ async def _discover_composite(
                 budget_max=budget_max,
                 experience_tag=theme_experience_tag,
                 experience_tags=theme_experience_tags,
+                explore_more=explore_more,
             )
         except Exception as e:
             logger.warning("Discover composite query %s failed: %s", q, e)
@@ -575,6 +594,9 @@ async def run_agentic_loop(
         "ucp_prioritized": bool(admin_settings and admin_settings.get("ucp_prioritized")),
         "interaction_stage": interaction_stage,
     }
+    # #region agent log
+    _debug_log("loop.py:state_init", "Agentic loop state init", {"bundle_id": bundle_id, "thread_id": thread_id, "messages_count": len(messages or []), "last_suggestion_preview": (last_suggestion or "")[:80], "user_message": user_message[:100]}, "H2,H3")
+    # #endregion
     if admin_settings:
         state["opening_instructions"] = admin_settings.get("opening_instructions")
         state["narrowing_instructions"] = admin_settings.get("narrowing_instructions")
@@ -596,6 +618,8 @@ async def run_agentic_loop(
             state["fulfillment_context"] = dict(fc)
         else:
             state["fulfillment_context"] = {}
+        if _refinement.get("last_shown_bundle_options"):
+            state["last_shown_bundle_options"] = _refinement["last_shown_bundle_options"]
     else:
         state["fulfillment_context"] = {}
 
@@ -755,25 +779,42 @@ async def run_agentic_loop(
                     else:
                         plan = None
                 elif rec == "discover_composite" and intent_data.get("intent_type") in ("discover_composite", "refine_composite"):
-                    # Refinement leak: use purged search_queries/proposed_plan from state if present
-                    sq = state.get("purged_search_queries") or intent_data.get("search_queries") or ["flowers", "restaurant", "movies"]
-                    # Run discover_composite: on first turn (probe_count 0) show options without requiring location; after that probe if location/time missing
-                    if not _has_location_or_time(intent_data, user_message, state) and state.get("probe_count", 0) >= 1:
-                        state["orchestrator_state"] = ORCHESTRATOR_STATE_AWAITING_PROBE
-                        plan = None  # Let planner run → complete with probing for location/time
-                    else:
+                    # User may be picking a theme from "Explore more options" (e.g. "I'd like to explore the Option 1" or "explore the Luxury Date Night")
+                    explore_opt = _resolve_explore_option(user_message, state.get("last_shown_bundle_options"))
+                    if explore_opt:
+                        sq = state.get("purged_search_queries") or explore_opt.get("categories") or intent_data.get("search_queries") or ["flowers", "restaurant", "movies"]
                         plan = {
                             "action": "tool",
                             "tool_name": "discover_composite",
                             "tool_args": {
-                                "bundle_options": intent_data.get("bundle_options") or [],
-                                "search_queries": sq,
+                                "bundle_options": [explore_opt],
+                                "search_queries": sq if isinstance(sq, list) else [sq] if sq else ["flowers", "restaurant", "movies"],
                                 "experience_name": intent_data.get("experience_name") or "experience",
                                 "location": _merged_location(intent_data, state),
                                 "budget_max": _extract_budget(intent_data),
                             },
-                            "reasoning": "Intent recommended discover_composite (or refine_composite with purged categories).",
+                            "reasoning": "User chose a previously shown theme; running discover_composite with that option.",
                         }
+                    else:
+                        # Refinement leak: use purged search_queries/proposed_plan from state if present
+                        sq = state.get("purged_search_queries") or intent_data.get("search_queries") or ["flowers", "restaurant", "movies"]
+                        # Run discover_composite: on first turn (probe_count 0) show options without requiring location; after that probe if location/time missing
+                        if not _has_location_or_time(intent_data, user_message, state) and state.get("probe_count", 0) >= 1:
+                            state["orchestrator_state"] = ORCHESTRATOR_STATE_AWAITING_PROBE
+                            plan = None  # Let planner run → complete with probing for location/time
+                        else:
+                            plan = {
+                                "action": "tool",
+                                "tool_name": "discover_composite",
+                                "tool_args": {
+                                    "bundle_options": intent_data.get("bundle_options") or [],
+                                    "search_queries": sq,
+                                    "experience_name": intent_data.get("experience_name") or "experience",
+                                    "location": _merged_location(intent_data, state),
+                                    "budget_max": _extract_budget(intent_data),
+                                },
+                                "reasoning": "Intent recommended discover_composite (or refine_composite with purged categories).",
+                            }
                 elif rec == "discover_products" and intent_data.get("intent_type") in ("discover", "browse"):
                     sq = (intent_data.get("search_query") or "").strip()
                     # Prefer derived query from user message so we don't send generic phrases like "Find products" to discovery
@@ -870,6 +911,9 @@ async def run_agentic_loop(
             tool_name = plan["tool_name"]
             tool_args = plan.get("tool_args", {})
             state["agent_reasoning"].append(plan.get("reasoning", ""))
+            # #region agent log
+            _debug_log("loop.py:tool_execute", "Planner chose tool", {"tool_name": tool_name, "action": plan.get("action"), "iteration": state.get("iteration", 0), "user_message": user_message[:80]}, "H4")
+            # #endregion
 
             # Inject limit, location, budget from intent entities for discover_products
             if tool_name == "discover_products":
@@ -882,6 +926,11 @@ async def run_agentic_loop(
                     tool_args["query"] = "browse"
                 elif not current_q or current_q.lower() in generic_for_discover:
                     tool_args["query"] = fallback_search_query(user_message)
+                # Optional chat integration: when user asks for more options, request explore_more from discovery
+                _msg_lower = (user_message or "").lower()
+                _explore_more_phrases = ("more options", "show me more", "explore more", "other options", "something else", "different options", "what else", "any other", "any more", "more choices", "other choices")
+                if any(p in _msg_lower for p in _explore_more_phrases):
+                    tool_args["explore_more"] = True
                 if intent_data:
                     loc = _merged_location(intent_data, state)
                     if loc:
@@ -932,6 +981,10 @@ async def run_agentic_loop(
                 tool_args = dict(tool_args)
                 if not tool_args.get("bundle_options") and intent_data.get("bundle_options"):
                     tool_args["bundle_options"] = intent_data.get("bundle_options")
+                _msg_lower_c = (user_message or "").lower()
+                _explore_more_phrases_c = ("more options", "show me more", "explore more", "other options", "something else", "different options", "what else", "any other", "any more", "more choices", "other choices")
+                if any(p in _msg_lower_c for p in _explore_more_phrases_c):
+                    tool_args["explore_more"] = True
                 # Always prefer purged list when user previously removed categories (e.g. "no limo")
                 purged_sq = state.get("purged_search_queries")
                 purged_set = {str(c).strip().lower() for c in (purged_sq or []) if c}
@@ -1000,7 +1053,7 @@ async def run_agentic_loop(
                                 f"Weather in {loc}: {weather_desc}. We've adjusted your plan for indoor options."
                             )
 
-            async def _discover_composite_fn(search_queries, experience_name, location=None, budget_max=None, bundle_options=None, theme_experience_tag=None, theme_experience_tags=None):
+            async def _discover_composite_fn(search_queries, experience_name, location=None, budget_max=None, bundle_options=None, theme_experience_tag=None, theme_experience_tags=None, explore_more=False):
                 fulfillment_hints = _extract_fulfillment_hints(intent_data, user_message)
                 intent = intent_data or {}
                 return await _discover_composite(
@@ -1014,6 +1067,7 @@ async def run_agentic_loop(
                     fulfillment_hints=fulfillment_hints,
                     theme_experience_tag=theme_experience_tag or intent.get("theme_experience_tag"),
                     theme_experience_tags=theme_experience_tags or intent.get("theme_experience_tags"),
+                    explore_more=explore_more,
                 )
 
             async def _refine_bundle_category_fn(bundle_id: str, category: str):
@@ -1107,10 +1161,14 @@ async def run_agentic_loop(
                     logger.debug("OrchestrationTrace product_discovery (composite) failed: %s", e)
                 # Use intent's bundle options when we have 1+; call LLM only when 0 to generate 2-4
                 intent_bundles = (products_data or {}).get("suggested_bundle_options") or []
+                # #region agent log
+                _debug_log("loop.py:discover_composite_raw", "Raw suggested_bundle_options from discovery", {"raw_count": len(intent_bundles), "raw_options": [{"label": b.get("label"), "has_product_ids": bool(b.get("product_ids")), "product_ids_count": len(b.get("product_ids") or [])} for b in intent_bundles[:5]], "product_count": len(pc) if isinstance(pc, list) else 0}, "H1,H5")
+                # #endregion
                 intent_bundles = [b for b in intent_bundles if (b.get("product_ids") or [])]
                 if len(intent_bundles) >= 1:
                     engagement_data["suggested_bundle_options"] = intent_bundles
                     state["last_shown_bundle_label"] = intent_bundles[0].get("label") if intent_bundles else None
+                    state["last_shown_bundle_options"] = [{"label": b.get("label"), "description": b.get("description"), "categories": b.get("categories") or []} for b in intent_bundles]
                     # OrchestrationTrace: bundle created (from intent/discover_composite inline)
                     try:
                         from db import log_orchestration_trace
@@ -1156,6 +1214,7 @@ async def run_agentic_loop(
                             if options:
                                 engagement_data["suggested_bundle_options"] = options
                                 state["last_shown_bundle_label"] = options[0].get("label") if options else None
+                                state["last_shown_bundle_options"] = [{"label": o.get("label"), "description": o.get("description"), "categories": o.get("categories") or []} for o in options]
                                 state.pop("rotate_tier", None)
                                 # OrchestrationTrace: bundle created (from PartnerBalancer/LLM)
                                 try:
@@ -1225,6 +1284,9 @@ async def run_agentic_loop(
                 machine_readable = result.get("machine_readable")
                 pd = products_data or {}
                 pc = pd.get("products") or []
+                # #region agent log
+                _debug_log("loop.py:discover_products", "discover_products result", {"product_count": len(pc) if isinstance(pc, list) else 0, "has_suggested_bundle_options": bool(pd.get("suggested_bundle_options")), "query": tool_args.get("query")}, "H5")
+                # #endregion
                 await _emit_thinking(on_thinking, "after_discover", {"product_count": len(pc) if isinstance(pc, list) else 0}, thinking_messages or {})
                 # OrchestrationTrace: product discovery
                 try:
@@ -1301,8 +1363,9 @@ async def run_agentic_loop(
             else:
                 intent_opts = (intent_data or {}).get("bundle_options") or []
                 if intent_opts:
+                    exp_name_title = ((intent_data or {}).get("experience_name") or "experience").replace("_", " ").title()
                     opts_list = [
-                        {"option_label": o.get("label", f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you."}
+                        {"option_label": (o.get("label") or (exp_name_title if i == 0 else None) or f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you."}
                         for i, o in enumerate(intent_opts) if isinstance(o, dict)
                     ]
                     # When intent returns only one date-night-like option, add fallback options so frontend shows 3 cards (matches prompt)
@@ -1315,11 +1378,22 @@ async def run_agentic_loop(
                             {"option_label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers."},
                         ])
                     engagement_data["suggested_bundle_options"] = opts_list
+                    exp_name_title = ((intent_data or {}).get("experience_name") or "experience").replace("_", " ").title()
+                    state["last_shown_bundle_options"] = [{"label": (o.get("label") or (exp_name_title if i == 0 else None) or f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you.", "categories": o.get("categories") or []} for i, o in enumerate(intent_opts)]
+                    if len(opts_list) > len(intent_opts):
+                        state["last_shown_bundle_options"] = state.get("last_shown_bundle_options", []) + [
+                            {"label": "Casual Date Night", "description": "A laid-back evening with dinner and flowers, no limo.", "categories": ["flowers", "restaurant"]},
+                            {"label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers.", "categories": ["restaurant", "limo", "flowers"]},
+                        ]
+                    # #region agent log
+                    _debug_log("loop.py:halt_preview_opts", "Halt & Preview options (no product_ids)", {"opts_count": len(opts_list), "opts_labels": [o.get("option_label") for o in opts_list], "has_product_ids": False}, "H1")
+                    # #endregion
         except Exception:
             intent_opts = (intent_data or {}).get("bundle_options") or []
             if intent_opts:
+                exp_name_title = ((intent_data or {}).get("experience_name") or "experience").replace("_", " ").title()
                 opts_list = [
-                    {"option_label": o.get("label", f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you."}
+                    {"option_label": (o.get("label") or (exp_name_title if i == 0 else None) or f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you."}
                     for i, o in enumerate(intent_opts) if isinstance(o, dict)
                 ]
                 exp_name = ((intent_data or {}).get("experience_name") or "").lower()
@@ -1331,6 +1405,13 @@ async def run_agentic_loop(
                         {"option_label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers."},
                     ])
                 engagement_data["suggested_bundle_options"] = opts_list
+                exp_name_title_ex = ((intent_data or {}).get("experience_name") or "experience").replace("_", " ").title()
+                state["last_shown_bundle_options"] = [{"label": (o.get("label") or (exp_name_title_ex if i == 0 else None) or f"Option {i+1}"), "description": (o.get("description") or "").strip() or "A curated experience for you.", "categories": o.get("categories") or []} for i, o in enumerate(intent_opts)]
+                if len(opts_list) > len(intent_opts):
+                    state["last_shown_bundle_options"] = state.get("last_shown_bundle_options", []) + [
+                        {"label": "Casual Date Night", "description": "A laid-back evening with dinner and flowers, no limo.", "categories": ["flowers", "restaurant"]},
+                        {"label": "Luxury Date Night", "description": "Premium dinner and limo, with optional flowers.", "categories": ["restaurant", "limo", "flowers"]},
+                    ]
 
     # Pass fulfillment context and missing required fields (configurable from admin/bundle/KB) so frontend can block checkout until provided
     required_fields_list = state.get("required_fulfillment_fields") or list(DEFAULT_FULFILLMENT_FIELDS)
@@ -1365,12 +1446,13 @@ async def run_agentic_loop(
         out["planner_complete_message"] = planner_msg
     if last_suggestion:
         out["last_suggestion"] = last_suggestion
-    # Persist refinement at service level (DB) so next turn keeps "no limo" etc. without client sending it
-    if state.get("purged_proposed_plan") or state.get("purged_search_queries") or state.get("fulfillment_context"):
+    # Persist refinement at service level (DB) so next turn keeps "no limo", last-shown options, etc. without client sending it
+    if state.get("purged_proposed_plan") or state.get("purged_search_queries") or state.get("fulfillment_context") or state.get("last_shown_bundle_options"):
         out["data"]["refinement_context"] = {
             "proposed_plan": state.get("purged_proposed_plan"),
             "search_queries": state.get("purged_search_queries"),
             "fulfillment_context": state.get("fulfillment_context"),
+            "last_shown_bundle_options": state.get("last_shown_bundle_options"),
         }
         if thread_id:
             try:
@@ -1380,13 +1462,14 @@ async def run_agentic_loop(
                     proposed_plan=state.get("purged_proposed_plan"),
                     search_queries=state.get("purged_search_queries"),
                     fulfillment_context=state.get("fulfillment_context"),
+                    last_shown_bundle_options=state.get("last_shown_bundle_options"),
                 )
             except Exception:
                 pass
     elif thread_id:
         try:
             from db import set_thread_refinement_context
-            set_thread_refinement_context(thread_id, proposed_plan=None, search_queries=None)
+            set_thread_refinement_context(thread_id, proposed_plan=None, search_queries=None, last_shown_bundle_options=[])
         except Exception:
             pass
     # Pass through so chat can use same LLM config for engagement (avoids "no LLM client" when config is valid for planner)
@@ -1502,6 +1585,39 @@ async def _direct_flow(
 
 # Orchestrator states for context-aware planning
 ORCHESTRATOR_STATE_AWAITING_PROBE = "AWAITING_PROBE"
+
+
+def _resolve_explore_option(
+    user_message: str,
+    last_shown_bundle_options: Optional[List[Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """If user said e.g. 'I'd like to explore the Option 1' or 'explore the Luxury Date Night', return the matching option from last_shown_bundle_options (for discover_composite with that single option)."""
+    if not user_message or not last_shown_bundle_options:
+        return None
+    msg = (user_message or "").strip().lower()
+    if "explore" not in msg:
+        return None
+    # Match "Option N" (1-based index)
+    m = re.search(r"option\s*(\d+)", msg)
+    if m:
+        idx = int(m.group(1))
+        if 1 <= idx <= len(last_shown_bundle_options):
+            opt = last_shown_bundle_options[idx - 1]
+            if isinstance(opt, dict):
+                return opt
+    # Match by label (e.g. "Luxury Date Night", "Casual Date Night")
+    for opt in last_shown_bundle_options:
+        if not isinstance(opt, dict):
+            continue
+        label = (opt.get("label") or opt.get("option_label") or "").strip().lower()
+        if not label:
+            continue
+        if label in msg:
+            return opt
+        words = [w for w in label.split() if len(w) > 3]
+        if words and sum(1 for w in words if w in msg) >= min(2, len(words)):
+            return opt
+    return None
 
 
 def _has_location_or_time(

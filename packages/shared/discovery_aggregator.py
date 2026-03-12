@@ -326,13 +326,13 @@ class UCPManifestDriver:
                     origin = self._origin(base_url)
                     if not origin:
                         continue
-                    # Try manifest: standard paths first, then exact base_url if it has a path (e.g. .../ucp)
-                    manifest_url = f"{origin}/.well-known/ucp.json"
+                    # Try manifest: prefer /.well-known/ucp (no extension) first to avoid 404 where servers only serve that path
+                    manifest_url = f"{origin}/.well-known/ucp"
                     async with httpx.AsyncClient(timeout=3.0) as client:
                         r = await client.get(manifest_url, headers=headers)
                         logger.info("UCP manifest request: GET url=%s status=%s", manifest_url, r.status_code)
                         if r.status_code != 200:
-                            manifest_url = f"{origin}/.well-known/ucp"
+                            manifest_url = f"{origin}/.well-known/ucp.json"
                             r = await client.get(manifest_url, headers=headers)
                             logger.info("UCP manifest request: GET url=%s status=%s", manifest_url, r.status_code)
                         if r.status_code != 200 and base_url != origin and base_url.startswith(origin):
@@ -352,11 +352,15 @@ class UCPManifestDriver:
                     slug = origin.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "_")[:64]
 
                     if mcp_endpoint:
-                        products_raw = await self._search_via_mcp(mcp_endpoint, query, limit, slug, access_token=access_token)
-                        if not products_raw and "/api/ucp/mcp" in (mcp_endpoint or ""):
-                            host = origin.replace("http://", "").replace("https://", "").split("/")[0]
-                            fallback_mcp = f"https://{host}/api/mcp"
+                        host = origin.replace("http://", "").replace("https://", "").split("/")[0]
+                        fallback_mcp = f"https://{host}/api/mcp" if "/api/ucp/mcp" in (mcp_endpoint or "") else None
+                        has_token = access_token and str(access_token).strip()
+                        if not has_token and fallback_mcp:
                             products_raw = await self._search_via_mcp(fallback_mcp, query, limit, slug, access_token=None)
+                        else:
+                            products_raw = await self._search_via_mcp(mcp_endpoint, query, limit, slug, access_token=access_token)
+                            if not products_raw and fallback_mcp:
+                                products_raw = await self._search_via_mcp(fallback_mcp, query, limit, slug, access_token=None)
                         if products_raw:
                             for raw in products_raw[:limit]:
                                 p = _normalize_to_ucp_product(raw, "UCP")
@@ -374,6 +378,9 @@ class UCPManifestDriver:
                                 rest = dev.get("rest", dev)
                                 if isinstance(rest, dict):
                                     catalog_url = rest.get("endpoint", rest.get("catalog"))
+                    # Only try REST catalog when manifest explicitly advertises a REST endpoint (avoids 404 on /api/v1/ucp/* for MCP-only partners)
+                    if not catalog_url and not rest_endpoint:
+                        continue
                     if not catalog_url:
                         catalog_base = rest_endpoint or f"{origin}/api/v1/ucp"
                     else:
@@ -384,7 +391,7 @@ class UCPManifestDriver:
                                 break
                         else:
                             catalog_base = cu or f"{origin}/api/v1/ucp"
-                    # Try primary path /items, then fallbacks: /search, /item, /products
+                    # Try primary path /items, then fallbacks: /search, /item, /products; stop after first 404 to avoid 4x 404 for MCP-only partners
                     catalog_paths = ["/items", "/search", "/item", "/products"]
                     cat = None
                     async with httpx.AsyncClient(timeout=3.0) as client:
@@ -392,6 +399,8 @@ class UCPManifestDriver:
                             url = f"{catalog_base.rstrip('/')}{path}"
                             r = await client.get(url, params={"q": query, "limit": limit}, headers=headers)
                             logger.info("UCP REST catalog request: GET url=%s params=q=%s,limit=%s status=%s", url, (query or "")[:30], limit, r.status_code)
+                            if r.status_code == 404:
+                                break
                             if r.status_code == 200:
                                 try:
                                     cat = r.json()

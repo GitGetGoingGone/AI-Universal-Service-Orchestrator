@@ -14,6 +14,7 @@ from clients import (
     remove_from_bundle as remove_from_bundle_client,
     replace_in_bundle as replace_in_bundle_client,
     proceed_to_checkout as proceed_to_checkout_client,
+    commitment_precheck as commitment_precheck_client,
     create_payment_intent as create_payment_intent_client,
     confirm_payment as confirm_payment_client,
     create_checkout_session as create_checkout_session_client,
@@ -180,6 +181,33 @@ async def remove_from_bundle(body: RemoveFromBundleBody):
         raise HTTPException(status_code=502, detail=f"Discovery service error: {e}")
 
 
+class CommitmentPrecheckBody(BaseModel):
+    """Request body for commitment precheck (TCO before payment)."""
+
+    bundle_id: str
+    shipping: Dict[str, Any]
+    thread_id: str | None = None
+    user_id: str | None = None
+
+
+@router.post("/commitment/precheck")
+async def commitment_precheck(body: CommitmentPrecheckBody):
+    """Commitment precheck: get TCO (tax/shipping) per vendor before Gateway charge."""
+    try:
+        return await commitment_precheck_client(
+            bundle_id=body.bundle_id,
+            shipping=body.shipping,
+            thread_id=body.thread_id,
+            user_id=body.user_id,
+        )
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Bundle not found")
+        raise HTTPException(status_code=502, detail=str(e.response.json().get("detail", "Precheck failed")))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 class CheckoutBody(BaseModel):
     """Request body for proceeding to checkout."""
 
@@ -205,13 +233,21 @@ class CreatePaymentBody(BaseModel):
     """Request body for creating payment intent."""
 
     order_id: str
+    commitment_breakdown: dict | None = None
+    thread_id: str | None = None
+    total_amount: float | None = None
 
 
 @router.post("/payment/create")
 async def create_payment(body: CreatePaymentBody):
-    """Create Stripe PaymentIntent for order. Use order_id from checkout response."""
+    """Create Stripe PaymentIntent for order. Use order_id from checkout response. Supports commitment flow."""
     try:
-        return await create_payment_intent_client(order_id=body.order_id)
+        return await create_payment_intent_client(
+            order_id=body.order_id,
+            commitment_breakdown=body.commitment_breakdown,
+            thread_id=body.thread_id,
+            total_amount=body.total_amount,
+        )
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             raise HTTPException(status_code=404, detail="Order not found")

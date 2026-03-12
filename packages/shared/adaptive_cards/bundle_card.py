@@ -49,6 +49,7 @@ def generate_bundle_card(
                         text_block(f"{currency} {price:.2f}", size="Small"),
                         action_set([
                             {"type": "Action.Submit", "title": "Remove", "data": {"action": "remove_from_bundle", "item_id": str(item.get("id", ""))}},
+                            {"type": "Action.Submit", "title": "Replace", "data": {"action": "replace_in_bundle", "item_id": str(item.get("id", "")), "category": (item.get("capabilities") or ["item"])[0] if isinstance(item.get("capabilities"), list) else "item"}},
                         ]),
                     ],
                 }

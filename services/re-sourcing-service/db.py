@@ -56,14 +56,14 @@ async def get_order(order_id: str) -> Optional[Dict[str, Any]]:
 
 
 async def get_order_leg(order_leg_id: str) -> Optional[Dict[str, Any]]:
-    """Get order leg by ID."""
+    """Get order leg by ID (includes external_order_id, vendor_type for commitment cancel)."""
     client = get_supabase()
     if not client:
         return None
     try:
         result = (
             client.table("order_legs")
-            .select("id, order_id, bundle_leg_id, partner_id, status")
+            .select("id, order_id, bundle_leg_id, partner_id, status, external_order_id, vendor_type")
             .eq("id", order_leg_id)
             .single()
             .execute()
@@ -236,6 +236,23 @@ async def create_autonomous_recovery(
         return result.data[0] if result.data else None
     except Exception:
         return None
+
+
+async def clear_sla_re_sourcing_pending(leg_id: str) -> bool:
+    """Clear re_sourcing_state and delete sla_re_sourcing_pending for leg."""
+    client = get_supabase()
+    if not client:
+        return False
+    try:
+        from datetime import datetime, timezone
+        client.table("experience_session_legs").update({
+            "re_sourcing_state": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", leg_id).execute()
+        client.table("sla_re_sourcing_pending").delete().eq("experience_session_leg_id", leg_id).execute()
+        return True
+    except Exception:
+        return False
 
 
 async def create_escalation(negotiation_id: str, reason: str) -> bool:

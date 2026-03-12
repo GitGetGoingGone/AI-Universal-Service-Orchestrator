@@ -332,7 +332,7 @@ def get_admin_orchestration_settings() -> Optional[Dict[str, Any]]:
 
 
 def get_thread_refinement_context(thread_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Load refinement context (proposed_plan, search_queries, fulfillment_context) for a thread."""
+    """Load refinement context (proposed_plan, search_queries, fulfillment_context, last_shown_bundle_options) for a thread."""
     if not thread_id:
         return None
     client = get_supabase()
@@ -344,7 +344,7 @@ def get_thread_refinement_context(thread_id: Optional[str]) -> Optional[Dict[str
         row_dict = row if isinstance(row, dict) else {}
         ctx = row_dict.get("refinement_context")
         if isinstance(ctx, dict) and (
-            ctx.get("proposed_plan") or ctx.get("search_queries") or ctx.get("fulfillment_context")
+            ctx.get("proposed_plan") or ctx.get("search_queries") or ctx.get("fulfillment_context") or ctx.get("last_shown_bundle_options")
         ):
             return ctx
         if isinstance(ctx, dict):
@@ -359,6 +359,7 @@ def set_thread_refinement_context(
     proposed_plan: Optional[List[str]] = None,
     search_queries: Optional[List[str]] = None,
     fulfillment_context: Optional[Dict[str, str]] = None,
+    last_shown_bundle_options: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Persist refinement context for a thread. Merges with existing; None means do not change that key."""
     if not thread_id:
@@ -370,7 +371,7 @@ def set_thread_refinement_context(
         from datetime import datetime, timezone
         # Load existing so we merge rather than overwrite
         r = client.table("chat_threads").select("refinement_context").eq("id", thread_id).limit(1).execute()
-        existing = {}
+        existing: Dict[str, Any] = {}
         if r.data and isinstance(r.data[0], dict) and isinstance(r.data[0].get("refinement_context"), dict):
             existing = dict(r.data[0]["refinement_context"])
         if proposed_plan is not None:
@@ -379,6 +380,8 @@ def set_thread_refinement_context(
             existing["search_queries"] = search_queries
         if fulfillment_context is not None:
             existing["fulfillment_context"] = {k: v for k, v in fulfillment_context.items() if v}
+        if last_shown_bundle_options is not None:
+            existing["last_shown_bundle_options"] = last_shown_bundle_options
         payload: Dict[str, Any] = {
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "refinement_context": existing if existing else None,

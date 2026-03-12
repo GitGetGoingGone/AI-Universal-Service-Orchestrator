@@ -53,6 +53,7 @@ TOOL_DEFS = [
                 "limit": {"type": "integer", "description": "Max products to return", "default": 20},
                 "location": {"type": "string", "description": "Optional location filter"},
                 "budget_max": {"type": "integer", "description": "Max price in cents (e.g. 5000 for $50)"},
+                "explore_more": {"type": "boolean", "description": "When true, return more options (e.g. from partners) so user can explore additional choices. Use when user says 'show me more', 'other options', 'explore more', 'what else'.", "default": False},
             },
             "required": ["query"],
         },
@@ -70,6 +71,7 @@ TOOL_DEFS = [
                 "budget_max": {"type": "integer", "description": "Max price in cents (e.g. 5000 for $50)"},
                 "theme_experience_tag": {"type": "string", "description": "Optional single experience tag to filter/boost discovery (e.g. romantic, baby)"},
                 "theme_experience_tags": {"type": "array", "items": {"type": "string"}, "description": "Optional multiple experience tags for AND filter (e.g. luxury, travel-friendly)"},
+                "explore_more": {"type": "boolean", "description": "When true, return more options per category (e.g. from partners). Use when user says 'show me more', 'other options', 'explore more'.", "default": False},
             },
         },
     },
@@ -368,6 +370,7 @@ async def execute_tool(
             limit=params.get("limit", 20),
             location=params.get("location"),
             budget_max=params.get("budget_max"),
+            explore_more=bool(params.get("explore_more", False)),
         )
 
     if name == "discover_composite":
@@ -385,6 +388,7 @@ async def execute_tool(
             budget_max=params.get("budget_max"),
             theme_experience_tag=params.get("theme_experience_tag"),
             theme_experience_tags=params.get("theme_experience_tags"),
+            explore_more=bool(params.get("explore_more", False)),
         )
 
     if name == "refine_bundle_category":

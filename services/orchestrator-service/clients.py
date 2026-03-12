@@ -338,9 +338,11 @@ async def discover_products(
     budget_max: Optional[int] = None,
     experience_tag: Optional[str] = None,
     experience_tags: Optional[List[str]] = None,
+    explore_more: bool = False,
 ) -> Dict[str, Any]:
     """Call Discovery service to find products by query. Retries on 429 (rate limit).
     When the first response has 0 products for cosmetics-like queries, retries with fallback terms (makeup, beauty, skincare).
+    When explore_more=True, discovery returns more options (e.g. from UCP/MCP partners) so user can see additional choices.
     """
     url = f"{settings.discovery_service_url}/api/v1/discover"
     params: Dict[str, Any] = {"intent": query, "limit": limit}
@@ -356,6 +358,8 @@ async def discover_products(
         params["experience_tag"] = experience_tag
     if experience_tags:
         params["experience_tags"] = experience_tags
+    if explore_more:
+        params["explore_more"] = "true"
     path = "/api/v1/discover"
     headers = _gateway_headers_for_discovery("GET", path)
     for attempt in range(DISCOVERY_RETRY_ATTEMPTS):
@@ -514,11 +518,41 @@ async def proceed_to_checkout(bundle_id: str) -> Dict[str, Any]:
         return r.json()
 
 
-async def create_payment_intent(order_id: str) -> Dict[str, Any]:
-    """Call Payment service to create Stripe PaymentIntent for order."""
-    url = f"{settings.payment_service_url}/api/v1/payment/create"
+async def commitment_precheck(
+    bundle_id: str,
+    shipping: Dict[str, Any],
+    thread_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Call Payment service commitment precheck. Returns TCO and breakdown for Gateway charge."""
+    url = f"{settings.payment_service_url}/api/v1/commitment/precheck"
+    payload = {"bundle_id": bundle_id, "shipping": shipping}
+    if thread_id:
+        payload["thread_id"] = thread_id
+    if user_id:
+        payload["user_id"] = user_id
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        r = await client.post(url, json={"order_id": order_id})
+        r = await client.post(url, json=payload)
+        r.raise_for_status()
+        return r.json()
+
+
+async def create_payment_intent(
+    order_id: str,
+    commitment_breakdown: Optional[Dict[str, Any]] = None,
+    thread_id: Optional[str] = None,
+    total_amount: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Call Payment service to create Stripe PaymentIntent for order. Supports commitment flow."""
+    url = f"{settings.payment_service_url}/api/v1/payment/create"
+    payload: Dict[str, Any] = {"order_id": order_id}
+    if commitment_breakdown and thread_id:
+        payload["commitment_breakdown"] = commitment_breakdown
+        payload["thread_id"] = thread_id
+    if total_amount is not None:
+        payload["total_amount"] = total_amount
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        r = await client.post(url, json=payload)
         r.raise_for_status()
         return r.json()
 
@@ -541,6 +575,89 @@ async def create_checkout_session(
         r = await client.post(
             url,
             json={"order_id": order_id, "success_url": success_url, "cancel_url": cancel_url},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def set_customization_partner(thread_id: str, partner_id: Optional[str] = None) -> bool:
+    """Set customization_partner_id for session (hybrid customization)."""
+    url = f"{settings.discovery_service_url}/api/v1/experience-sessions/by-thread/{thread_id}/customization-partner"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.put(url, params={"partner_id": partner_id} if partner_id else {})
+            r.raise_for_status()
+            return True
+    except Exception:
+        return False
+
+
+async def design_chat_active(thread_id: str) -> Dict[str, Any]:
+    """Check if thread has design chat active (legs in in_customization)."""
+    url = f"{settings.discovery_service_url}/api/v1/design-chat/active"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(url, params={"thread_id": thread_id})
+            r.raise_for_status()
+            return r.json()
+    except Exception:
+        return {"active": False}
+
+
+async def get_sla_re_sourcing_pending(thread_id: str) -> Optional[Dict[str, Any]]:
+    """Get pending SLA re-sourcing for thread (awaiting user response)."""
+    url = f"{settings.discovery_service_url}/api/v1/sla/pending"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(url, params={"thread_id": thread_id})
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            data = r.json()
+            if isinstance(data, dict) and data.get("experience_session_leg_id"):
+                return data
+            return None
+    except httpx.HTTPStatusError:
+        return None
+    except Exception:
+        return None
+
+
+async def execute_sla_re_sourcing(
+    leg_id: str,
+    alternative_partner_id: str,
+    alternative_product_id: str,
+    alternative_price: float,
+) -> Dict[str, Any]:
+    """Execute SLA re-sourcing (user confirmed switch)."""
+    resourcing_url = settings.resourcing_service_url
+    url = f"{resourcing_url.rstrip('/')}/api/v1/recovery/sla-execute"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(url, json={
+            "experience_session_leg_id": leg_id,
+            "alternative_partner_id": alternative_partner_id,
+            "alternative_product_id": alternative_product_id,
+            "alternative_price": alternative_price,
+        })
+        r.raise_for_status()
+        return r.json()
+
+
+async def design_chat_proxy(
+    thread_id: str,
+    user_message: str,
+    order_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Forward message to partner design chat endpoint."""
+    url = f"{settings.discovery_service_url}/api/v1/design-chat/proxy"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(
+            url,
+            json={
+                "thread_id": thread_id,
+                "user_message": user_message,
+                "order_id": order_id,
+            },
         )
         r.raise_for_status()
         return r.json()

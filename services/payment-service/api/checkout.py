@@ -14,12 +14,26 @@ class CreatePaymentBody(BaseModel):
     """Create payment intent for order."""
 
     order_id: str
+    commitment_breakdown: dict | None = Field(
+        default=None,
+        description="From commitment precheck: {partner_id: {reservation_id, vendor_type}}. Enables handshake on payment success.",
+    )
+    thread_id: str | None = Field(
+        default=None,
+        description="Thread ID for experience_session lookup when commitment_breakdown is set.",
+    )
+    total_amount: float | None = Field(
+        default=None,
+        description="Override total from precheck (TCO with tax). If omitted, uses order total.",
+    )
 
 
 @router.post("/payment/create")
 async def create_payment(body: CreatePaymentBody):
     """
     Create Stripe PaymentIntent for order.
+    When commitment_breakdown is provided (from commitment precheck), TCO is used and
+    webhook will complete drafts per vendor on payment success.
     Returns client_secret for frontend to confirm payment.
     """
     order = await get_order_with_items(body.order_id)
@@ -28,17 +42,25 @@ async def create_payment(body: CreatePaymentBody):
     if order.get("payment_status") == "paid":
         raise HTTPException(status_code=400, detail="Order already paid")
 
-    total = float(order.get("total_amount", 0))
+    total = float(body.total_amount or order.get("total_amount", 0))
     currency = order.get("currency", "USD")
     amount_cents = int(round(total * 100))
     if amount_cents < 50:  # Stripe minimum
         raise HTTPException(status_code=400, detail="Amount too small")
+
+    metadata = {"order_id": body.order_id}
+    if body.commitment_breakdown and body.thread_id:
+        import json
+        metadata["commitment_flow"] = "1"
+        metadata["thread_id"] = body.thread_id
+        metadata["commitment_breakdown"] = json.dumps(body.commitment_breakdown)
 
     try:
         result = await create_payment_intent(
             order_id=body.order_id,
             amount_cents=amount_cents,
             currency=currency.lower(),
+            metadata=metadata,
         )
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))

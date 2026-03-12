@@ -53,6 +53,11 @@ class Settings:
         get_env("REVERSE_LOGISTICS_SERVICE_URL") or "http://localhost:8011"
     ).rstrip("/")
 
+    # Re-Sourcing (Module 6) - SLA re-sourcing execution
+    resourcing_service_url: str = (
+        get_env("RE_SOURCING_SERVICE_URL") or "http://localhost:8005"
+    ).rstrip("/")
+
     # Omnichannel Broker (Module 24)
     omnichannel_broker_url: str = (
         get_env("OMNICHANNEL_BROKER_URL") or "http://localhost:8004"

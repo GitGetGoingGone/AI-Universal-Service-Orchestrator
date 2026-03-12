@@ -3,6 +3,9 @@ Dynamic Metadata Enricher (Phase 3: The Vibe Moat).
 
 Intercepts products before ranking; enriches missing experience_tags via existing configured LLM.
 For Shopify/external products: in-memory only (no DB write).
+
+Single intercept path: All products (LocalDB, UCP, MCP, Shopify MCP) flow through scout_engine
+which calls enrich_products_middleware after aggregator fetch and before ranking. No bypass.
 """
 
 import asyncio

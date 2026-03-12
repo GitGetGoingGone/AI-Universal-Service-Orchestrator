@@ -109,7 +109,29 @@ async def complete_draft_order(
     }
 
 
-async def get_shopify_partner_credentials(partner_id: str) -> Optional[Dict[str, str]]:
+async def cancel_shopify_order(
+    shop_url: str,
+    access_token: str,
+    order_id: str,
+) -> bool:
+    """
+    Cancel a Shopify order. Use after draft is completed (order created).
+    Returns True on success.
+    """
+    url = _shopify_admin_url(shop_url, f"/orders/{order_id}/cancel.json")
+    headers = {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": access_token,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, json={}, headers=headers)
+        return resp.status_code < 400
+    except Exception:
+        return False
+
+
+def get_shopify_partner_credentials(partner_id: str) -> Optional[Dict[str, str]]:
     """
     Get shop_url and access_token for a Shopify curated partner.
     Returns { shop_url, access_token } or None.

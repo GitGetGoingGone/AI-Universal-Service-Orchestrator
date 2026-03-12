@@ -39,6 +39,8 @@ from api.feeds import router as feeds_router
 from api.manifest import router as manifest_router, _build_manifest
 from api.orders import router as orders_router
 from api.experience_sessions import router as experience_sessions_router
+from api.design_chat import router as design_chat_router
+from api.sla import router as sla_router
 from webhooks.inventory_webhook import router as webhooks_router
 
 app = FastAPI(
@@ -74,6 +76,8 @@ app.include_router(feeds_router)
 app.include_router(manifest_router)
 app.include_router(orders_router)
 app.include_router(experience_sessions_router)
+app.include_router(design_chat_router)
+app.include_router(sla_router)
 app.include_router(webhooks_router)
 
 # Health checks (per 07-project-operations.md)

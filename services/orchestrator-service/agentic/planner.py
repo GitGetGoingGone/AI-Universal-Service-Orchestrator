@@ -28,6 +28,7 @@ Category-in-message: When the user's message contains or clearly implies a produ
 - For standing intents: use create_standing_intent. For other long-running workflows: use start_orchestration.
 - When intent has unrelated_to_probing: call complete with a graceful message (rephrase or offer default assumptions).
 - When user refines (e.g. "no flowers, add a movie"): resolve_intent interprets it. Use the new search_query.
+- Bundle edits (Commitment-First): When user says "No limo", "skip the flowers", "remove the transport", "I don't want the cake", "find a different color cap", "swap the flowers for tulips", "different restaurant", "something cheaper for dinner" — treat as remove_leg or replace_leg. Call remove_from_bundle or replace_product_in_bundle (with discover for new query); do NOT just reply with text. Confirm the edit and re-show the bundle.
 - Extract location from "around me" or "near X" for discover_products when relevant.
 - When user gives flexible date (e.g. "anytime next week"), use web_search for weather outlook and suggest optimal dates.
 - Metadata: The intent's proposed_plan is passed to the frontend as the Draft Itinerary; ensure your complete message references it (e.g. "your Flowers and Dinner") so the user sees we're building that plan.

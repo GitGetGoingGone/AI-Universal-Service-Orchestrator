@@ -20,6 +20,7 @@ async def create_payment_intent(
     order_id: str,
     amount_cents: int,
     currency: str = "usd",
+    metadata: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Create Stripe PaymentIntent for order.
@@ -37,10 +38,12 @@ async def create_payment_intent(
         # Simplified: single payment, transfers handled in webhook
         pass
 
+    meta = dict(metadata or {})
+    meta.setdefault("order_id", order_id)
     pi = stripe.PaymentIntent.create(
         amount=amount_cents,
         currency=currency,
-        metadata={"order_id": order_id},
+        metadata=meta,
         automatic_payment_methods={"enabled": True},
     )
     return {
@@ -107,6 +110,53 @@ async def create_checkout_session(
         metadata={"order_id": order_id},
     )
     return {"url": session.url, "session_id": session.id}
+
+
+async def create_supplemental_payment_intent(
+    experience_session_id: str,
+    leg_id: str,
+    amount_cents: int,
+    currency: str = "usd",
+    description: str = "",
+) -> Dict[str, Any]:
+    """Create supplemental PaymentIntent for design add/edit (AERD)."""
+    _ensure_stripe_configured()
+    stripe.api_key = settings.stripe_secret_key
+    pi = stripe.PaymentIntent.create(
+        amount=amount_cents,
+        currency=currency,
+        metadata={
+            "type": "supplemental",
+            "experience_session_id": experience_session_id,
+            "leg_id": leg_id,
+            "description": description or "Design add-on",
+        },
+        automatic_payment_methods={"enabled": True},
+    )
+    return {
+        "client_secret": pi.client_secret,
+        "payment_intent_id": pi.id,
+    }
+
+
+async def create_refund(
+    payment_intent_id: str,
+    amount_cents: int,
+    reason: str = "requested_by_customer",
+) -> Dict[str, Any]:
+    """Create Stripe refund for partial amount (AERD Replace/Delete)."""
+    _ensure_stripe_configured()
+    stripe.api_key = settings.stripe_secret_key
+    pi = stripe.PaymentIntent.retrieve(payment_intent_id)
+    charge_id = pi.latest_charge
+    if not charge_id:
+        raise ValueError("No charge found for payment intent")
+    refund = stripe.Refund.create(
+        charge=charge_id,
+        amount=amount_cents,
+        reason=reason,
+    )
+    return {"refund_id": refund.id, "status": refund.status}
 
 
 async def confirm_payment_intent(payment_intent_id: str) -> Optional[Dict[str, Any]]:

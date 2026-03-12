@@ -139,6 +139,7 @@ async def discover_products(
     partner_id: Optional[str] = Query(None, description="Filter by partner"),
     exclude_partner_id: Optional[str] = Query(None, description="Exclude partner (for re-sourcing)"),
     limit: int = Query(20, ge=1, le=100),
+    explore_more: bool = Query(False, description="When true, return more options (higher limit) so user can see additional UCP/MCP partner products"),
     budget_max: Optional[int] = Query(None, ge=0, description="Max price in cents (e.g. 5000 for $50)"),
     experience_tag: Optional[str] = Query(None, description="Filter/boost by experience category (e.g. baby, celebration)"),
     experience_tags: Optional[List[str]] = Query(None, description="Filter by multiple experience categories (AND semantics; e.g. luxury, travel-friendly)"),
@@ -149,15 +150,18 @@ async def discover_products(
     Chat-First: Returns JSON-LD and Adaptive Card for AI agents.
     Optionally include partner KB articles (semantic match) via include_kb_articles=true.
     """
-    logger.info("UCP discover request: intent=%s limit=%s", intent, limit)
+    effective_limit = min(limit * 2, 100) if explore_more else (limit * 2 if budget_max else limit)
+    effective_limit = min(effective_limit, 100)
+    logger.info("UCP discover request: intent=%s limit=%s explore_more=%s", intent, effective_limit, explore_more)
     products = await search(
-        query=intent, limit=limit * 2 if budget_max else limit,
+        query=intent, limit=effective_limit,
         partner_id=partner_id, exclude_partner_id=exclude_partner_id,
         experience_tag=experience_tag,
         experience_tags=experience_tags,
     )
     if settings.id_masking_enabled and products:
         products = await mask_products(products, source="local")
+    return_limit = effective_limit if explore_more else limit
     if budget_max is not None:
         filtered = []
         for p in products:
@@ -168,9 +172,9 @@ async def discover_products(
                     filtered.append(p)
             else:
                 filtered.append(p)
-        products = filtered[:limit]
+        products = filtered[:return_limit]
     else:
-        products = products[:limit]
+        products = products[:return_limit]
 
     logger.info("UCP discover response: intent=%s result_count=%s", intent, len(products))
 
