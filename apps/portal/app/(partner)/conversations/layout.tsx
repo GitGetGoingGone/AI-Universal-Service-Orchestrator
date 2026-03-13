@@ -6,9 +6,11 @@ export default function ConversationsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex h-[calc(100vh-8rem)]">
+    <div className="flex h-[calc(100vh-0px)] min-h-0">
       <ConversationSidebar />
-      <main className="flex-1 overflow-hidden flex flex-col">{children}</main>
+      <main className="flex-1 min-w-0 overflow-hidden flex flex-col" role="main">
+        {children}
+      </main>
     </div>
   );
 }

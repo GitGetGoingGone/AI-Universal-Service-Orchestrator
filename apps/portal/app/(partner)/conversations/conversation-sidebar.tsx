@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { PartnerGuard, PartnerRequiredMessage } from "@/components/partner-guard";
 import { Button } from "@/components/ui/button";
+import { MessageCircle, Plus } from "lucide-react";
 
 type Conversation = {
   id: string;
@@ -16,16 +17,31 @@ type Conversation = {
 
 type LastMessages = Record<string, { content: string; sent_at: string }>;
 
+const FILTERS = [
+  { value: "all" as const, label: "All" },
+  { value: "mine" as const, label: "Mine" },
+  { value: "unassigned" as const, label: "Unassigned" },
+];
+
 export function ConversationSidebar() {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const urlFilter = searchParams.get("filter");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [lastMessages, setLastMessages] = useState<LastMessages>({});
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "mine" | "unassigned">("all");
+  const [filter, setFilter] = useState<"all" | "mine" | "unassigned">(
+    urlFilter === "unassigned" ? "unassigned" : urlFilter === "mine" ? "mine" : "all"
+  );
   const [myMemberId, setMyMemberId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [partnerRequired, setPartnerRequired] = useState(false);
+
+  useEffect(() => {
+    const f = urlFilter === "unassigned" ? "unassigned" : urlFilter === "mine" ? "mine" : "all";
+    setFilter(f);
+  }, [urlFilter]);
 
   useEffect(() => {
     fetch("/api/partners/current-member")
@@ -68,10 +84,24 @@ export function ConversationSidebar() {
       if (res.ok) {
         router.push(`/conversations/${data.id}`);
       } else {
-        alert(data.detail ?? "Failed");
+        setCreating(false);
+        return;
       }
+    } catch {
+      // keep creating false in finally
     } finally {
       setCreating(false);
+    }
+  };
+
+  const setFilterAndUrl = (f: "all" | "mine" | "unassigned") => {
+    setFilter(f);
+    const isListPage = pathname === "/conversations" || pathname === "/conversations/";
+    if (isListPage) {
+      const params = new URLSearchParams(searchParams);
+      if (f === "all") params.delete("filter");
+      else params.set("filter", f);
+      router.replace(`/conversations?${params.toString()}`, { scroll: false });
     }
   };
 
@@ -81,43 +111,66 @@ export function ConversationSidebar() {
 
   return (
     <PartnerGuard>
-      <aside className="w-64 shrink-0 border-r border-[rgb(var(--color-border))] flex flex-col bg-[rgb(var(--color-background))]">
-        <div className="p-4 border-b border-[rgb(var(--color-border))]">
-          <Button onClick={handleNew} disabled={creating} className="w-full">
-            {creating ? "Creating…" : "+ New conversation"}
+      <aside
+        className="w-64 sm:w-72 shrink-0 border-r border-[rgb(var(--color-border))] flex flex-col bg-[rgb(var(--color-surface))] min-h-0"
+        aria-label="Conversations list"
+      >
+        <div className="p-4 border-b border-[rgb(var(--color-border))] shrink-0">
+          <Button
+            onClick={handleNew}
+            disabled={creating}
+            className="w-full gap-2"
+            aria-label={creating ? "Creating conversation" : "New conversation"}
+          >
+            <Plus className="size-4" aria-hidden />
+            {creating ? "Creating…" : "New conversation"}
           </Button>
         </div>
-        <div className="flex gap-1 p-2">
-          {(["all", "mine", "unassigned"] as const).map((f) => (
+        <div className="flex gap-1 p-2 shrink-0">
+          {FILTERS.map((f) => (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`flex-1 px-2 py-1 rounded text-xs capitalize ${
-                filter === f
+              key={f.value}
+              onClick={() => setFilterAndUrl(f.value)}
+              className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
+                filter === f.value
                   ? "bg-[rgb(var(--color-primary))] text-[rgb(var(--color-primary-foreground))]"
-                  : "bg-[rgb(var(--color-surface))]"
+                  : "bg-[rgb(var(--color-background))] text-[rgb(var(--color-text-secondary))] hover:bg-[rgb(var(--color-border))]/50"
               }`}
+              aria-pressed={filter === f.value}
+              aria-label={`Filter: ${f.label}`}
             >
-              {f}
+              {f.label}
             </button>
           ))}
         </div>
-        <nav className="flex-1 overflow-y-auto p-2">
+        <nav className="flex-1 overflow-y-auto p-2 min-h-0" aria-label="Conversation threads">
           {loading ? (
-            <p className="text-sm text-[rgb(var(--color-text-secondary))] p-4">Loading…</p>
+            <div className="p-4 space-y-2" aria-busy="true">
+              <div className="h-14 rounded-lg bg-[rgb(var(--color-border))]/30 animate-pulse" />
+              <div className="h-14 rounded-lg bg-[rgb(var(--color-border))]/30 animate-pulse" />
+              <div className="h-14 rounded-lg bg-[rgb(var(--color-border))]/30 animate-pulse" />
+            </div>
           ) : conversations.length === 0 ? (
-            <p className="text-sm text-[rgb(var(--color-text-secondary))] p-4">No conversations</p>
+            <div className="p-4 text-center">
+              <MessageCircle className="size-10 mx-auto text-[rgb(var(--color-text-secondary))]/50 mb-2" aria-hidden />
+              <p className="text-sm text-[rgb(var(--color-text-secondary))]">No conversations yet</p>
+              <p className="text-xs text-[rgb(var(--color-text-secondary))]/80 mt-1">
+                Create one above or they’ll appear when customers message.
+              </p>
+            </div>
           ) : (
-            <ul className="space-y-1">
+            <ul className="space-y-1" role="list">
               {conversations.map((c) => (
                 <li key={c.id}>
                   <button
+                    type="button"
                     onClick={() => router.push(`/conversations/${c.id}`)}
-                    className={`w-full text-left p-3 rounded-lg border transition ${
+                    className={`w-full text-left p-3 rounded-lg border transition-colors focus:outline-none focus:ring-2 focus:ring-[rgb(var(--color-primary))] focus:ring-offset-2 ${
                       activeId === c.id
                         ? "bg-[rgb(var(--color-primary))] text-[rgb(var(--color-primary-foreground))] border-[rgb(var(--color-primary))]"
-                        : "hover:bg-[rgb(var(--color-surface))] border-transparent hover:border-[rgb(var(--color-border))]"
+                        : "hover:bg-[rgb(var(--color-background))] border-transparent hover:border-[rgb(var(--color-border))]"
                     }`}
+                    aria-current={activeId === c.id ? "true" : undefined}
                   >
                     <p className="font-medium text-sm truncate">{c.title || "Untitled"}</p>
                     <p className="text-xs opacity-80 truncate mt-0.5">

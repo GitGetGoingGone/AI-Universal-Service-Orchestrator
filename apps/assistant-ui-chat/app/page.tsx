@@ -670,7 +670,7 @@ export default function ChatPage() {
           </div>
         </div>
       </aside>
-      <div key={chatKey} className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div key={chatKey} className="assistant-chat-main flex min-h-0 min-w-0 flex-1 flex-col">
         {!sidebarOpen && (
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--background)] px-4">
             <span className="text-sm font-semibold text-[var(--foreground)]">Atreyai</span>

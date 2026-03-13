@@ -35,6 +35,18 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+/* Chat content: text always black irrespective of theme */
+.assistant-chat-main {
+  --foreground: #171717;
+}
+.assistant-chat-main .msg-assistant,
+.assistant-chat-main .msg-assistant * {
+  color: #171717 !important;
+}
+.assistant-chat-main .msg-assistant {
+  background: #f4f4f5;
+}
+
 /* Message bubbles */
 .msg-user {
   @apply ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-zinc-900 px-4 py-2.5 text-sm text-white dark:bg-zinc-100 dark:text-zinc-900;

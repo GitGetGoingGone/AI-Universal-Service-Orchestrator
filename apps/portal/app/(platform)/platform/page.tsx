@@ -7,8 +7,11 @@ export default async function PlatformDashboardPage() {
   if (!userId) redirect("/platform/login");
 
   return (
-    <main className="max-w-[var(--content-max-width)] mx-auto px-6 py-8">
-      <h1 className="text-2xl font-bold mb-6">Platform Dashboard</h1>
+    <main className="max-w-[var(--content-max-width)] mx-auto px-6 py-8" role="main">
+      <h1 className="text-2xl font-bold text-[rgb(var(--color-text))] mb-2">Dashboard</h1>
+      <p className="text-sm text-[rgb(var(--color-text-secondary))] mb-8">
+        Platform metrics, conversations, conversion rate, and operations at a glance.
+      </p>
       <PlatformDashboard />
     </main>
   );

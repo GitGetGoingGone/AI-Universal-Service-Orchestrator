@@ -3,66 +3,123 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
+import {
+  LayoutDashboard,
+  Users,
+  ShoppingCart,
+  MessageSquare,
+  AlertCircle,
+  FileText,
+  Settings,
+  Shield,
+  Package,
+  Link2,
+} from "lucide-react";
 
-const NAV_ITEMS = [
-  { href: "/platform", label: "Dashboard", description: "Platform metrics and overview" },
-  { href: "/platform/partners", label: "Partners", description: "Manage partner accounts and onboarding" },
-  { href: "/platform/partners/ucp", label: "UCP Partners", description: "Stores with UCP manifest; add via manifest JSON or base URL" },
-  { href: "/platform/partners/shopify", label: "Shopify Partners", description: "Curated Shopify MCP partners; edit premium and details" },
-  { href: "/platform/orders", label: "Orders", description: "List of orders placed" },
-  { href: "/platform/experience-sessions", label: "Experience Sessions", description: "Bundle sessions and legs by thread" },
-  { href: "/platform/escalations", label: "Escalations", description: "Support escalations and assignments" },
-  { href: "/platform/rfps", label: "RFPs", description: "Hub RFPs and bid management" },
-  { href: "/platform/admins", label: "Admins", description: "Platform admin users" },
-  { href: "/platform/config", label: "Algorithms & Config", description: "LLM, ranking, discovery, and integrations" },
+const NAV_GROUPS = [
+  {
+    label: "Overview",
+    items: [{ href: "/platform", label: "Dashboard", icon: LayoutDashboard }],
+  },
+  {
+    label: "Partners & orders",
+    items: [
+      { href: "/platform/partners", label: "Partners", icon: Users },
+      { href: "/platform/partners/ucp", label: "UCP Partners", icon: Link2 },
+      { href: "/platform/partners/shopify", label: "Shopify Partners", icon: Package },
+      { href: "/platform/orders", label: "Orders", icon: ShoppingCart },
+    ],
+  },
+  {
+    label: "Conversations & sessions",
+    items: [
+      { href: "/platform/experience-sessions", label: "Experience sessions", icon: MessageSquare },
+      { href: "/platform/escalations", label: "Escalations", icon: AlertCircle },
+    ],
+  },
+  {
+    label: "Hub & config",
+    items: [
+      { href: "/platform/rfps", label: "RFPs", icon: FileText },
+      { href: "/platform/admins", label: "Admins", icon: Shield },
+      { href: "/platform/config", label: "Config", icon: Settings },
+    ],
+  },
 ];
+
+function NavLink({
+  href,
+  label,
+  icon: Icon,
+  isActive,
+}: {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  isActive: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+        isActive
+          ? "bg-[rgb(var(--color-primary))] text-[rgb(var(--color-primary-foreground))] font-medium"
+          : "text-[rgb(var(--color-text-secondary))] hover:bg-[rgb(var(--color-border))]/50 hover:text-[rgb(var(--color-text))]"
+      }`}
+      aria-current={isActive ? "page" : undefined}
+    >
+      <Icon className="size-4 shrink-0" aria-hidden />
+      <span>{label}</span>
+    </Link>
+  );
+}
 
 export function PlatformNav() {
   const pathname = usePathname();
-  const isLoginOrAccessDenied =
-    pathname === "/platform/login" || pathname === "/platform/access-denied";
-
-  if (isLoginOrAccessDenied) return null;
 
   return (
-    <div className="flex flex-col h-full w-56 shrink-0 border-r border-[rgb(var(--color-border))] bg-[rgb(var(--color-background))]">
-      <div className="p-4 border-b border-[rgb(var(--color-border))] flex items-center justify-between">
-        <Link href="/platform" className="font-semibold text-lg">
+    <aside
+      className="flex flex-col h-full w-56 min-w-0 shrink-0 border-r border-[rgb(var(--color-border))] bg-[rgb(var(--color-surface))] overflow-hidden"
+      aria-label="Platform admin navigation"
+    >
+      <div className="p-4 border-b border-[rgb(var(--color-border))] flex items-center justify-between shrink-0">
+        <Link
+          href="/platform"
+          className="font-semibold text-lg text-[rgb(var(--color-text))] hover:opacity-90"
+          aria-label="Platform admin home"
+        >
           Platform Admin
         </Link>
         <UserButton afterSignOutUrl="/" />
       </div>
-      <nav className="flex flex-col p-2 gap-0.5 overflow-y-auto flex-1">
-        {NAV_ITEMS.map(({ href, label, description }) => {
-          const isActive =
-            href === "/platform"
-              ? pathname === "/platform"
-              : pathname?.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`block px-3 py-2.5 rounded-md text-sm group ${
-                isActive
-                  ? "bg-[rgb(var(--color-primary))] text-[rgb(var(--color-primary-foreground))] font-medium"
-                  : "text-[rgb(var(--color-text-secondary))] hover:bg-[rgb(var(--color-border))] hover:text-[rgb(var(--color-text))]"
-              }`}
-              title={description}
+      <nav className="flex-1 overflow-y-auto p-3 space-y-4 min-h-0" aria-label="Platform admin sections">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label}>
+            <p
+              className="px-3 mb-1.5 text-xs font-medium uppercase tracking-wider text-[rgb(var(--color-text-secondary))]/80"
+              id={`platform-nav-${group.label.replace(/\s+/g, "-")}`}
             >
-              <span className="block font-medium">{label}</span>
-              <span
-                className={`block text-xs mt-0.5 ${
-                  isActive
-                    ? "opacity-90"
-                    : "text-[rgb(var(--color-text-secondary))] opacity-80"
-                }`}
-              >
-                {description}
-              </span>
-            </Link>
-          );
-        })}
+              {group.label}
+            </p>
+            <ul
+              className="space-y-0.5"
+              aria-labelledby={`platform-nav-${group.label.replace(/\s+/g, "-")}`}
+            >
+              {group.items.map(({ href, label, icon }) => {
+                const isActive =
+                  href === "/platform"
+                    ? pathname === "/platform"
+                    : pathname?.startsWith(href);
+                return (
+                  <li key={href}>
+                    <NavLink href={href} label={label} icon={icon} isActive={!!isActive} />
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
       </nav>
-    </div>
+    </aside>
   );
 }

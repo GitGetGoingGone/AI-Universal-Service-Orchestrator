@@ -26,6 +26,11 @@ export async function GET(request: Request) {
       ? supabase.from("orders").select("id,total_amount").gte("created_at", periodStart)
       : supabase.from("orders").select("id,total_amount");
 
+    const sessionsQuery =
+      periodStart
+        ? supabase.from("experience_sessions").select("id", { count: "exact", head: true }).gte("created_at", periodStart)
+        : supabase.from("experience_sessions").select("id", { count: "exact", head: true });
+
     const results = await Promise.allSettled([
       supabase.from("partners").select("id", { count: "exact", head: true }),
       supabase.from("partners").select("id", { count: "exact", head: true }).eq("verification_status", "pending"),
@@ -35,6 +40,9 @@ export async function GET(request: Request) {
       supabase.from("support_escalations").select("id", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("vendor_tasks").select("id", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("rfps").select("id", { count: "exact", head: true }).eq("status", "open"),
+      supabase.from("conversations").select("id", { count: "exact", head: true }),
+      supabase.from("conversations").select("id", { count: "exact", head: true }).eq("status", "active"),
+      sessionsQuery,
     ]);
 
     const settled = (i: number) => (results[i].status === "fulfilled" ? (results[i] as PromiseFulfilledResult<{ data?: unknown[]; count?: number }>).value : null);
@@ -46,6 +54,9 @@ export async function GET(request: Request) {
     const escalationsRes = settled(5);
     const tasksRes = settled(6);
     const rfpsRes = settled(7);
+    const conversationsTotalRes = settled(8);
+    const conversationsActiveRes = settled(9);
+    const sessionsRes = settled(10);
 
     const ordersData = ordersRes?.data || [];
     const revenueCents = (ordersData as { total_amount?: number }[]).reduce(
@@ -53,16 +64,25 @@ export async function GET(request: Request) {
       0
     );
 
+    const ordersCount = ordersData.length;
+    const sessionsCount = sessionsRes?.count ?? 0;
+    const conversionRate =
+      sessionsCount > 0 ? Math.round((ordersCount / sessionsCount) * 1000) / 10 : 0;
+
     return NextResponse.json({
       partners: partnersRes?.count ?? 0,
       pendingApprovals: pendingRes?.count ?? 0,
       activeBundles: bundlesRes?.count ?? 0,
-      ordersCount: ordersData.length,
+      ordersCount,
       ordersToday: ordersTodayRes?.count ?? 0,
       revenueCents,
       pendingEscalations: escalationsRes?.count ?? 0,
       vendorTasksPending: tasksRes?.count ?? 0,
       openRfps: rfpsRes?.count ?? 0,
+      conversationsTotal: conversationsTotalRes?.count ?? 0,
+      conversationsActive: conversationsActiveRes?.count ?? 0,
+      experienceSessions: sessionsCount,
+      conversionRate,
       period,
     });
   } catch (err) {
