@@ -54,8 +54,6 @@ function StatCard({
   icon: React.ComponentType<{ className?: string }>;
   variant?: "default" | "highlight" | "muted";
 }) {
-  const Wrapper = href ? Link : "div";
-  const wrapperProps = href ? { href } : {};
   const base =
     "block p-5 rounded-xl border border-[rgb(var(--color-border))] bg-[rgb(var(--color-surface))] transition-colors text-left";
   const hover = href ? "hover:border-[rgb(var(--color-primary))]/50 hover:shadow-sm" : "";
@@ -66,8 +64,9 @@ function StatCard({
         ? "bg-[rgb(var(--color-background))]"
         : "";
 
-  return (
-    <Wrapper className={`${base} ${hover} ${variantStyles}`} {...wrapperProps}>
+  const className = `${base} ${hover} ${variantStyles}`;
+  const content = (
+    <>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-medium text-[rgb(var(--color-text-secondary))]">{title}</p>
@@ -82,8 +81,17 @@ function StatCard({
           <Icon className="size-5" aria-hidden />
         </div>
       </div>
-    </Wrapper>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {content}
+      </Link>
+    );
+  }
+  return <div className={className}>{content}</div>;
 }
 
 export function PlatformDashboard() {
