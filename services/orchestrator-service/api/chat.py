@@ -37,7 +37,9 @@ from clients import (
     get_sla_re_sourcing_pending,
     execute_sla_re_sourcing,
 )
+from db import merge_thread_conversation_metrics
 from agentic.loop import run_agentic_loop
+from agentic.multi_agent_orchestrator import attach_multi_agent_to_chat_result
 from agentic.response import generate_engagement_response, stream_engagement_response
 from packages.shared.utils.api_response import chat_first_response, request_id_from_request
 from packages.shared.json_ld.error import error_ld
@@ -94,6 +96,69 @@ class ChatRequest(BaseModel):
     order_id: Optional[str] = Field(None, description="Thread's paid order ID - use for track/support, never ask user")
     explore_product_id: Optional[str] = Field(None, description="When set (e.g. from Explore button), fetch and show full product details")
     debug: bool = Field(False, description="When true, include prompt_trace (prompt sent and response received) for inspection")
+    multi_agent_mode: bool = Field(False, description="Run multi-agent bundle scouts (local DB, UCP, context, etc.) when intent allows")
+    agents: Optional[List[str]] = Field(None, description="Selected agent ids; empty uses defaults from platform config")
+    cancel_agent_ids: Optional[List[str]] = Field(None, description="User-skipped agents (only agents marked user_cancellable)")
+    agent_skills_overrides: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Per-agent skill overrides from user (only for agents with user_editable)",
+    )
+
+
+async def _finalize_with_multi_agent(
+    result: Dict[str, Any],
+    body: ChatRequest,
+    user_id: Optional[str],
+    discover_fn,
+    effective_user_message: str,
+) -> Dict[str, Any]:
+    if not isinstance(result, dict) or result.get("error"):
+        return result
+    try:
+        out = await attach_multi_agent_to_chat_result(
+            result,
+            multi_agent_mode=bool(body.multi_agent_mode),
+            agents_requested=body.agents,
+            cancel_agent_ids=body.cancel_agent_ids,
+            agent_skills_overrides=body.agent_skills_overrides if isinstance(body.agent_skills_overrides, dict) else {},
+            user_message=effective_user_message,
+            thread_id=body.thread_id,
+            user_id=user_id,
+            limit=body.limit,
+            discover_products_fn=discover_fn,
+            message_count=len(body.messages or []),
+        )
+        if body.thread_id and isinstance(out, dict):
+            agents = (out.get("multi_agent_status") or {}).get("agents") or []
+            merge_thread_conversation_metrics(
+                body.thread_id,
+                thought_timelines=out.get("thought_timelines"),
+                memory_health=out.get("memory_health"),
+                credit_usage=out.get("credit_usage"),
+                multi_agent_agent_count=len(agents) if isinstance(agents, list) else 0,
+            )
+        return out
+    except Exception as e:
+        logger.warning("multi_agent attach failed: %s", e)
+        return result
+
+
+def _multi_agent_extras(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Top-level chat response fields for Assistant UI huddle."""
+    if not isinstance(result, dict):
+        return {}
+    return {
+        k: result.get(k)
+        for k in (
+            "multi_agent_status",
+            "todos",
+            "thought_timelines",
+            "memory_health",
+            "credit_usage",
+            "multi_agent_narrative",
+        )
+        if result.get(k) is not None
+    }
 
 
 async def _stream_chat_events(
@@ -138,7 +203,7 @@ async def _stream_chat_events(
                 explore_product_id=body.explore_product_id,
                 on_thinking=on_thinking,
             )
-            result_holder[0] = r
+            result_holder[0] = await _finalize_with_multi_agent(r, body, user_id, _discover, effective_user_message)
         except Exception as e:
             err_holder[0] = e
         finally:
@@ -267,6 +332,7 @@ async def _stream_chat_events(
             agent_reasoning=result.get("agent_reasoning", []),
             suggested_ctas=suggested_ctas_stream if suggested_ctas_stream else None,
             summary_format="markdown" if not use_adaptive_cards else None,
+            **_multi_agent_extras(result),
         )
         if body.debug:
             engagement_debug_or: Dict[str, Any] = engagement_debug if isinstance(engagement_debug, dict) else {}
@@ -505,6 +571,7 @@ async def chat(
             order_id=body.order_id,
             explore_product_id=body.explore_product_id,
         )
+        result = await _finalize_with_multi_agent(result, body, user_id, _discover, effective_message)
     except Exception as e:
         return chat_first_response(
             data={"intent": None, "products": None, "error": str(e)},
@@ -593,6 +660,7 @@ async def chat(
         agent_reasoning=result.get("agent_reasoning", []),
         suggested_ctas=suggested_ctas if suggested_ctas else None,
         summary_format="markdown" if not use_adaptive_cards else None,
+        **_multi_agent_extras(result),
     )
     if body.debug:
         engagement_debug_ns_or: Dict[str, Any] = engagement_debug_ns

@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useRef, useState, useEffect, useCallback, useMemo } from "react";
+import { History, Settings, Sparkles } from "lucide-react";
+import { takeCancelAgentIdsForRequest } from "@/components/AgentHuddle";
 import {
   AssistantRuntimeProvider,
   ThreadPrimitive,
@@ -89,6 +91,165 @@ function UserMessage() {
 }
 
 type BundleItem = { name?: string; price?: number; currency?: string };
+
+type RegistryAgent = {
+  id: string;
+  name?: string;
+  enabled_default?: boolean;
+  user_editable?: boolean;
+  user_cancellable?: boolean;
+};
+
+function maStorageKey(threadId: string | null, part: string) {
+  return `uso_ma_${part}_${threadId || "pending"}`;
+}
+
+function AgentToolbarChat({
+  threadId,
+  onConfig,
+}: {
+  threadId: string | null;
+  onConfig: (v: { multi_agent_mode: boolean; agents: string[] | undefined; skills: Record<string, string> }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [catalog, setCatalog] = useState<{ enabled?: boolean; agents?: RegistryAgent[] } | null>(null);
+  const [modeOn, setModeOn] = useState(true);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [skillText, setSkillText] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/agents");
+        const j = (await r.json()) as { enabled?: boolean; agents?: RegistryAgent[] };
+        if (cancelled) return;
+        setCatalog(j);
+        const agents = j.agents ?? [];
+        const fromStore = localStorage.getItem(maStorageKey(threadId, "picked"));
+        if (fromStore) {
+          try {
+            const arr = JSON.parse(fromStore) as string[];
+            setPicked(new Set(Array.isArray(arr) ? arr : []));
+          } catch {
+            setPicked(new Set(agents.filter((a) => a.enabled_default !== false).map((a) => a.id)));
+          }
+        } else {
+          setPicked(new Set(agents.filter((a) => a.enabled_default !== false).map((a) => a.id)));
+        }
+        const sk = localStorage.getItem(maStorageKey(threadId, "skills"));
+        if (sk) {
+          try {
+            setSkillText(JSON.parse(sk) as Record<string, string>);
+          } catch {
+            setSkillText({});
+          }
+        } else setSkillText({});
+        const m = localStorage.getItem(maStorageKey(threadId, "mode"));
+        setModeOn(m !== "0");
+      } catch {
+        if (!cancelled) setCatalog({ enabled: false, agents: [] });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
+
+  useEffect(() => {
+    if (!catalog?.agents?.length) return;
+    const agents = catalog.agents;
+    const ids = agents.map((a) => a.id).filter((id) => picked.has(id));
+    localStorage.setItem(maStorageKey(threadId, "picked"), JSON.stringify(ids));
+    localStorage.setItem(maStorageKey(threadId, "mode"), modeOn ? "1" : "0");
+    localStorage.setItem(maStorageKey(threadId, "skills"), JSON.stringify(skillText));
+    onConfig({
+      multi_agent_mode: modeOn,
+      agents: ids.length ? ids : undefined,
+      skills: skillText,
+    });
+  }, [catalog, picked, modeOn, skillText, threadId, onConfig]);
+
+  const agents = catalog?.agents ?? [];
+  if (catalog && catalog.enabled === false && agents.length === 0) return null;
+
+  const toggle = (id: string) => {
+    setPicked((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  };
+
+  return (
+    <div className="mb-2 rounded-xl border border-[var(--border)] bg-[var(--card)]/90 px-3 py-2 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm text-[var(--foreground)]">
+          <Sparkles className="h-4 w-4 shrink-0 text-[var(--primary)]" aria-hidden />
+          <span className="font-medium">Agents active</span>
+          <label className="ml-1 flex cursor-pointer items-center gap-1.5 text-xs text-[var(--foreground)]/75">
+            <input
+              type="checkbox"
+              checked={modeOn}
+              onChange={(e) => setModeOn(e.target.checked)}
+              className="rounded border-[var(--border)]"
+            />
+            Multi-agent
+          </label>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="rounded-lg p-2 text-[var(--foreground)] hover:bg-[var(--muted)]"
+          aria-label="Agent settings"
+          aria-expanded={open}
+        >
+          <Settings className="h-5 w-5" aria-hidden />
+        </button>
+      </div>
+      {open && (
+        <div className="mt-3 space-y-3 border-t border-[var(--border)] pt-3">
+          <p className="text-xs text-[var(--muted)]">
+            Select discovery scouts. For weather, you can add JSON overrides when marked editable (e.g.{" "}
+            <code className="rounded bg-[var(--muted)] px-1">{`{"min_temp_f":70}`}</code>).
+          </p>
+          <ul className="max-h-56 space-y-3 overflow-y-auto pr-1">
+            {agents.map((a) => (
+              <li key={a.id} className="rounded-lg border border-[var(--border)]/60 p-2">
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-1 rounded border-[var(--border)]"
+                    checked={picked.has(a.id)}
+                    onChange={() => toggle(a.id)}
+                  />
+                  <span>
+                    <span className="font-medium text-[var(--foreground)]">{a.name ?? a.id}</span>
+                    {a.user_cancellable ? (
+                      <span className="ml-2 text-[10px] uppercase text-[var(--muted)]">skippable</span>
+                    ) : null}
+                  </span>
+                </label>
+                {a.user_editable ? (
+                  <input
+                    type="text"
+                    placeholder={`Skills JSON for ${a.id}`}
+                    value={skillText[a.id] ?? ""}
+                    onChange={(e) => setSkillText((s) => ({ ...s, [a.id]: e.target.value }))}
+                    className="mt-2 w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 font-mono text-xs text-[var(--foreground)]"
+                    aria-label={`Skill overrides for ${a.name ?? a.id}`}
+                  />
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BundleViewCard({
   items,
   total,
@@ -149,6 +310,18 @@ function ChatContent({
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
 
+  const maCfgRef = useRef<{
+    multi_agent_mode: boolean;
+    agents: string[] | undefined;
+    skills: Record<string, string>;
+  }>({ multi_agent_mode: true, agents: undefined, skills: {} });
+  const handleMaConfig = useCallback(
+    (v: { multi_agent_mode: boolean; agents: string[] | undefined; skills: Record<string, string> }) => {
+      maCfgRef.current = v;
+    },
+    []
+  );
+
   const transport = useMemo(
     () =>
       new AssistantChatTransport({
@@ -175,6 +348,22 @@ function ChatContent({
             body.explore_product_id = epid;
             exploreProductIdRef.current = null;
           }
+          const cancelIds = takeCancelAgentIdsForRequest();
+          if (cancelIds.length) body.cancel_agent_ids = cancelIds;
+          const cfg = maCfgRef.current;
+          if (cfg.multi_agent_mode) body.multi_agent_mode = true;
+          if (cfg.agents?.length) body.agents = cfg.agents;
+          const overrides: Record<string, unknown> = {};
+          for (const [agentId, rawSkill] of Object.entries(cfg.skills)) {
+            const t = (rawSkill || "").trim();
+            if (!t) continue;
+            try {
+              overrides[agentId] = JSON.parse(t) as unknown;
+            } catch {
+              overrides[agentId] = { condition: t };
+            }
+          }
+          if (Object.keys(overrides).length) body.agent_skills_overrides = overrides;
           return { body };
         },
       }),
@@ -355,6 +544,7 @@ function ChatContent({
                   </div>
                 </AuiIf>
                 <div className="flex flex-col gap-4 pt-6">
+                  <AgentToolbarChat threadId={threadId} onConfig={handleMaConfig} />
                   <ThreadPrimitive.Messages
                     components={{ UserMessage, AssistantMessage }}
                   />
@@ -672,18 +862,40 @@ export default function ChatPage() {
       </aside>
       <div key={chatKey} className="assistant-chat-main flex min-h-0 min-w-0 flex-1 flex-col">
         {!sidebarOpen && (
-          <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--background)] px-4">
-            <span className="text-sm font-semibold text-[var(--foreground)]">Atreyai</span>
-            <Link
-              href="/settings"
-              className="rounded p-2 text-[var(--muted)] hover:bg-[var(--border)]/50 hover:text-[var(--foreground)]"
-              aria-label="Settings"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </Link>
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--background)] px-3">
+            <div className="flex min-w-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="rounded-lg p-2 text-[var(--muted)] hover:bg-[var(--border)]/50 hover:text-[var(--foreground)]"
+                aria-label="Open conversation history"
+              >
+                <History className="h-5 w-5" aria-hidden />
+              </button>
+              <span className="truncate text-sm font-semibold text-[var(--foreground)]">Atreyai</span>
+            </div>
+            <div className="flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className="rounded-lg p-2 text-[var(--muted)] hover:bg-[var(--border)]/50 hover:text-[var(--foreground)]"
+                aria-label="New chat"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+              <Link
+                href="/settings"
+                className="rounded-lg p-2 text-[var(--muted)] hover:bg-[var(--border)]/50 hover:text-[var(--foreground)]"
+                aria-label="Settings"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </Link>
+            </div>
           </div>
         )}
         <ChatContent

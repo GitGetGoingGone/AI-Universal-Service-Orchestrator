@@ -40,6 +40,7 @@ from api.auxiliary import router as auxiliary_router
 from api.standing_intents import router as standing_intents_router
 from api.admin import router as admin_router
 from api.gateway_ucp import router as gateway_ucp_router
+from api.multi_agent import router as multi_agent_router
 
 app = FastAPI(
     title="Orchestrator Service",
@@ -60,6 +61,7 @@ app.add_exception_handler(USOException, uso_exception_handler)  # type: ignore[r
 app.add_exception_handler(Exception, generic_exception_handler)
 
 app.include_router(gateway_ucp_router)
+app.include_router(multi_agent_router)
 app.include_router(chat_router)
 app.include_router(products_router)
 app.include_router(link_account_router)

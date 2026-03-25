@@ -62,6 +62,10 @@ export async function POST(req: Request) {
       bundle_id?: string;
       order_id?: string;
       explore_product_id?: string;
+      multi_agent_mode?: boolean;
+      agents?: string[];
+      cancel_agent_ids?: string[];
+      agent_skills_overrides?: Record<string, unknown>;
     };
 
     /** Extract text from message content/parts (AI SDK: string or [{ type: "text", text }]) */
@@ -153,6 +157,12 @@ export async function POST(req: Request) {
     if (body.bundle_id) payload.bundle_id = body.bundle_id;
     if (body.order_id) payload.order_id = body.order_id;
     if (body.explore_product_id) payload.explore_product_id = body.explore_product_id;
+    if (body.multi_agent_mode === true) payload.multi_agent_mode = true;
+    if (Array.isArray(body.agents) && body.agents.length > 0) payload.agents = body.agents;
+    if (Array.isArray(body.cancel_agent_ids) && body.cancel_agent_ids.length > 0)
+      payload.cancel_agent_ids = body.cancel_agent_ids;
+    if (body.agent_skills_overrides && typeof body.agent_skills_overrides === "object")
+      payload.agent_skills_overrides = body.agent_skills_overrides;
 
     const res = await fetch(`${GATEWAY_URL}/api/v1/chat?stream=true&agentic=true`, {
       method: "POST",
@@ -282,6 +292,25 @@ export async function POST(req: Request) {
               data: { options: suggestedOptions },
             });
           }
+          const maStatus = doneData.multi_agent_status as Record<string, unknown> | undefined;
+          const todos = doneData.todos as unknown[] | undefined;
+          const thoughtTimelines = doneData.thought_timelines as unknown[] | undefined;
+          const memoryHealth = doneData.memory_health as Record<string, unknown> | undefined;
+          const creditUsage = doneData.credit_usage as Record<string, unknown> | undefined;
+          if (maStatus && Array.isArray((maStatus as { agents?: unknown[] }).agents) && (maStatus as { agents: unknown[] }).agents.length > 0) {
+            writer.write({
+              type: "data",
+              name: "agent_huddle",
+              data: {
+                multi_agent_status: maStatus,
+                todos,
+                thought_timelines: thoughtTimelines,
+                memory_health: memoryHealth,
+                credit_usage: creditUsage,
+              },
+            } as Parameters<typeof writer.write>[0]);
+          }
+
           if (Array.isArray(suggestedCtas) && suggestedCtas.length > 0) {
             const orderId = (doneData.order_id as string) ?? (doneData.data as Record<string, unknown>)?.order_id as string | undefined;
             const bundleId = (doneData.bundle_id as string) ?? body.bundle_id as string | undefined;

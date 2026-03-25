@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase";
 import { isPlatformAdmin } from "@/lib/auth";
+import { parseMultiAgentConfigPatch } from "@/lib/multi-agent-config-schema";
 
 export async function GET() {
   try {
@@ -103,6 +104,16 @@ export async function PATCH(request: Request) {
         body.thinking_messages && typeof body.thinking_messages === "object"
           ? body.thinking_messages
           : {};
+    if (body.multi_agent_config !== undefined) {
+      const parsed = parseMultiAgentConfigPatch(body.multi_agent_config);
+      if (!parsed) {
+        return NextResponse.json(
+          { detail: "Invalid multi_agent_config: expected { enabled, workflow_order, agents[] with id }" },
+          { status: 400 }
+        );
+      }
+      updates.multi_agent_config = parsed;
+    }
 
     const { data: existing } = await supabase
       .from("platform_config")

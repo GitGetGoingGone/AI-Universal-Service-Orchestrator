@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 type LLMProvider = {
@@ -1839,6 +1840,14 @@ export function ConfigEditor() {
         <div className="space-y-6">
           <p className="text-sm text-[rgb(var(--color-text-secondary))]">
             Partner ranking weights, sponsorship pricing, and composite discovery (date night, bundles).
+          </p>
+          <p className="text-sm rounded-lg border border-[rgb(var(--color-border))] bg-[rgb(var(--color-surface))] px-3 py-2 text-[rgb(var(--color-text))]">
+            <strong className="font-medium">Multi-agent bundle scouts</strong> — workflow, skills, plan templates, and
+            user skip/editing flags are managed on{" "}
+            <Link href="/platform/agents" className="text-[rgb(var(--color-primary))] underline font-medium">
+              Multi-agent scouts
+            </Link>
+            .
           </p>
       <div className="border border-[rgb(var(--color-border))] rounded-md p-4">
         <button

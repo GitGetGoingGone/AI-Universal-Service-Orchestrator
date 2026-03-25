@@ -4,6 +4,7 @@ import React from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { useGatewayAction } from "@/contexts/GatewayActionContext";
 import { PaymentFormInline } from "./PaymentFormInline";
+import { AgentHuddle } from "./AgentHuddle";
 
 type Product = {
   id?: string;
@@ -260,10 +261,33 @@ const DATA_RENDERERS_BY_NAME: Record<string, React.ComponentType<DataPartProps>>
   thinking: ThinkingRenderer as React.ComponentType<DataPartProps>,
   payment_form: PaymentFormRenderer as React.ComponentType<DataPartProps>,
   thread_metadata: ThreadMetadataRenderer as React.ComponentType<DataPartProps>,
+  agent_huddle: AgentHuddleRenderer as React.ComponentType<DataPartProps>,
 };
 
 function ThreadMetadataRenderer() {
   return null;
+}
+
+function AgentHuddleRenderer({
+  data,
+}: {
+  data: {
+    multi_agent_status?: { agents?: unknown[] };
+    todos?: { label?: string; status?: string }[];
+    thought_timelines?: { label?: string; duration_ms?: number; detail?: string }[];
+    memory_health?: { label?: string; status?: string; detail?: string };
+    credit_usage?: { estimated_total_tokens?: number; note?: string };
+  };
+}) {
+  return (
+    <AgentHuddle
+      multi_agent_status={data.multi_agent_status}
+      todos={data.todos}
+      thought_timelines={data.thought_timelines}
+      memory_health={data.memory_health}
+      credit_usage={data.credit_usage}
+    />
+  );
 }
 
 function DataPartFallback({ name, data }: { name: string; data: unknown }) {

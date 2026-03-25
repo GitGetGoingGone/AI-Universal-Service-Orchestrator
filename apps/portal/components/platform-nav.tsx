@@ -14,6 +14,8 @@ import {
   Shield,
   Package,
   Link2,
+  Bot,
+  LineChart,
 } from "lucide-react";
 
 const NAV_GROUPS = [
@@ -34,6 +36,7 @@ const NAV_GROUPS = [
     label: "Conversations & sessions",
     items: [
       { href: "/platform/experience-sessions", label: "Experience sessions", icon: MessageSquare },
+      { href: "/platform/conversations", label: "Chat metrics & cost", icon: LineChart },
       { href: "/platform/escalations", label: "Escalations", icon: AlertCircle },
     ],
   },
@@ -42,6 +45,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/platform/rfps", label: "RFPs", icon: FileText },
       { href: "/platform/admins", label: "Admins", icon: Shield },
+      { href: "/platform/agents", label: "Multi-agent scouts", icon: Bot },
       { href: "/platform/config", label: "Config", icon: Settings },
     ],
   },

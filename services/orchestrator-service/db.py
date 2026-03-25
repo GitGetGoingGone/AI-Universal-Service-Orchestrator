@@ -391,6 +391,61 @@ def set_thread_refinement_context(
         pass
 
 
+def merge_thread_conversation_metrics(
+    thread_id: Optional[str],
+    *,
+    thought_timelines: Optional[List[Dict[str, Any]]] = None,
+    memory_health: Optional[Dict[str, Any]] = None,
+    credit_usage: Optional[Dict[str, Any]] = None,
+    multi_agent_agent_count: Optional[int] = None,
+) -> None:
+    """
+    Append turn snapshot to chat_threads.conversation_metrics for admin cost dashboard.
+    Safe no-op when Supabase or thread_id missing.
+    """
+    if not thread_id:
+        return
+    client = get_supabase()
+    if not client:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        r = client.table("chat_threads").select("conversation_metrics").eq("id", thread_id).limit(1).execute()
+        row = r.data[0] if r.data else {}
+        cur = row.get("conversation_metrics") if isinstance(row, dict) else {}
+        if not isinstance(cur, dict):
+            cur = {}
+        turns = cur.get("turns")
+        if not isinstance(turns, list):
+            turns = []
+        snap: Dict[str, Any] = {"at": datetime.now(timezone.utc).isoformat()}
+        if thought_timelines is not None:
+            snap["thought_timelines"] = thought_timelines
+        if memory_health is not None:
+            snap["memory_health"] = memory_health
+        if credit_usage is not None:
+            snap["credit_usage"] = credit_usage
+        if multi_agent_agent_count is not None:
+            snap["multi_agent_agent_count"] = multi_agent_agent_count
+        turns.append(snap)
+        # Cap list size
+        turns = turns[-80:]
+        total_tok = 0
+        for t in turns:
+            if isinstance(t, dict) and isinstance(t.get("credit_usage"), dict):
+                total_tok += int(t["credit_usage"].get("estimated_total_tokens") or 0)
+        cur["turns"] = turns
+        cur["aggregated"] = {
+            "total_estimated_tokens": total_tok,
+            "turn_count": len(turns),
+            "last_memory_health": (memory_health or {}).get("status") if isinstance(memory_health, dict) else None,
+        }
+        client.table("chat_threads").update({"conversation_metrics": cur}).eq("id", thread_id).execute()
+    except Exception:
+        pass
+
+
 def log_orchestration_trace(
     trace_type: str,
     *,
