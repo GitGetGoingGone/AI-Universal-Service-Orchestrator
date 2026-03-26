@@ -84,18 +84,6 @@ def _build_context(result: Dict[str, Any]) -> str:
             label = str(o.get("label", "")).strip()
             desc = (o.get("description") or "").strip() or "A curated experience for you."
             theme_entries.append(f"• {label}: {desc[:120]}")
-        # When Intent returns only 1 option, add generic tier variants (same categories, different emphasis)—no domain-specific scripts
-        sq = intent.get("search_queries") or []
-        if len(theme_entries) == 1 and len(sq) >= 2:
-            first_opt = bundle_opts[0] if isinstance(bundle_opts[0], dict) else {}
-            base_label = str(first_opt.get("label", "")).strip() or "Primary option"
-            cat_hint = ", ".join(str(x) for x in sq[:6] if x)
-            theme_entries.extend(
-                [
-                    f"• {base_label} (streamlined): Core categories only ({cat_hint})—lighter selection, faster path.",
-                    f"• {base_label} (expanded): Same categories ({cat_hint})—fuller coverage and upgraded picks where available.",
-                ]
-            )
         if theme_entries:
             # When a flow rule says skip_date_area_probe (e.g. gift), do not ask for date/area in this line
             try:
@@ -106,16 +94,38 @@ def _build_context(result: Dict[str, Any]) -> str:
                 _skip_date_area = bool(_rule and _rule.get("skip_date_area_probe"))
             except Exception:
                 _skip_date_area = False
-            if _skip_date_area:
+            if len(theme_entries) == 1:
+                if _skip_date_area:
+                    theme_suffix = "\nDescribe this theme once. Invite confirmation so we can show product options. Do NOT ask for date or area."
+                else:
+                    theme_suffix = (
+                        "\nDescribe this theme once. Then ask for any missing date and location (or next required detail). "
+                        "Do NOT offer '(streamlined)', '(expanded)', or duplicate labels as separate choices."
+                    )
+                theme_header = (
+                    "Configured theme (only one in intent — present it once, clearly). "
+                    "Do NOT invent extra themes, tiers, or '(streamlined)/(expanded)' variants. "
+                    "After describing it, move to the next step (usually date and area unless skipped above).\n"
+                )
+            elif _skip_date_area:
                 theme_suffix = "\nList each option with its description so the user can choose. Invite them to pick one so we can show product options. Do NOT ask for date or area."
+                theme_header = (
+                    "Themed experience options — you MUST present ALL of these to the user (every bullet below), "
+                    "never pick or default to one for them unless they explicitly ask you to choose (then pick one from this list only):\n"
+                )
             else:
                 theme_suffix = "\nList each option with its description so the user can choose. After listing, invite them to pick one and share date/area. Do NOT say 'I'm thinking X' or suggest a single option."
+                theme_header = (
+                    "Themed experience options — you MUST present ALL of these to the user (every bullet below), "
+                    "never pick or default to one for them unless they explicitly ask you to choose (then pick one from this list only):\n"
+                )
             parts.append(
-                "Themed experience options — you MUST present ALL of these to the user (2–3+ options), never pick or default to one:\n"
+                theme_header
                 + "\n".join(theme_entries)
                 + theme_suffix
                 + "\nGROUNDING: If the user asks what is inside each option, theme, or tier, answer ONLY using the labels and descriptions above plus category/search_queries from intent. "
-                "Do NOT add new theme names, occasions, or product types that are not in this context."
+                "Do NOT add new theme names, occasions, or product types that are not in this context. "
+                "If they say 'surprise me' or ask you to pick: choose exactly one label from the bullets above (or the single theme if only one)—never substitute unrelated experiences."
             )
 
     last_suggestion = result.get("last_suggestion")
@@ -169,8 +179,10 @@ def _build_context(result: Dict[str, Any]) -> str:
             exp_str = ", ".join(str(t) for t in exp_cats[:12] if t)
             parts.append(
                 "User is browsing (open-ended). Base your response on their actual message above. "
-                f"Probe what experience they want; use these themes when relevant: {exp_str}. "
-                "Do NOT list categories or suggest fetching products until they pick an experience."
+                f"OFFICIAL theme names for this deployment (use ONLY these when offering experiences—do not invent others): {exp_str}. "
+                "You may offer a subset or ask which they prefer. "
+                "If they say 'surprise me' or ask you to choose, pick one name from that list only and briefly say why—do not add themes outside the list. "
+                "Do NOT list product SKUs or suggest fetching products until they pick a theme (or confirm your pick)."
             )
         else:
             parts.append(

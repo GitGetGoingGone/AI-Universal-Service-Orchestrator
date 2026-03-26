@@ -475,8 +475,13 @@ def _snapshot_to_progress_payload(
     t0: float,
     include_full_meta: bool,
     in_flight: Optional[Dict[str, Dict[str, Any]]] = None,
+    hide_pending_agents: bool = False,
 ) -> Dict[str, Any]:
-    """Build multi_agent_status (+ optional meta) for streaming or final response."""
+    """Build multi_agent_status (+ optional meta) for streaming or final response.
+
+    When hide_pending_agents is True (streaming progress), omit scouts that are not yet
+    in completed or in_flight so the UI reveals each row as work starts or finishes.
+    """
     inflight = in_flight or {}
     agent_payload: List[Dict[str, Any]] = []
     for aid in ordered:
@@ -496,7 +501,7 @@ def _snapshot_to_progress_payload(
             if summ:
                 row["summary"] = summ
             agent_payload.append(row)
-        else:
+        elif not hide_pending_agents:
             adef = agents_by_id.get(aid, {})
             agent_payload.append(_running_placeholder_public(aid, adef))
 
@@ -513,7 +518,25 @@ def _snapshot_to_progress_payload(
 
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
     running_n = sum(1 for a in agent_payload if a.get("status") == "running")
-    if running_n == 0:
+    total_ordered = len(ordered)
+    visible_n = len(agent_payload)
+    if hide_pending_agents and visible_n < total_ordered:
+        if visible_n == 0:
+            coord_detail = (
+                "Scouts appear here as each run begins or is skipped; "
+                f"{total_ordered} scout(s) scheduled for this turn."
+            )
+        elif running_n == 0:
+            coord_detail = (
+                f"Showing {visible_n} of {total_ordered} scout(s); "
+                "more appear as each begins or is skipped."
+            )
+        else:
+            coord_detail = (
+                f"Showing {visible_n} of {total_ordered} scout(s); "
+                f"{running_n} in progress."
+            )
+    elif running_n == 0:
         coord_detail = f"Ran {len(agent_payload)} scout(s) in parallel for this turn."
     else:
         coord_detail = f"Completed {len(agent_payload) - running_n} of {len(agent_payload)} scout(s)."
@@ -580,8 +603,9 @@ async def run_multi_agent_bundle(
 ) -> Dict[str, Any]:
     """
     Returns multi_agent_status, todos, thought_timelines, memory_health, credit_usage, narrative, merged_hints.
-    When on_progress is set (streaming chat), emits snapshots: initial all-running, per–PAO-step
-    partial traces while each scout runs, and again when each scout finishes.
+    When on_progress is set (streaming chat), emits snapshots as each scout starts (or finishes
+    if it returns immediately), per–PAO-step partial traces while running, and again when each
+    scout finishes. Pending scouts are omitted until they start or complete (no all-at-once list).
     """
     t0 = time.perf_counter()
     reg = get_resolved_registry()
@@ -671,10 +695,29 @@ async def run_multi_agent_bundle(
                     t0=t0,
                     include_full_meta=True,
                     in_flight=dict(in_flight_partial),
+                    hide_pending_agents=True,
                 )
             await _emit(snap)
 
         ep: PaoEmitFn = emit_pao if on_progress else None
+
+        if ep:
+            async with progress_lock:
+                in_flight_partial[aid] = {
+                    "trace": [],
+                    "summary": "Scout is starting…",
+                }
+                snap_start = _snapshot_to_progress_payload(
+                    ordered,
+                    agents_by_id,
+                    completed,
+                    message_count=message_count,
+                    t0=t0,
+                    include_full_meta=True,
+                    in_flight=dict(in_flight_partial),
+                    hide_pending_agents=True,
+                )
+            await _emit(snap_start)
 
         if aid == AGENT_LOCAL_DB:
             return await _invoke_local_db(inv, discover_products_fn, plan_labels, emit_pao=ep)
@@ -695,19 +738,6 @@ async def run_multi_agent_bundle(
 
     if not ordered:
         return {}
-
-    if on_progress:
-        async with progress_lock:
-            init_snap = _snapshot_to_progress_payload(
-                ordered,
-                agents_by_id,
-                completed,
-                message_count=message_count,
-                t0=t0,
-                include_full_meta=True,
-                in_flight={},
-            )
-        await _emit(init_snap)
 
     task_by_aid: Dict[asyncio.Task[Any], str] = {}
     for aid in ordered:
@@ -751,6 +781,7 @@ async def run_multi_agent_bundle(
                             t0=t0,
                             include_full_meta=True,
                             in_flight=dict(in_flight_partial),
+                            hide_pending_agents=True,
                         )
                     await _emit(done_snap)
                 else:
@@ -773,6 +804,7 @@ async def run_multi_agent_bundle(
                             t0=t0,
                             include_full_meta=True,
                             in_flight=dict(in_flight_partial),
+                            hide_pending_agents=True,
                         )
                     await _emit(done_snap)
                 else:

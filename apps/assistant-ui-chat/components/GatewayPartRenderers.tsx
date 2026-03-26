@@ -315,6 +315,7 @@ function ThreadMetadataRenderer() {
 
 function AgentHuddleRenderer({
   data,
+  defaultCollapsed = false,
 }: {
   data: {
     multi_agent_status?: { agents?: unknown[] };
@@ -323,6 +324,7 @@ function AgentHuddleRenderer({
     memory_health?: { label?: string; status?: string; detail?: string };
     credit_usage?: { estimated_total_tokens?: number; note?: string };
   };
+  defaultCollapsed?: boolean;
 }) {
   const agents = data.multi_agent_status?.agents;
   const status =
@@ -336,6 +338,7 @@ function AgentHuddleRenderer({
       thought_timelines={data.thought_timelines as ThoughtLine[] | undefined}
       memory_health={data.memory_health}
       credit_usage={data.credit_usage}
+      defaultCollapsed={defaultCollapsed}
     />
   );
 }
@@ -420,6 +423,7 @@ export function GatewayMessageParts() {
         <AgentHuddleRenderer
           key={`agent-huddle-pinned-${lastAgentHuddleIndex}`}
           data={(pinnedHuddlePart.data ?? {}) as Parameters<typeof AgentHuddleRenderer>[0]["data"]}
+          defaultCollapsed={!isLastMessage}
         />
       ) : null}
       {content.map((part, index) => {

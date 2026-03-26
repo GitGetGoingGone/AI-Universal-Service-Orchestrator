@@ -110,14 +110,21 @@ export function AgentHuddle({
   thought_timelines,
   memory_health,
   credit_usage,
+  /** When true, the huddle card starts collapsed (e.g. past turns in the thread). */
+  defaultCollapsed = false,
 }: {
   multi_agent_status?: { agents?: AgentRow[] };
   todos?: TodoItem[];
   thought_timelines?: ThoughtLine[];
   memory_health?: { label?: string; status?: string; detail?: string };
   credit_usage?: { estimated_total_tokens?: number; note?: string };
+  defaultCollapsed?: boolean;
 }) {
   const agents = multi_agent_status?.agents ?? [];
+  const [huddleOpen, setHuddleOpen] = useState(() => !defaultCollapsed);
+  useEffect(() => {
+    setHuddleOpen(!defaultCollapsed);
+  }, [defaultCollapsed]);
   const [openTrace, setOpenTrace] = useState<Record<string, boolean>>({});
   const [queuedSkipIds, setQueuedSkipIds] = useState<Set<string>>(() => new Set(readMaCancelNextQueue()));
 
@@ -180,30 +187,38 @@ export function AgentHuddle({
   }
 
   return (
-    <section
-      className="agent-huddle-root assistant-themed-surface my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--card-foreground)] shadow-sm dark:border-gray-700 dark:bg-gray-900/40"
+    <details
+      className="agent-huddle-root assistant-themed-surface group my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--card-foreground)] shadow-sm dark:border-gray-700 dark:bg-gray-900/40"
       aria-label="Agent huddle — scout progress"
+      open={huddleOpen}
+      onToggle={(e) => setHuddleOpen(e.currentTarget.open)}
     >
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
-        <div className="flex items-center gap-2 text-sm font-medium text-[var(--foreground)]">
-          {anyScoutRunning ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--primary,#2563eb)]" aria-hidden />
-              <span>Working with your concierge team</span>
-            </>
-          ) : (
-            <>
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
-              <span>Scouts finished for this turn</span>
-            </>
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-2 group-open:mb-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-[var(--foreground)]">
+            <ChevronRight
+              className="h-4 w-4 shrink-0 text-[var(--foreground)]/60 transition-transform group-open:rotate-90"
+              aria-hidden
+            />
+            {anyScoutRunning ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin text-[var(--primary,#2563eb)]" aria-hidden />
+                <span>Working with your concierge team</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+                <span>Scouts finished for this turn</span>
+              </>
+            )}
+          </div>
+          {credit_usage?.estimated_total_tokens != null && (
+            <span className="text-xs text-[var(--foreground)]/70" title={credit_usage.note}>
+              ~{credit_usage.estimated_total_tokens} tokens (est.)
+            </span>
           )}
         </div>
-        {credit_usage?.estimated_total_tokens != null && (
-          <span className="text-xs text-[var(--foreground)]/70" title={credit_usage.note}>
-            ~{credit_usage.estimated_total_tokens} tokens (est.)
-          </span>
-        )}
-      </div>
+      </summary>
 
       {memory_health && (
         <div className="mb-3 rounded-lg bg-[var(--muted)]/40 px-3 py-2 text-sm">
@@ -329,6 +344,6 @@ export function AgentHuddle({
           );
         })}
       </ul>
-    </section>
+    </details>
   );
 }

@@ -236,7 +236,14 @@ export async function POST(req: Request) {
                     credit_usage?: Record<string, unknown>;
                   };
                   const maStatus = j.multi_agent_status as { agents?: unknown[] } | undefined;
-                  if (maStatus && Array.isArray(maStatus.agents) && maStatus.agents.length > 0) {
+                  const agentList = maStatus?.agents;
+                  const hasAgents = Array.isArray(agentList) && agentList.length > 0;
+                  const hasHuddleMeta =
+                    (Array.isArray(j.todos) && j.todos.length > 0) ||
+                    (Array.isArray(j.thought_timelines) && j.thought_timelines.length > 0) ||
+                    Boolean(j.memory_health) ||
+                    Boolean(j.credit_usage);
+                  if (maStatus && (hasAgents || hasHuddleMeta)) {
                     streamedAgentHuddle = true;
                     writer.write({
                       type: "data-agent_huddle",
