@@ -224,6 +224,31 @@ export async function POST(req: Request) {
                     data: { text: "Thinking..." },
                   });
                 }
+              } else if (eventType === "agent_huddle" && eventData) {
+                try {
+                  const j = JSON.parse(eventData) as {
+                    multi_agent_status?: Record<string, unknown>;
+                    todos?: unknown[];
+                    thought_timelines?: unknown[];
+                    memory_health?: Record<string, unknown>;
+                    credit_usage?: Record<string, unknown>;
+                  };
+                  const maStatus = j.multi_agent_status as { agents?: unknown[] } | undefined;
+                  if (maStatus && Array.isArray(maStatus.agents) && maStatus.agents.length > 0) {
+                    writer.write({
+                      type: "data-agent_huddle",
+                      data: {
+                        multi_agent_status: maStatus,
+                        todos: j.todos,
+                        thought_timelines: j.thought_timelines,
+                        memory_health: j.memory_health,
+                        credit_usage: j.credit_usage,
+                      },
+                    });
+                  }
+                } catch {
+                  // ignore malformed agent_huddle frame
+                }
               } else if (eventType === "summary_delta" && eventData) {
                 try {
                   const data = JSON.parse(eventData) as { delta?: string };

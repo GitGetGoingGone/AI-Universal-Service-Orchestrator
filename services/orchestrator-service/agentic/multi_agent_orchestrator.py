@@ -383,6 +383,106 @@ def _effective_skills(agent_def: Dict[str, Any], overrides: Dict[str, Any], agen
     return skills
 
 
+def _running_placeholder_public(aid: str, adef: Dict[str, Any]) -> Dict[str, Any]:
+    return AgentResult(
+        id=aid,
+        label=str(adef.get("display_name") or aid),
+        kind=(adef.get("kind") or "discovery"),  # type: ignore[arg-type]
+        status="running",
+        summary="Scout is working…",
+        trace=[],
+        user_cancellable=bool(adef.get("user_cancellable")),
+        user_editable=bool(adef.get("user_editable")),
+    ).model_dump_public()
+
+
+def _snapshot_to_progress_payload(
+    ordered: List[str],
+    agents_by_id: Dict[str, Dict[str, Any]],
+    completed: Dict[str, AgentResult],
+    *,
+    message_count: int,
+    t0: float,
+    include_full_meta: bool,
+) -> Dict[str, Any]:
+    """Build multi_agent_status (+ optional meta) for streaming or final response."""
+    agent_payload: List[Dict[str, Any]] = []
+    for aid in ordered:
+        if aid in completed:
+            r = completed[aid]
+            adef = agents_by_id.get(r.id, {})
+            r.label = str(adef.get("display_name") or r.label or r.id)
+            r.user_cancellable = bool(adef.get("user_cancellable", r.user_cancellable))
+            r.user_editable = bool(adef.get("user_editable", r.user_editable))
+            agent_payload.append(r.model_dump_public())
+        else:
+            adef = agents_by_id.get(aid, {})
+            agent_payload.append(_running_placeholder_public(aid, adef))
+
+    todos: List[Dict[str, Any]] = []
+    for row in agent_payload:
+        st = row.get("status")
+        if st == "running":
+            t_status = "in_progress"
+        elif st in ("cancelled", "failed", "succeeded"):
+            t_status = "done"
+        else:
+            t_status = "in_progress"
+        todos.append({"label": f"Scout: {row.get('label', row.get('id'))}", "status": t_status})
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    running_n = sum(1 for a in agent_payload if a.get("status") == "running")
+    if running_n == 0:
+        coord_detail = f"Ran {len(agent_payload)} scout(s) in parallel for this turn."
+    else:
+        coord_detail = f"Completed {len(agent_payload) - running_n} of {len(agent_payload)} scout(s)."
+    thought_timelines = [
+        {
+            "label": "Multi-agent coordination",
+            "duration_ms": elapsed_ms,
+            "detail": coord_detail,
+        }
+    ]
+
+    approx_tokens_in = message_count * 180 + 400
+    approx_tokens_out = 650
+    credit_usage = {
+        "estimated_input_tokens": approx_tokens_in,
+        "estimated_output_tokens": approx_tokens_out,
+        "estimated_total_tokens": approx_tokens_in + approx_tokens_out,
+        "note": "Heuristic estimate for this turn (Status Narrator / Module 14 visibility).",
+    }
+
+    if message_count > 24:
+        memory_health = {
+            "status": "near_limit",
+            "label": "Near limit",
+            "detail": "Conversation is long; consider starting a fresh thread for best results.",
+        }
+    elif message_count > 12:
+        memory_health = {
+            "status": "moderate",
+            "label": "Moderate headroom",
+            "detail": "Context usage is healthy; still room to refine.",
+        }
+    else:
+        memory_health = {
+            "status": "healthy",
+            "label": "Plenty of room",
+            "detail": "Context window has ample space for this session.",
+        }
+
+    out: Dict[str, Any] = {"multi_agent_status": {"agents": agent_payload}, "todos": todos}
+    if include_full_meta:
+        out["thought_timelines"] = thought_timelines
+        out["memory_health"] = memory_health
+        out["credit_usage"] = credit_usage
+    return out
+
+
+MultiAgentProgressCallback = Optional[Callable[[Dict[str, Any]], Awaitable[None]]]
+
+
 async def run_multi_agent_bundle(
     *,
     intent_data: Dict[str, Any],
@@ -395,9 +495,11 @@ async def run_multi_agent_bundle(
     cancel_agent_ids: Optional[List[str]],
     agent_skills_overrides: Optional[Dict[str, Any]],
     message_count: int = 0,
+    on_progress: MultiAgentProgressCallback = None,
 ) -> Dict[str, Any]:
     """
     Returns multi_agent_status, todos, thought_timelines, memory_health, credit_usage, narrative, merged_hints.
+    When on_progress is set (streaming chat), emits a snapshot after each scout completes (plus an initial all-running snapshot).
     """
     t0 = time.perf_counter()
     reg = get_resolved_registry()
@@ -476,81 +578,95 @@ async def run_multi_agent_bundle(
         trace_append(trace, "OBSERVE", "Unknown agent id in workflow; skipped.")
         return AgentResult(id=aid, label=aid, status="failed", summary="Unknown agent", trace=trace)
 
-    tasks = [run_one(aid) for aid in ordered]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    agent_payload: List[Dict[str, Any]] = []
-    for i, res in enumerate(results):
-        if isinstance(res, Exception):
-            aid = ordered[i] if i < len(ordered) else "unknown"
-            agent_payload.append(
-                AgentResult(
-                    id=aid,
-                    label=aid,
-                    status="failed",
-                    summary=f"Error: {res}",
-                    trace=[AgentOperation(phase="OBSERVE", label="Agent raised an unexpected error", detail=str(res), timestamp=time.time())],
-                ).model_dump_public()
+    async def _emit(snap: Dict[str, Any]) -> None:
+        if not on_progress:
+            return
+        try:
+            await on_progress(snap)
+        except Exception as e:
+            logger.debug("multi_agent on_progress failed: %s", e)
+
+    completed: Dict[str, AgentResult] = {}
+    if not ordered:
+        return {}
+
+    if on_progress:
+        await _emit(
+            _snapshot_to_progress_payload(
+                ordered,
+                agents_by_id,
+                completed,
+                message_count=message_count,
+                t0=t0,
+                include_full_meta=True,
             )
-        else:
-            r = res
-            adef = agents_by_id.get(r.id, {})
-            r.label = str(adef.get("display_name") or r.label or r.id)
-            r.user_cancellable = bool(adef.get("user_cancellable", r.user_cancellable))
-            r.user_editable = bool(adef.get("user_editable", r.user_editable))
-            agent_payload.append(r.model_dump_public())
+        )
 
-    elapsed_ms = int((time.perf_counter() - t0) * 1000)
-    todos: List[Dict[str, Any]] = []
-    for i, row in enumerate(agent_payload):
-        st = row.get("status")
-        if st == "cancelled":
-            t_status = "done"
-        elif st == "failed":
-            t_status = "done"
-        elif st == "succeeded":
-            t_status = "done"
-        else:
-            t_status = "done"
-        todos.append({"label": f"Scout: {row.get('label', row.get('id'))}", "status": t_status})
+    task_by_aid: Dict[asyncio.Task[Any], str] = {}
+    for aid in ordered:
+        t = asyncio.create_task(run_one(aid))
+        task_by_aid[t] = aid
+    pending: Any = set(task_by_aid.keys())
 
-    thought_timelines = [
-        {
-            "label": "Multi-agent coordination",
-            "duration_ms": elapsed_ms,
-            "detail": f"Ran {len(agent_payload)} scout(s) in parallel for this turn.",
-        }
-    ]
+    while pending:
+        done_tasks, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for task in done_tasks:
+            aid = task_by_aid[task]
+            try:
+                raw = task.result()
+            except Exception as ex:
+                raw = ex
+            if isinstance(raw, Exception):
+                completed[aid] = AgentResult(
+                    id=aid,
+                    label=str(agents_by_id.get(aid, {}).get("display_name") or aid),
+                    kind="discovery",
+                    status="failed",
+                    summary=f"Error: {raw}",
+                    trace=[
+                        AgentOperation(
+                            phase="OBSERVE",
+                            label="Agent raised an unexpected error",
+                            detail=str(raw),
+                            timestamp=time.time(),
+                        )
+                    ],
+                )
+            else:
+                r = raw
+                adef = agents_by_id.get(r.id, {})
+                r.label = str(adef.get("display_name") or r.label or r.id)
+                r.user_cancellable = bool(adef.get("user_cancellable", r.user_cancellable))
+                r.user_editable = bool(adef.get("user_editable", r.user_editable))
+                completed[aid] = r
+            if on_progress:
+                await _emit(
+                    _snapshot_to_progress_payload(
+                        ordered,
+                        agents_by_id,
+                        completed,
+                        message_count=message_count,
+                        t0=t0,
+                        include_full_meta=True,
+                    )
+                )
 
-    approx_tokens_in = message_count * 180 + 400
-    approx_tokens_out = 650
-    credit_usage = {
-        "estimated_input_tokens": approx_tokens_in,
-        "estimated_output_tokens": approx_tokens_out,
-        "estimated_total_tokens": approx_tokens_in + approx_tokens_out,
-        "note": "Heuristic estimate for this turn (Status Narrator / Module 14 visibility).",
-    }
-
-    if message_count > 24:
-        memory_health = {"status": "near_limit", "label": "Near limit", "detail": "Conversation is long; consider starting a fresh thread for best results."}
-    elif message_count > 12:
-        memory_health = {"status": "moderate", "label": "Moderate headroom", "detail": "Context usage is healthy; still room to refine."}
-    else:
-        memory_health = {"status": "healthy", "label": "Plenty of room", "detail": "Context window has ample space for this session."}
-
-    ok = sum(1 for a in agent_payload if a.get("status") == "succeeded")
+    base = _snapshot_to_progress_payload(
+        ordered,
+        agents_by_id,
+        completed,
+        message_count=message_count,
+        t0=t0,
+        include_full_meta=True,
+    )
+    agent_payload = base["multi_agent_status"]["agents"]
+    ok = sum(1 for a in agent_payload if isinstance(a, dict) and a.get("status") == "succeeded")
     narrative = (
         f"I coordinated {len(agent_payload)} scouts ({ok} succeeded). "
         "Inventory, feeds, and context signals are merged for your bundle view."
     )
-
-    return {
-        "multi_agent_status": {"agents": agent_payload},
-        "todos": todos,
-        "thought_timelines": thought_timelines,
-        "memory_health": memory_health,
-        "credit_usage": credit_usage,
-        "multi_agent_narrative": narrative,
-    }
+    base["multi_agent_narrative"] = narrative
+    return base
 
 
 def should_run_multi_agent(
@@ -581,6 +697,7 @@ async def attach_multi_agent_to_chat_result(
     limit: int,
     discover_products_fn: Callable[..., Awaitable[Dict[str, Any]]],
     message_count: int = 0,
+    on_multi_agent_progress: MultiAgentProgressCallback = None,
 ) -> Dict[str, Any]:
     data = out.get("data") or {}
     intent = data.get("intent") or {}
@@ -602,6 +719,7 @@ async def attach_multi_agent_to_chat_result(
         cancel_agent_ids=cancel_agent_ids,
         agent_skills_overrides=agent_skills_overrides,
         message_count=message_count,
+        on_progress=on_multi_agent_progress,
     )
     if not extra:
         return out

@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,8 @@ async def _finalize_with_multi_agent(
     user_id: Optional[str],
     discover_fn,
     effective_user_message: str,
+    *,
+    on_multi_agent_progress: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
     if not isinstance(result, dict) or result.get("error"):
         return result
@@ -127,6 +129,7 @@ async def _finalize_with_multi_agent(
             limit=body.limit,
             discover_products_fn=discover_fn,
             message_count=len(body.messages or []),
+            on_multi_agent_progress=on_multi_agent_progress,
         )
         if body.thread_id and isinstance(out, dict):
             agents = (out.get("multi_agent_status") or {}).get("agents") or []
@@ -181,6 +184,9 @@ async def _stream_chat_events(
     async def on_thinking(msg: str, ctx: Optional[Dict]) -> None:
         await queue.put(("thinking", {"text": msg, "step": (ctx or {}).get("step", "")}))
 
+    async def on_multi_agent_progress(payload: Dict[str, Any]) -> None:
+        await queue.put(("agent_huddle", payload))
+
     async def run_loop() -> None:
         try:
             # #region agent log
@@ -203,7 +209,14 @@ async def _stream_chat_events(
                 explore_product_id=body.explore_product_id,
                 on_thinking=on_thinking,
             )
-            result_holder[0] = await _finalize_with_multi_agent(r, body, user_id, _discover, effective_user_message)
+            result_holder[0] = await _finalize_with_multi_agent(
+                r,
+                body,
+                user_id,
+                _discover,
+                effective_user_message,
+                on_multi_agent_progress=on_multi_agent_progress,
+            )
         except Exception as e:
             err_holder[0] = e
         finally:
@@ -219,6 +232,8 @@ async def _stream_chat_events(
             continue
         if event_type == "thinking":
             yield f"event: thinking\ndata: {json.dumps(data)}\n\n"
+        elif event_type == "agent_huddle":
+            yield f"event: agent_huddle\ndata: {json.dumps(data, default=str)}\n\n"
         elif event_type == "complete":
             break
 

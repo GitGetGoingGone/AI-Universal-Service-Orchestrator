@@ -16,6 +16,7 @@ import { useChatRuntime, AssistantChatTransport } from "@assistant-ui/react-ai-s
 import { GatewayMessageParts } from "@/components/GatewayPartRenderers";
 import { PaymentFormInline } from "@/components/PaymentFormInline";
 import { GatewayActionProvider, type ActionPayload } from "@/contexts/GatewayActionContext";
+import { CHAT_STORAGE_MA_IN_FLIGHT } from "@/lib/chat-storage-keys";
 
 const SUGGESTIONS = [
   "Find flowers for delivery",
@@ -100,6 +101,7 @@ type BundleItem = { name?: string; price?: number; currency?: string };
 type RegistryAgent = {
   id: string;
   name?: string;
+  description?: string;
   enabled_default?: boolean;
   user_editable?: boolean;
   user_cancellable?: boolean;
@@ -215,9 +217,12 @@ function AgentToolbarChat({
       </div>
       {open && (
         <div className="mt-3 space-y-3 border-t border-[var(--border)] pt-3">
-          <p className="text-xs text-[var(--muted)]">
+          <p className="text-xs text-[var(--foreground)]/80">
             Select discovery scouts. For weather, you can add JSON overrides when marked editable (e.g.{" "}
-            <code className="rounded bg-[var(--muted)] px-1">{`{"min_temp_f":70}`}</code>).
+            <code
+              className="rounded border border-[var(--border)] bg-[var(--card)] px-1.5 py-0.5 font-mono text-[var(--foreground)]"
+            >{`{"min_temp_f":70}`}</code>
+            ).
           </p>
           <ul className="max-h-56 space-y-3 overflow-y-auto pr-1">
             {agents.map((a) => (
@@ -229,10 +234,15 @@ function AgentToolbarChat({
                     checked={picked.has(a.id)}
                     onChange={() => toggle(a.id)}
                   />
-                  <span>
+                  <span className="min-w-0 flex-1">
                     <span className="font-medium text-[var(--foreground)]">{a.name ?? a.id}</span>
                     {a.user_cancellable ? (
                       <span className="ml-2 text-[10px] uppercase text-[var(--muted)]">skippable</span>
+                    ) : null}
+                    {a.description ? (
+                      <span className="mt-0.5 block text-xs leading-snug text-[var(--foreground)]/70">
+                        {a.description}
+                      </span>
                     ) : null}
                   </span>
                 </label>
@@ -357,6 +367,10 @@ function ChatContent({
           if (cancelIds.length) body.cancel_agent_ids = cancelIds;
           const cfg = maCfgRef.current;
           if (cfg.multi_agent_mode) body.multi_agent_mode = true;
+          if (typeof window !== "undefined") {
+            if (cfg.multi_agent_mode) sessionStorage.setItem(CHAT_STORAGE_MA_IN_FLIGHT, "1");
+            else sessionStorage.removeItem(CHAT_STORAGE_MA_IN_FLIGHT);
+          }
           if (cfg.agents?.length) body.agents = cfg.agents;
           const overrides: Record<string, unknown> = {};
           for (const [agentId, rawSkill] of Object.entries(cfg.skills)) {

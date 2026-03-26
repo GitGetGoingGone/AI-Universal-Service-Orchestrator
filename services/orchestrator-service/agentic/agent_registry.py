@@ -39,7 +39,10 @@ _BUILTIN_AGENTS: List[Dict[str, Any]] = [
         "enabled_default": True,
         "capabilities": ["products", "ucp"],
         "display_name": "UCP catalog",
-        "description": "Queries Universal Commerce Protocol gift and product feeds.",
+        "description": (
+            "Looks up products from partner catalogs exposed through the Universal Commerce "
+            "Protocol—standardized, machine-readable listings outside your primary inventory."
+        ),
         "category": "Discovery",
         "enabled": True,
         "user_cancellable": False,
@@ -54,7 +57,10 @@ _BUILTIN_AGENTS: List[Dict[str, Any]] = [
         "enabled_default": False,
         "capabilities": ["products", "shopify"],
         "display_name": "MCP / Shopify mesh",
-        "description": "Curated partner mesh (Shopify MCP) when configured.",
+        "description": (
+            "Adds products from connected partner storefronts (e.g. Shopify) when those "
+            "integrations are enabled—an optional mesh on top of local and protocol feeds."
+        ),
         "category": "Discovery",
         "enabled": True,
         "user_cancellable": False,

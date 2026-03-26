@@ -131,7 +131,7 @@ export function AgentHuddle({
 
   return (
     <section
-      className="my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900/40"
+      className="agent-huddle-root my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--card-foreground)] shadow-sm dark:border-gray-700 dark:bg-gray-900/40"
       aria-label="Agent huddle — scout progress"
     >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-2">

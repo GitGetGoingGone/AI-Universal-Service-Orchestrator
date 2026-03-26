@@ -1,7 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo } from "react";
+import { Loader2 } from "lucide-react";
 import { useAuiState } from "@assistant-ui/react";
+import { CHAT_STORAGE_MA_IN_FLIGHT } from "@/lib/chat-storage-keys";
 import { useGatewayAction } from "@/contexts/GatewayActionContext";
 import { PaymentFormInline } from "./PaymentFormInline";
 import { AgentHuddle, type AgentRow, type TodoItem, type ThoughtLine } from "./AgentHuddle";
@@ -265,6 +267,39 @@ function getDataStreamPartName(part: { type?: string; name?: string }): string |
   return null;
 }
 
+function contentHasAgentHuddle(content: unknown[] | undefined): boolean {
+  if (!Array.isArray(content)) return false;
+  return content.some((part) => {
+    if (!part || typeof part !== "object") return false;
+    return getDataStreamPartName(part as { type?: string; name?: string }) === "agent_huddle";
+  });
+}
+
+function readMultiAgentInFlight(): boolean {
+  if (typeof window === "undefined") return false;
+  return sessionStorage.getItem(CHAT_STORAGE_MA_IN_FLIGHT) === "1";
+}
+
+/** Shown while the assistant message streams and multi-agent mode was requested, before the final huddle part arrives. */
+function MultiAgentFlightPlaceholder() {
+  return (
+    <section
+      className="agent-huddle-root my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--card-foreground)] shadow-sm"
+      aria-live="polite"
+      aria-label="Concierge scouts in progress"
+    >
+      <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-2 text-sm font-medium text-[var(--foreground)]">
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--primary,#2563eb)]" aria-hidden />
+        <span>Working with your concierge team</span>
+      </div>
+      <p className="text-sm leading-relaxed text-[var(--foreground)]/90">
+        Scouts are checking inventory, partner catalogs, and context. Full status, memory, and reasoning traces
+        will appear here as each step completes.
+      </p>
+    </section>
+  );
+}
+
 const DATA_RENDERERS_BY_NAME: Record<string, React.ComponentType<DataPartProps>> = {
   product_list: ProductListRenderer as React.ComponentType<DataPartProps>,
   thematic_options: ThematicOptionsRenderer as React.ComponentType<DataPartProps>,
@@ -324,17 +359,35 @@ export function GatewayMessageParts() {
   const isLastMessage = useAuiState((s) => s.message.isLast ?? true);
   const showThinking = Boolean(isRunning && isLastMessage);
 
+  useEffect(() => {
+    if (!isRunning && typeof window !== "undefined") {
+      sessionStorage.removeItem(CHAT_STORAGE_MA_IN_FLIGHT);
+    }
+  }, [isRunning]);
+
   if (!Array.isArray(content)) {
     if (showThinking) {
       return (
-        <div className="flex items-center gap-2 rounded-lg bg-[var(--muted)]/30 px-3 py-2 text-sm text-[var(--foreground)]">
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--primary)]" aria-hidden />
-          Thinking...
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 rounded-lg bg-[var(--muted)]/30 px-3 py-2 text-sm text-[var(--foreground)]">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--primary)]" aria-hidden />
+            Thinking...
+          </div>
+          {readMultiAgentInFlight() ? <MultiAgentFlightPlaceholder /> : null}
         </div>
       );
     }
     return null;
   }
+
+  const lastAgentHuddleIndex = useMemo(() => {
+    let last = -1;
+    content.forEach((part, i) => {
+      if (!part || typeof part !== "object") return;
+      if (getDataStreamPartName(part as { type?: string; name?: string }) === "agent_huddle") last = i;
+    });
+    return last;
+  }, [content]);
 
   const hasThinkingParts = content.some((part) => {
     if (typeof part !== "object" || part === null) return false;
@@ -355,6 +408,9 @@ export function GatewayMessageParts() {
           Understanding what you&apos;re looking for...
         </div>
       )}
+      {showThinking && readMultiAgentInFlight() && !contentHasAgentHuddle(content) ? (
+        <MultiAgentFlightPlaceholder />
+      ) : null}
       {content.map((part, index) => {
         if (!part || typeof part !== "object") return null;
         const p = part as { type?: string; text?: string; name?: string; data?: unknown };
@@ -367,6 +423,9 @@ export function GatewayMessageParts() {
         }
         const dataName = getDataStreamPartName(p);
         if (dataName) {
+          if (dataName === "agent_huddle" && index !== lastAgentHuddleIndex) {
+            return null;
+          }
           if (dataName === "thinking") {
             if (!showThinking) return null;
             // Only render the latest thinking part so status messages don't stack
