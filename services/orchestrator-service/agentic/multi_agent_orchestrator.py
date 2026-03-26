@@ -32,6 +32,17 @@ logger = logging.getLogger(__name__)
 
 HTTP_TIMEOUT = 25.0
 
+PaoEmitFn = Optional[Callable[[List[AgentOperation], str], Awaitable[None]]]
+
+
+async def _maybe_emit_pao(emit_pao: PaoEmitFn, trace: List[AgentOperation], summary: str) -> None:
+    if not emit_pao:
+        return
+    try:
+        await emit_pao(list(trace), summary)
+    except Exception as e:
+        logger.debug("emit_pao scout step failed: %s", e)
+
 
 def _intent_location(intent: Dict[str, Any]) -> Optional[str]:
     for e in intent.get("entities") or []:
@@ -56,11 +67,15 @@ async def _invoke_local_db(
     inv: AgentInvocation,
     discover_products_fn: Callable[..., Awaitable[Dict[str, Any]]],
     plan_labels: List[str],
+    *,
+    emit_pao: PaoEmitFn = None,
 ) -> AgentResult:
     trace: List[AgentOperation] = []
     for lbl in plan_labels or ["Context check", "Discovery", "Curate matches"]:
         trace_append(trace, "PLAN", lbl)
+        await _maybe_emit_pao(emit_pao, trace, "Planning…")
     trace_append(trace, "ACTION", "Searching local inventory for matching products")
+    await _maybe_emit_pao(emit_pao, trace, "Searching catalog…")
     try:
         r = await discover_products_fn(
             query=_search_query(inv.intent, inv.user_message),
@@ -75,6 +90,7 @@ async def _invoke_local_db(
             "OBSERVE",
             f"Found {count} candidate products in local inventory; prioritizing relevance and availability.",
         )
+        await _maybe_emit_pao(emit_pao, trace, f"Local inventory: {count} matches")
         return AgentResult(
             id=AGENT_LOCAL_DB,
             label="Local inventory",
@@ -91,6 +107,7 @@ async def _invoke_local_db(
     except Exception as e:
         logger.warning("local_db agent failed: %s", e)
         trace_append(trace, "OBSERVE", "Local inventory search hit an issue; continuing with other sources.")
+        await _maybe_emit_pao(emit_pao, trace, "Local inventory: issue")
         return AgentResult(
             id=AGENT_LOCAL_DB,
             label="Local inventory",
@@ -102,11 +119,18 @@ async def _invoke_local_db(
         )
 
 
-async def _invoke_ucp(inv: AgentInvocation, plan_labels: List[str]) -> AgentResult:
+async def _invoke_ucp(
+    inv: AgentInvocation,
+    plan_labels: List[str],
+    *,
+    emit_pao: PaoEmitFn = None,
+) -> AgentResult:
     trace: List[AgentOperation] = []
     for lbl in plan_labels or ["Context check", "UCP discovery", "Relevance filter"]:
         trace_append(trace, "PLAN", lbl)
-    trace_append(trace, "ACTION", "Querying UCP catalog for curated gift and product options")
+        await _maybe_emit_pao(emit_pao, trace, "Planning…")
+    trace_append(trace, "ACTION", "Querying UCP catalog for curated product options")
+    await _maybe_emit_pao(emit_pao, trace, "Querying partner catalog…")
     q = _search_query(inv.intent, inv.user_message)
     url = f"{settings.discovery_service_url.rstrip('/')}/api/v1/ucp/items"
     try:
@@ -124,6 +148,7 @@ async def _invoke_ucp(inv: AgentInvocation, plan_labels: List[str]) -> AgentResu
             items = inner
         n = len(items) if isinstance(items, list) else 0
         trace_append(trace, "OBSERVE", f"UCP returned {n} items aligned to your request.")
+        await _maybe_emit_pao(emit_pao, trace, f"UCP: {n} items")
         return AgentResult(
             id=AGENT_UCP,
             label="UCP catalog",
@@ -137,6 +162,7 @@ async def _invoke_ucp(inv: AgentInvocation, plan_labels: List[str]) -> AgentResu
     except Exception as e:
         logger.debug("ucp agent: %s", e)
         trace_append(trace, "OBSERVE", "UCP feed did not return results this time; local inventory still applies.")
+        await _maybe_emit_pao(emit_pao, trace, "UCP: no feed")
         return AgentResult(
             id=AGENT_UCP,
             label="UCP catalog",
@@ -148,11 +174,18 @@ async def _invoke_ucp(inv: AgentInvocation, plan_labels: List[str]) -> AgentResu
         )
 
 
-async def _invoke_mcp(inv: AgentInvocation, plan_labels: List[str]) -> AgentResult:
+async def _invoke_mcp(
+    inv: AgentInvocation,
+    plan_labels: List[str],
+    *,
+    emit_pao: PaoEmitFn = None,
+) -> AgentResult:
     trace: List[AgentOperation] = []
     for lbl in plan_labels or ["Mesh readiness", "Partner catalog scan", "Offer alignment"]:
         trace_append(trace, "PLAN", lbl)
+        await _maybe_emit_pao(emit_pao, trace, "Planning…")
     trace_append(trace, "ACTION", "Checking curated Shopify MCP partners for extra assortment")
+    await _maybe_emit_pao(emit_pao, trace, "Scanning partner channels…")
     try:
         from db import get_supabase
 
@@ -172,6 +205,7 @@ async def _invoke_mcp(inv: AgentInvocation, plan_labels: List[str]) -> AgentResu
             "OBSERVE",
             f"MCP mesh: {n_shopify} curated partner channel(s) available; bundle legs can pull from mesh when enabled.",
         )
+        await _maybe_emit_pao(emit_pao, trace, f"MCP: {n_shopify} channel(s)")
         return AgentResult(
             id=AGENT_MCP,
             label="MCP / Shopify mesh",
@@ -183,6 +217,7 @@ async def _invoke_mcp(inv: AgentInvocation, plan_labels: List[str]) -> AgentResu
         )
     except Exception as e:
         trace_append(trace, "OBSERVE", "MCP mesh is not fully configured; skipping mesh-only SKUs for this turn.")
+        await _maybe_emit_pao(emit_pao, trace, "MCP: not configured")
         return AgentResult(
             id=AGENT_MCP,
             label="MCP / Shopify mesh",
@@ -194,18 +229,26 @@ async def _invoke_mcp(inv: AgentInvocation, plan_labels: List[str]) -> AgentResu
         )
 
 
-async def _invoke_weather(inv: AgentInvocation, plan_labels: List[str]) -> AgentResult:
+async def _invoke_weather(
+    inv: AgentInvocation,
+    plan_labels: List[str],
+    *,
+    emit_pao: PaoEmitFn = None,
+) -> AgentResult:
     trace: List[AgentOperation] = []
     for lbl in plan_labels or ["Location context", "Conditions lookup", "Comfort readout"]:
         trace_append(trace, "PLAN", lbl)
+        await _maybe_emit_pao(emit_pao, trace, "Planning…")
     loc = inv.location or "your area"
     trace_append(trace, "ACTION", f"Checking current weather for {loc}")
+    await _maybe_emit_pao(emit_pao, trace, "Resolving conditions…")
     try:
         from agentic import loop as ag_loop
 
         raw = await ag_loop._get_weather(loc)  # noqa: SLF001
         if raw.get("error"):
             trace_append(trace, "OBSERVE", "Weather service is not configured or location could not be resolved.")
+            await _maybe_emit_pao(emit_pao, trace, "Weather: unavailable")
             return AgentResult(
                 id=AGENT_WEATHER,
                 label="Weather context",
@@ -235,6 +278,11 @@ async def _invoke_weather(inv: AgentInvocation, plan_labels: List[str]) -> Agent
                 trace_append(trace, "OBSERVE", f"Current conditions: {temp}°F — {desc}".strip())
         else:
             trace_append(trace, "OBSERVE", f"Current conditions: {temp}°F — {desc}".strip() if temp else str(desc))
+        await _maybe_emit_pao(
+            emit_pao,
+            trace,
+            f"Weather: {temp}°F" if temp is not None else "Weather: updated",
+        )
         return AgentResult(
             id=AGENT_WEATHER,
             label="Weather context",
@@ -248,6 +296,7 @@ async def _invoke_weather(inv: AgentInvocation, plan_labels: List[str]) -> Agent
         )
     except Exception as e:
         trace_append(trace, "OBSERVE", "Could not read weather; continuing without a weather pivot.")
+        await _maybe_emit_pao(emit_pao, trace, "Weather: error")
         return AgentResult(
             id=AGENT_WEATHER,
             label="Weather context",
@@ -261,18 +310,26 @@ async def _invoke_weather(inv: AgentInvocation, plan_labels: List[str]) -> Agent
         )
 
 
-async def _invoke_events(inv: AgentInvocation, plan_labels: List[str]) -> AgentResult:
+async def _invoke_events(
+    inv: AgentInvocation,
+    plan_labels: List[str],
+    *,
+    emit_pao: PaoEmitFn = None,
+) -> AgentResult:
     trace: List[AgentOperation] = []
     for lbl in plan_labels or ["Venue context", "Event discovery", "Highlights"]:
         trace_append(trace, "PLAN", lbl)
+        await _maybe_emit_pao(emit_pao, trace, "Planning…")
     loc = inv.location or "near you"
     trace_append(trace, "ACTION", f"Looking up upcoming occasions near {loc}")
+    await _maybe_emit_pao(emit_pao, trace, "Fetching local occasions…")
     try:
         from agentic import loop as ag_loop
 
         raw = await ag_loop._get_upcoming_occasions(loc, limit=5)  # noqa: SLF001
         if raw.get("error"):
             trace_append(trace, "OBSERVE", "Events API not configured; no local occasion list for this turn.")
+            await _maybe_emit_pao(emit_pao, trace, "Events: unavailable")
             return AgentResult(
                 id=AGENT_EVENTS,
                 label="Local events",
@@ -286,6 +343,7 @@ async def _invoke_events(inv: AgentInvocation, plan_labels: List[str]) -> AgentR
             )
         events = (raw.get("data") or {}).get("events") or []
         trace_append(trace, "OBSERVE", f"Surfaced {len(events)} upcoming happenings you may want to weave into the plan.")
+        await _maybe_emit_pao(emit_pao, trace, f"Events: {len(events)} found")
         return AgentResult(
             id=AGENT_EVENTS,
             label="Local events",
@@ -299,6 +357,7 @@ async def _invoke_events(inv: AgentInvocation, plan_labels: List[str]) -> AgentR
         )
     except Exception as e:
         trace_append(trace, "OBSERVE", "Events lookup failed softly; core bundle discovery still applies.")
+        await _maybe_emit_pao(emit_pao, trace, "Events: error")
         return AgentResult(
             id=AGENT_EVENTS,
             label="Local events",
@@ -312,16 +371,24 @@ async def _invoke_events(inv: AgentInvocation, plan_labels: List[str]) -> AgentR
         )
 
 
-async def _invoke_resourcing(inv: AgentInvocation, plan_labels: List[str]) -> AgentResult:
+async def _invoke_resourcing(
+    inv: AgentInvocation,
+    plan_labels: List[str],
+    *,
+    emit_pao: PaoEmitFn = None,
+) -> AgentResult:
     trace: List[AgentOperation] = []
     for lbl in plan_labels or ["Thread health", "Alternative inventory", "Recovery narrative"]:
         trace_append(trace, "PLAN", lbl)
+        await _maybe_emit_pao(emit_pao, trace, "Planning…")
     trace_append(trace, "ACTION", "Checking SLA re-sourcing queue for this conversation")
+    await _maybe_emit_pao(emit_pao, trace, "Checking re-sourcing queue…")
     try:
         from clients import get_sla_re_sourcing_pending
 
         if not inv.thread_id:
             trace_append(trace, "OBSERVE", "No thread context; re-sourcing monitors idle.")
+            await _maybe_emit_pao(emit_pao, trace, "Re-sourcing: idle")
             return AgentResult(
                 id=AGENT_RESOURCING,
                 label="Re-sourcing",
@@ -340,6 +407,7 @@ async def _invoke_resourcing(inv: AgentInvocation, plan_labels: List[str]) -> Ag
                 "OBSERVE",
                 f"Primary partner may need a swap; {len(alts)} alternative option(s) are on standby for your confirmation.",
             )
+            await _maybe_emit_pao(emit_pao, trace, f"Re-sourcing: {len(alts)} alternative(s)")
             return AgentResult(
                 id=AGENT_RESOURCING,
                 label="Re-sourcing",
@@ -351,6 +419,7 @@ async def _invoke_resourcing(inv: AgentInvocation, plan_labels: List[str]) -> Ag
                 trace=trace,
             )
         trace_append(trace, "OBSERVE", "No active re-sourcing requests; vendors look stable for this thread.")
+        await _maybe_emit_pao(emit_pao, trace, "Re-sourcing: clear")
         return AgentResult(
             id=AGENT_RESOURCING,
             label="Re-sourcing",
@@ -363,6 +432,7 @@ async def _invoke_resourcing(inv: AgentInvocation, plan_labels: List[str]) -> Ag
         )
     except Exception as e:
         trace_append(trace, "OBSERVE", "Re-sourcing check completed with warnings; support can still intervene manually.")
+        await _maybe_emit_pao(emit_pao, trace, "Re-sourcing: check failed")
         return AgentResult(
             id=AGENT_RESOURCING,
             label="Re-sourcing",
@@ -404,8 +474,10 @@ def _snapshot_to_progress_payload(
     message_count: int,
     t0: float,
     include_full_meta: bool,
+    in_flight: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build multi_agent_status (+ optional meta) for streaming or final response."""
+    inflight = in_flight or {}
     agent_payload: List[Dict[str, Any]] = []
     for aid in ordered:
         if aid in completed:
@@ -415,6 +487,15 @@ def _snapshot_to_progress_payload(
             r.user_cancellable = bool(adef.get("user_cancellable", r.user_cancellable))
             r.user_editable = bool(adef.get("user_editable", r.user_editable))
             agent_payload.append(r.model_dump_public())
+        elif aid in inflight:
+            adef = agents_by_id.get(aid, {})
+            row = _running_placeholder_public(aid, adef)
+            partial = inflight[aid]
+            row["trace"] = partial.get("trace") or []
+            summ = partial.get("summary")
+            if summ:
+                row["summary"] = summ
+            agent_payload.append(row)
         else:
             adef = agents_by_id.get(aid, {})
             agent_payload.append(_running_placeholder_public(aid, adef))
@@ -499,7 +580,8 @@ async def run_multi_agent_bundle(
 ) -> Dict[str, Any]:
     """
     Returns multi_agent_status, todos, thought_timelines, memory_health, credit_usage, narrative, merged_hints.
-    When on_progress is set (streaming chat), emits a snapshot after each scout completes (plus an initial all-running snapshot).
+    When on_progress is set (streaming chat), emits snapshots: initial all-running, per–PAO-step
+    partial traces while each scout runs, and again when each scout finishes.
     """
     t0 = time.perf_counter()
     reg = get_resolved_registry()
@@ -524,6 +606,18 @@ async def run_multi_agent_bundle(
             ordered.append(aid)
 
     location = _intent_location(intent_data)
+
+    completed: Dict[str, AgentResult] = {}
+    in_flight_partial: Dict[str, Dict[str, Any]] = {}
+    progress_lock = asyncio.Lock()
+
+    async def _emit(snap: Dict[str, Any]) -> None:
+        if not on_progress:
+            return
+        try:
+            await on_progress(snap)
+        except Exception as e:
+            logger.debug("multi_agent on_progress failed: %s", e)
 
     async def run_one(aid: str) -> AgentResult:
         adef = agents_by_id.get(aid)
@@ -561,46 +655,59 @@ async def run_multi_agent_bundle(
             skills=skills,
         )
 
+        async def emit_pao(trace_ops: List[AgentOperation], summary: str) -> None:
+            if not on_progress:
+                return
+            async with progress_lock:
+                in_flight_partial[aid] = {
+                    "trace": [op.model_dump(mode="json") for op in trace_ops],
+                    "summary": summary,
+                }
+                snap = _snapshot_to_progress_payload(
+                    ordered,
+                    agents_by_id,
+                    completed,
+                    message_count=message_count,
+                    t0=t0,
+                    include_full_meta=True,
+                    in_flight=dict(in_flight_partial),
+                )
+            await _emit(snap)
+
+        ep: PaoEmitFn = emit_pao if on_progress else None
+
         if aid == AGENT_LOCAL_DB:
-            return await _invoke_local_db(inv, discover_products_fn, plan_labels)
+            return await _invoke_local_db(inv, discover_products_fn, plan_labels, emit_pao=ep)
         if aid == AGENT_UCP:
-            return await _invoke_ucp(inv, plan_labels)
+            return await _invoke_ucp(inv, plan_labels, emit_pao=ep)
         if aid == AGENT_MCP:
-            return await _invoke_mcp(inv, plan_labels)
+            return await _invoke_mcp(inv, plan_labels, emit_pao=ep)
         if aid == AGENT_WEATHER:
-            return await _invoke_weather(inv, plan_labels)
+            return await _invoke_weather(inv, plan_labels, emit_pao=ep)
         if aid == AGENT_EVENTS:
-            return await _invoke_events(inv, plan_labels)
+            return await _invoke_events(inv, plan_labels, emit_pao=ep)
         if aid == AGENT_RESOURCING:
-            return await _invoke_resourcing(inv, plan_labels)
+            return await _invoke_resourcing(inv, plan_labels, emit_pao=ep)
 
         trace: List[AgentOperation] = []
         trace_append(trace, "OBSERVE", "Unknown agent id in workflow; skipped.")
         return AgentResult(id=aid, label=aid, status="failed", summary="Unknown agent", trace=trace)
 
-    async def _emit(snap: Dict[str, Any]) -> None:
-        if not on_progress:
-            return
-        try:
-            await on_progress(snap)
-        except Exception as e:
-            logger.debug("multi_agent on_progress failed: %s", e)
-
-    completed: Dict[str, AgentResult] = {}
     if not ordered:
         return {}
 
     if on_progress:
-        await _emit(
-            _snapshot_to_progress_payload(
+        async with progress_lock:
+            init_snap = _snapshot_to_progress_payload(
                 ordered,
                 agents_by_id,
                 completed,
                 message_count=message_count,
                 t0=t0,
                 include_full_meta=True,
+                in_flight={},
             )
-        )
+        await _emit(init_snap)
 
     task_by_aid: Dict[asyncio.Task[Any], str] = {}
     for aid in ordered:
@@ -617,7 +724,7 @@ async def run_multi_agent_bundle(
             except Exception as ex:
                 raw = ex
             if isinstance(raw, Exception):
-                completed[aid] = AgentResult(
+                res_exc = AgentResult(
                     id=aid,
                     label=str(agents_by_id.get(aid, {}).get("display_name") or aid),
                     kind="discovery",
@@ -632,24 +739,44 @@ async def run_multi_agent_bundle(
                         )
                     ],
                 )
+                if on_progress:
+                    async with progress_lock:
+                        in_flight_partial.pop(aid, None)
+                        completed[aid] = res_exc
+                        done_snap = _snapshot_to_progress_payload(
+                            ordered,
+                            agents_by_id,
+                            completed,
+                            message_count=message_count,
+                            t0=t0,
+                            include_full_meta=True,
+                            in_flight=dict(in_flight_partial),
+                        )
+                    await _emit(done_snap)
+                else:
+                    completed[aid] = res_exc
             else:
                 r = raw
                 adef = agents_by_id.get(r.id, {})
                 r.label = str(adef.get("display_name") or r.label or r.id)
                 r.user_cancellable = bool(adef.get("user_cancellable", r.user_cancellable))
                 r.user_editable = bool(adef.get("user_editable", r.user_editable))
-                completed[aid] = r
-            if on_progress:
-                await _emit(
-                    _snapshot_to_progress_payload(
-                        ordered,
-                        agents_by_id,
-                        completed,
-                        message_count=message_count,
-                        t0=t0,
-                        include_full_meta=True,
-                    )
-                )
+                if on_progress:
+                    async with progress_lock:
+                        in_flight_partial.pop(aid, None)
+                        completed[aid] = r
+                        done_snap = _snapshot_to_progress_payload(
+                            ordered,
+                            agents_by_id,
+                            completed,
+                            message_count=message_count,
+                            t0=t0,
+                            include_full_meta=True,
+                            in_flight=dict(in_flight_partial),
+                        )
+                    await _emit(done_snap)
+                else:
+                    completed[aid] = r
 
     base = _snapshot_to_progress_payload(
         ordered,
@@ -667,6 +794,27 @@ async def run_multi_agent_bundle(
     )
     base["multi_agent_narrative"] = narrative
     return base
+
+
+def _apply_multi_agent_extra_to_out(out: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge run_multi_agent_bundle() return shape into chat result (top-level + data)."""
+    out = dict(out)
+    for k in (
+        "multi_agent_status",
+        "todos",
+        "thought_timelines",
+        "memory_health",
+        "credit_usage",
+        "multi_agent_narrative",
+    ):
+        if extra.get(k) is not None:
+            out[k] = extra[k]
+    d = dict(out.get("data") or {})
+    for k in ("multi_agent_status", "todos", "thought_timelines", "memory_health", "credit_usage"):
+        if extra.get(k) is not None:
+            d[k] = extra[k]
+    out["data"] = d
+    return out
 
 
 def should_run_multi_agent(
@@ -698,7 +846,20 @@ async def attach_multi_agent_to_chat_result(
     discover_products_fn: Callable[..., Awaitable[Dict[str, Any]]],
     message_count: int = 0,
     on_multi_agent_progress: MultiAgentProgressCallback = None,
+    precomputed_extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """
+    precomputed_extra: when set, merge this bundle output and skip running scouts again
+    (used when streaming chat started run_multi_agent_bundle in parallel with the agentic loop).
+    Pass None when no early run was attempted; pass {} when early run produced nothing to merge.
+    """
+    if not isinstance(out, dict) or out.get("error"):
+        return out
+    if precomputed_extra is not None:
+        if precomputed_extra:
+            return _apply_multi_agent_extra_to_out(out, precomputed_extra)
+        return out
+
     data = out.get("data") or {}
     intent = data.get("intent") or {}
     intent_type = str(intent.get("intent_type") or "")

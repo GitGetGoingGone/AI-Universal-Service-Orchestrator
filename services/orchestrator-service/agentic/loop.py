@@ -489,6 +489,7 @@ async def run_agentic_loop(
     explore_product_id: Optional[str] = None,
     on_thinking: Optional[Callable[[str, Optional[Dict]], Awaitable[None]]] = None,
     thinking_messages: Optional[Dict[str, str]] = None,
+    on_multi_agent_intent_ready: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
 ) -> Dict[str, Any]:
     """
     Run the agentic decision loop until completion.
@@ -852,6 +853,12 @@ async def run_agentic_loop(
             plan = await plan_next_action(
                 user_message, state, max_iterations=max_iterations, llm_config=llm_config
             )
+
+        if iteration == 0 and intent_data is not None and on_multi_agent_intent_ready is not None:
+            try:
+                await on_multi_agent_intent_ready(dict(intent_data))
+            except Exception as e:
+                logger.debug("on_multi_agent_intent_ready: %s", e)
 
         if plan.get("action") == "complete":
             msg = (plan.get("message") or "").strip()

@@ -27,23 +27,21 @@ function ProductListRenderer({ data }: { data: { products?: Product[] } }) {
   const products = data.products ?? [];
   if (products.length === 0) return null;
   return (
-    <div className="my-3 grid gap-2 sm:grid-cols-2">
+    <div className="assistant-themed-surface my-3 grid gap-2 sm:grid-cols-2">
       {products.slice(0, 6).map((p, i) => (
         <div
           key={p.id ?? i}
-          className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+          className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm"
         >
           {p.image_url && (
             <img
               src={p.image_url}
               alt={p.name ?? "Product"}
-              className="mb-2 h-24 w-full rounded object-cover"
+              className="mb-2 h-24 w-full rounded bg-[var(--background)] object-cover"
             />
           )}
-          <div className="font-medium text-gray-900 dark:text-gray-100">
-            {p.name ?? "Product"}
-          </div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">
+          <div className="font-medium text-[var(--card-foreground)]">{p.name ?? "Product"}</div>
+          <div className="text-sm text-[var(--card-foreground)]/80">
             {p.currency ?? "USD"} {(p.price ?? 0).toFixed(2)}
           </div>
           {onAction && p.id && (
@@ -70,7 +68,7 @@ function ProductListRenderer({ data }: { data: { products?: Product[] } }) {
                     product_name: p.name,
                   });
                 }}
-                className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                className="rounded border border-[var(--border)] bg-[var(--muted)]/20 px-2 py-1 text-xs font-medium text-[var(--card-foreground)] hover:bg-[var(--muted)]/35"
               >
                 Explore
               </button>
@@ -89,19 +87,17 @@ function ThematicOptionsRenderer({
   const options = data.options ?? [];
   if (options.length === 0) return null;
   return (
-    <div className="my-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="assistant-themed-surface my-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {options.map((opt, i) => (
         <div
           key={i}
-          className="flex flex-col rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+          className="flex flex-col rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm"
         >
-          <div className="mb-3 flex-1 font-medium text-gray-900 dark:text-gray-100">
+          <div className="mb-3 flex-1 font-medium text-[var(--card-foreground)]">
             {opt.option_label ?? `Option ${i + 1}`}
           </div>
           {opt.description != null && String(opt.description).trim() !== "" ? (
-            <div className="mb-3 text-sm text-gray-600 dark:text-gray-400">
-              {String(opt.description)}
-            </div>
+            <div className="mb-3 text-sm text-[var(--card-foreground)]/80">{String(opt.description)}</div>
           ) : null}
           {onAction && (
             <button
@@ -112,7 +108,7 @@ function ThematicOptionsRenderer({
                   option_label: opt.option_label ?? `Option ${i + 1}`,
                 })
               }
-              className="mt-auto rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              className="mt-auto rounded border border-[var(--border)] bg-[var(--muted)]/20 px-3 py-2 text-sm font-medium text-[var(--card-foreground)] hover:bg-[var(--muted)]/35"
             >
               Explore more options
             </button>
@@ -136,7 +132,7 @@ function EngagementChoiceRenderer({
   const options = data.options ?? [];
   if (ctas.length === 0) return null;
   return (
-    <div className="my-3 flex flex-wrap gap-2">
+    <div className="assistant-themed-surface my-3 flex flex-wrap gap-2">
       {ctas.map((cta, i) => (
         <button
           key={i}
@@ -186,18 +182,20 @@ function ExperienceSessionRenderer({ data }: { data: ExperienceSessionData }) {
   const legs = (data?.legs ?? []) as ExperienceLeg[];
   if (legs.length === 0) {
     return (
-      <div className="my-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
-        <span className="font-medium">Experience Session</span>
+      <div className="assistant-themed-surface my-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm text-[var(--card-foreground)]/85">
+        <span className="font-medium text-[var(--card-foreground)]">Experience Session</span>
         <p className="mt-1">
           Status: <span className="font-mono">{data?.status ?? "active"}</span>
         </p>
-        <p className="text-xs mt-2 text-gray-500">No legs yet. Add products to your bundle to see progress.</p>
+        <p className="mt-2 text-xs text-[var(--card-foreground)]/70">
+          No legs yet. Add products to your bundle to see progress.
+        </p>
       </div>
     );
   }
   return (
-    <div className="my-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
-      <span className="font-medium">Experience Session</span>
+    <div className="assistant-themed-surface my-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm text-[var(--card-foreground)]/85">
+      <span className="font-medium text-[var(--card-foreground)]">Experience Session</span>
       <p className="mt-1 text-xs">
         Status: <span className="font-mono">{data?.status ?? "active"}</span>
       </p>
@@ -216,10 +214,10 @@ function ExperienceSessionRenderer({ data }: { data: ExperienceSessionData }) {
               }`}
               aria-hidden
             />
-            <span className="font-medium text-gray-800 dark:text-gray-200">
+            <span className="font-medium text-[var(--card-foreground)]">
               {leg.partner_name ?? "Partner"}
             </span>
-            <span className="text-xs text-gray-500">— {leg.status ?? "pending"}</span>
+            <span className="text-xs text-[var(--card-foreground)]/65">— {leg.status ?? "pending"}</span>
           </li>
         ))}
       </ul>
@@ -232,8 +230,8 @@ function ThinkingRenderer({ data, isLive }: { data: { text?: string }; isLive?: 
     <div
       className={
         isLive
-          ? "my-2 flex items-center gap-2 rounded-lg bg-[var(--muted)]/30 px-3 py-2 text-sm text-[var(--foreground)]"
-          : "my-2 text-sm italic text-gray-500 dark:text-gray-400"
+          ? "assistant-themed-surface my-2 flex items-center gap-2 rounded-lg bg-[var(--muted)]/30 px-3 py-2 text-sm text-[var(--foreground)]"
+          : "assistant-themed-surface my-2 text-sm italic text-[var(--muted)]"
       }
     >
       {isLive && (
@@ -284,7 +282,7 @@ function readMultiAgentInFlight(): boolean {
 function MultiAgentFlightPlaceholder() {
   return (
     <section
-      className="agent-huddle-root my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--card-foreground)] shadow-sm"
+      className="agent-huddle-root assistant-themed-surface my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--card-foreground)] shadow-sm"
       aria-live="polite"
       aria-label="Concierge scouts in progress"
     >
@@ -344,7 +342,7 @@ function AgentHuddleRenderer({
 
 function DataPartFallback({ name, data }: { name: string; data: unknown }) {
   return (
-    <div className="my-2 text-xs text-gray-500">
+    <div className="assistant-themed-surface my-2 text-xs text-[var(--muted)]">
       [{name}] <pre className="inline">{JSON.stringify(data)}</pre>
     </div>
   );
@@ -400,6 +398,13 @@ export function GatewayMessageParts() {
     return getDataStreamPartName(part as { type?: string; name?: string }) === "thinking" ? i : last;
   }, -1);
 
+  const pinnedHuddlePart =
+    lastAgentHuddleIndex >= 0 ? (content[lastAgentHuddleIndex] as { type?: string; name?: string; data?: unknown }) : null;
+  const showPinnedHuddle =
+    pinnedHuddlePart &&
+    typeof pinnedHuddlePart === "object" &&
+    getDataStreamPartName(pinnedHuddlePart) === "agent_huddle";
+
   return (
     <div className="space-y-1">
       {showThinking && !hasThinkingParts && (
@@ -410,6 +415,12 @@ export function GatewayMessageParts() {
       )}
       {showThinking && readMultiAgentInFlight() && !contentHasAgentHuddle(content) ? (
         <MultiAgentFlightPlaceholder />
+      ) : null}
+      {showPinnedHuddle ? (
+        <AgentHuddleRenderer
+          key={`agent-huddle-pinned-${lastAgentHuddleIndex}`}
+          data={(pinnedHuddlePart.data ?? {}) as Parameters<typeof AgentHuddleRenderer>[0]["data"]}
+        />
       ) : null}
       {content.map((part, index) => {
         if (!part || typeof part !== "object") return null;
@@ -423,7 +434,7 @@ export function GatewayMessageParts() {
         }
         const dataName = getDataStreamPartName(p);
         if (dataName) {
-          if (dataName === "agent_huddle" && index !== lastAgentHuddleIndex) {
+          if (dataName === "agent_huddle") {
             return null;
           }
           if (dataName === "thinking") {

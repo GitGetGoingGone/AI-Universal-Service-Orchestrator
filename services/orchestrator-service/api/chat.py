@@ -39,7 +39,11 @@ from clients import (
 )
 from db import merge_thread_conversation_metrics
 from agentic.loop import run_agentic_loop
-from agentic.multi_agent_orchestrator import attach_multi_agent_to_chat_result
+from agentic.multi_agent_orchestrator import (
+    attach_multi_agent_to_chat_result,
+    run_multi_agent_bundle,
+    should_run_multi_agent,
+)
 from agentic.response import generate_engagement_response, stream_engagement_response
 from packages.shared.utils.api_response import chat_first_response, request_id_from_request
 from packages.shared.json_ld.error import error_ld
@@ -113,6 +117,7 @@ async def _finalize_with_multi_agent(
     effective_user_message: str,
     *,
     on_multi_agent_progress: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    precomputed_multi_agent_extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if not isinstance(result, dict) or result.get("error"):
         return result
@@ -130,6 +135,7 @@ async def _finalize_with_multi_agent(
             discover_products_fn=discover_fn,
             message_count=len(body.messages or []),
             on_multi_agent_progress=on_multi_agent_progress,
+            precomputed_extra=precomputed_multi_agent_extra,
         )
         if body.thread_id and isinstance(out, dict):
             agents = (out.get("multi_agent_status") or {}).get("agents") or []
@@ -180,12 +186,49 @@ async def _stream_chat_events(
     queue: asyncio.Queue = asyncio.Queue()
     result_holder: List[Optional[Dict]] = [None]
     err_holder: List[Optional[Exception]] = [None]
+    ma_scheduled: List[bool] = [False]
+    ma_bundle_extra: List[Optional[Dict[str, Any]]] = [None]
+    ma_task: List[Optional[asyncio.Task]] = [None]
 
     async def on_thinking(msg: str, ctx: Optional[Dict]) -> None:
         await queue.put(("thinking", {"text": msg, "step": (ctx or {}).get("step", "")}))
 
     async def on_multi_agent_progress(payload: Dict[str, Any]) -> None:
         await queue.put(("agent_huddle", payload))
+
+    async def on_multi_agent_intent_ready(intent_snapshot: Dict[str, Any]) -> None:
+        """Start PAO / scout bundle as soon as intent is known (parallel to planner + tools)."""
+        if ma_scheduled[0]:
+            return
+        if not should_run_multi_agent(
+            multi_agent_mode=bool(body.multi_agent_mode),
+            agents_requested=body.agents,
+            intent_type=str(intent_snapshot.get("intent_type") or ""),
+        ):
+            return
+        ma_scheduled[0] = True
+
+        async def _run_ma() -> None:
+            try:
+                ex = await run_multi_agent_bundle(
+                    intent_data=dict(intent_snapshot),
+                    user_message=effective_user_message,
+                    thread_id=body.thread_id,
+                    user_id=user_id,
+                    limit=body.limit,
+                    discover_products_fn=_discover,
+                    agents_requested=body.agents,
+                    cancel_agent_ids=body.cancel_agent_ids,
+                    agent_skills_overrides=body.agent_skills_overrides if isinstance(body.agent_skills_overrides, dict) else {},
+                    message_count=len(body.messages or []),
+                    on_progress=on_multi_agent_progress,
+                )
+                ma_bundle_extra[0] = ex if ex is not None else {}
+            except Exception as e:
+                logger.warning("parallel multi_agent bundle failed: %s", e)
+                ma_bundle_extra[0] = None
+
+        ma_task[0] = asyncio.create_task(_run_ma())
 
     async def run_loop() -> None:
         try:
@@ -208,7 +251,16 @@ async def _stream_chat_events(
                 order_id=body.order_id,
                 explore_product_id=body.explore_product_id,
                 on_thinking=on_thinking,
+                on_multi_agent_intent_ready=on_multi_agent_intent_ready,
             )
+            if ma_task[0] is not None:
+                try:
+                    await ma_task[0]
+                except Exception as e:
+                    logger.warning("multi_agent background task join: %s", e)
+            precomputed_ma: Optional[Dict[str, Any]] = None
+            if ma_scheduled[0] and ma_bundle_extra[0] is not None:
+                precomputed_ma = ma_bundle_extra[0]
             result_holder[0] = await _finalize_with_multi_agent(
                 r,
                 body,
@@ -216,6 +268,7 @@ async def _stream_chat_events(
                 _discover,
                 effective_user_message,
                 on_multi_agent_progress=on_multi_agent_progress,
+                precomputed_multi_agent_extra=precomputed_ma,
             )
         except Exception as e:
             err_holder[0] = e

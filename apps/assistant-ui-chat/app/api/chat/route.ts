@@ -195,6 +195,8 @@ export async function POST(req: Request) {
         async execute({ writer }) {
           let doneData: Record<string, unknown> | null = null;
           let textStarted = false;
+          /** True once we forwarded any `data-agent_huddle` from the gateway SSE stream. */
+          let streamedAgentHuddle = false;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -235,6 +237,7 @@ export async function POST(req: Request) {
                   };
                   const maStatus = j.multi_agent_status as { agents?: unknown[] } | undefined;
                   if (maStatus && Array.isArray(maStatus.agents) && maStatus.agents.length > 0) {
+                    streamedAgentHuddle = true;
                     writer.write({
                       type: "data-agent_huddle",
                       data: {
@@ -299,6 +302,30 @@ export async function POST(req: Request) {
           const suggestedOptions = engagement?.suggested_bundle_options as unknown[] | undefined;
           const suggestedCtas = doneData.suggested_ctas as { label?: string; action?: string }[] | undefined;
 
+          const maStatus = doneData.multi_agent_status as Record<string, unknown> | undefined;
+          const todos = doneData.todos as unknown[] | undefined;
+          const thoughtTimelines = doneData.thought_timelines as unknown[] | undefined;
+          const memoryHealth = doneData.memory_health as Record<string, unknown> | undefined;
+          const creditUsage = doneData.credit_usage as Record<string, unknown> | undefined;
+          const maAgents = (maStatus as { agents?: unknown[] } | undefined)?.agents;
+          if (
+            !streamedAgentHuddle &&
+            maStatus &&
+            Array.isArray(maAgents) &&
+            maAgents.length > 0
+          ) {
+            writer.write({
+              type: "data-agent_huddle",
+              data: {
+                multi_agent_status: maStatus,
+                todos,
+                thought_timelines: thoughtTimelines,
+                memory_health: memoryHealth,
+                credit_usage: creditUsage,
+              },
+            });
+          }
+
           if (!textStarted) {
             writer.write({ type: "text-start", id: "summary" });
             writer.write({ type: "text-delta", id: "summary", delta: summary });
@@ -315,23 +342,6 @@ export async function POST(req: Request) {
             writer.write({
               type: "data-thematic_options",
               data: { options: suggestedOptions },
-            });
-          }
-          const maStatus = doneData.multi_agent_status as Record<string, unknown> | undefined;
-          const todos = doneData.todos as unknown[] | undefined;
-          const thoughtTimelines = doneData.thought_timelines as unknown[] | undefined;
-          const memoryHealth = doneData.memory_health as Record<string, unknown> | undefined;
-          const creditUsage = doneData.credit_usage as Record<string, unknown> | undefined;
-          if (maStatus && Array.isArray((maStatus as { agents?: unknown[] }).agents) && (maStatus as { agents: unknown[] }).agents.length > 0) {
-            writer.write({
-              type: "data-agent_huddle",
-              data: {
-                multi_agent_status: maStatus,
-                todos,
-                thought_timelines: thoughtTimelines,
-                memory_health: memoryHealth,
-                credit_usage: creditUsage,
-              },
             });
           }
 

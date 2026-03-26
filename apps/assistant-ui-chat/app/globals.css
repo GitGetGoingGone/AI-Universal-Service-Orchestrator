@@ -44,16 +44,18 @@ body {
  * Never set --foreground on .assistant-chat-main — that made empty state, agent bar, and composer
  * use near-black text on a dark background.
  *
- * Agent huddle uses theme tokens (--card, --foreground). Forcing #171717 on * made body text
- * the same color as dark cards → invisible. Revert only inside .agent-huddle-root.
+ * Agent huddle and rich data surfaces (product cards, payment, etc.) use theme tokens and Tailwind
+ * dark/light utilities. Forcing #171717 on * made text invisible on dark --card backgrounds.
+ * Exclude these roots and their descendants from the forced bubble text color.
  */
-.assistant-chat-main .msg-assistant * {
+.assistant-chat-main
+  .msg-assistant
+  *:where(
+    :not(.agent-huddle-root):not(.agent-huddle-root *):not(.assistant-themed-surface):not(
+        .assistant-themed-surface *
+      )
+  ) {
   color: #171717 !important;
-}
-/* Theme-aware huddle: revert forced bubble text so --foreground / Tailwind work on --card surfaces */
-.assistant-chat-main .msg-assistant .agent-huddle-root,
-.assistant-chat-main .msg-assistant .agent-huddle-root * {
-  color: revert !important;
 }
 .assistant-chat-main .msg-assistant {
   background: #f4f4f5;

@@ -56,7 +56,7 @@ export function PaymentFormInline({
   };
 
   return (
-    <div className="my-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
+    <div className="assistant-themed-surface my-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
       <p className="mb-3 text-sm font-medium text-[var(--foreground)]">
         Order {orderId.slice(0, 8)}…
       </p>

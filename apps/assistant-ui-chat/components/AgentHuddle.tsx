@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Brain,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Cpu,
@@ -125,19 +126,44 @@ export function AgentHuddle({
     return { done, total: todos.length };
   }, [todos]);
 
+  const anyScoutRunning = useMemo(() => {
+    if (agents.length === 0) return false;
+    return agents.some((a) => {
+      const s = (a.status || "").toLowerCase();
+      return s === "running" || s === "pending";
+    });
+  }, [agents]);
+
+  const [thoughtTimelinesOpen, setThoughtTimelinesOpen] = useState(true);
+  useEffect(() => {
+    if (anyScoutRunning) setThoughtTimelinesOpen(true);
+  }, [anyScoutRunning]);
+  useEffect(() => {
+    if (!anyScoutRunning && agents.length > 0) setThoughtTimelinesOpen(false);
+  }, [anyScoutRunning, agents.length]);
+
   if (agents.length === 0 && !todoProgress && !thought_timelines?.length && !memory_health && !credit_usage) {
     return null;
   }
 
   return (
     <section
-      className="agent-huddle-root my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--card-foreground)] shadow-sm dark:border-gray-700 dark:bg-gray-900/40"
+      className="agent-huddle-root assistant-themed-surface my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--card-foreground)] shadow-sm dark:border-gray-700 dark:bg-gray-900/40"
       aria-label="Agent huddle — scout progress"
     >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-2">
         <div className="flex items-center gap-2 text-sm font-medium text-[var(--foreground)]">
-          <Loader2 className="h-4 w-4 text-[var(--primary,#2563eb)]" aria-hidden />
-          <span>Working with your concierge team</span>
+          {anyScoutRunning ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin text-[var(--primary,#2563eb)]" aria-hidden />
+              <span>Working with your concierge team</span>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+              <span>Scouts finished for this turn</span>
+            </>
+          )}
         </div>
         {credit_usage?.estimated_total_tokens != null && (
           <span className="text-xs text-[var(--foreground)]/70" title={credit_usage.note}>
@@ -157,7 +183,11 @@ export function AgentHuddle({
       )}
 
       {thought_timelines && thought_timelines.length > 0 && (
-        <details className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--muted)]/20 px-3 py-2">
+        <details
+          className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--muted)]/20 px-3 py-2"
+          open={thoughtTimelinesOpen}
+          onToggle={(e) => setThoughtTimelinesOpen(e.currentTarget.open)}
+        >
           <summary className="cursor-pointer text-sm font-medium text-[var(--foreground)]">
             Thought timelines
           </summary>
