@@ -2,6 +2,13 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  readMaCancelNextQueue,
+  queueMaCancelNext,
+  unqueueMaCancelNext,
+  takeMaCancelNextForSend,
+  MA_CANCEL_QUEUE_CHANGED_EVENT,
+} from "@/lib/ma-cancel-queue";
+import {
   AlertCircle,
   Brain,
   Check,
@@ -36,32 +43,29 @@ export type TodoItem = { label?: string; status?: "pending" | "in_progress" | "d
 
 export type ThoughtLine = { label?: string; duration_ms?: number; detail?: string };
 
-const STORAGE_CANCEL_NEXT = "uso_ma_cancel_next";
-
-function readCancelNext(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = sessionStorage.getItem(STORAGE_CANCEL_NEXT);
-    if (!raw) return [];
-    const p = JSON.parse(raw) as unknown;
-    return Array.isArray(p) ? p.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
+function notifyCancelQueueChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(MA_CANCEL_QUEUE_CHANGED_EVENT));
   }
 }
 
 export function queueSkipAgentForNextTurn(agentId: string) {
-  if (typeof window === "undefined" || !agentId) return;
-  const cur = new Set(readCancelNext());
-  cur.add(agentId);
-  sessionStorage.setItem(STORAGE_CANCEL_NEXT, JSON.stringify([...cur]));
+  queueMaCancelNext(agentId);
+  notifyCancelQueueChanged();
 }
 
+export function unqueueSkipAgentForNextTurn(agentId: string) {
+  unqueueMaCancelNext(agentId);
+  notifyCancelQueueChanged();
+}
+
+/** @deprecated Prefer takeMaCancelNextForSend from @/lib/ma-cancel-queue */
 export function takeCancelAgentIdsForRequest(): string[] {
-  if (typeof window === "undefined") return [];
-  const ids = readCancelNext();
-  sessionStorage.removeItem(STORAGE_CANCEL_NEXT);
-  return ids;
+  return takeMaCancelNextForSend();
+}
+
+export function readQueuedSkipAgentIds(): string[] {
+  return readMaCancelNextQueue();
 }
 
 function StatusIcon({ status }: { status?: string }) {
@@ -115,9 +119,38 @@ export function AgentHuddle({
 }) {
   const agents = multi_agent_status?.agents ?? [];
   const [openTrace, setOpenTrace] = useState<Record<string, boolean>>({});
+  const [queuedSkipIds, setQueuedSkipIds] = useState<Set<string>>(() => new Set(readMaCancelNextQueue()));
+
+  const syncQueuedFromStorage = useCallback(() => {
+    setQueuedSkipIds(new Set(readMaCancelNextQueue()));
+  }, []);
+
+  useEffect(() => {
+    syncQueuedFromStorage();
+  }, [agents, syncQueuedFromStorage]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onChange = () => syncQueuedFromStorage();
+    window.addEventListener(MA_CANCEL_QUEUE_CHANGED_EVENT, onChange);
+    window.addEventListener("storage", onChange);
+    return () => {
+      window.removeEventListener(MA_CANCEL_QUEUE_CHANGED_EVENT, onChange);
+      window.removeEventListener("storage", onChange);
+    };
+  }, [syncQueuedFromStorage]);
 
   const toggleTrace = useCallback((id: string) => {
     setOpenTrace((o) => ({ ...o, [id]: !o[id] }));
+  }, []);
+
+  const toggleSkipNextForAgent = useCallback((agentKey: string) => {
+    if (readMaCancelNextQueue().includes(agentKey)) {
+      unqueueSkipAgentForNextTurn(agentKey);
+    } else {
+      queueSkipAgentForNextTurn(agentKey);
+    }
+    setQueuedSkipIds(new Set(readMaCancelNextQueue()));
   }, []);
 
   const todoProgress = useMemo(() => {
@@ -254,11 +287,21 @@ export function AgentHuddle({
                 {a.user_cancellable && (
                   <button
                     type="button"
-                    className="shrink-0 rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--muted)]"
-                    aria-label={`Skip ${a.label ?? id} on next message`}
-                    onClick={() => queueSkipAgentForNextTurn(id)}
+                    role="switch"
+                    aria-checked={queuedSkipIds.has(id)}
+                    className={
+                      queuedSkipIds.has(id)
+                        ? "shrink-0 rounded-md border-2 border-[var(--primary)] bg-[var(--primary)]/10 px-2 py-1 text-xs font-semibold text-[var(--foreground)] shadow-sm"
+                        : "shrink-0 rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--muted)]/50"
+                    }
+                    aria-label={
+                      queuedSkipIds.has(id)
+                        ? `${a.label ?? id} will be skipped on your next message; click to undo`
+                        : `Skip ${a.label ?? id} on your next message`
+                    }
+                    onClick={() => toggleSkipNextForAgent(id)}
                   >
-                    Skip next turn
+                    {queuedSkipIds.has(id) ? "Skipping next turn" : "Skip next turn"}
                   </button>
                 )}
               </div>

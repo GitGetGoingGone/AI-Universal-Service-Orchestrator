@@ -25,7 +25,7 @@ RESPONSE_SYSTEM_COMPOSITE = """You are a luxury Universal Services Orchestrator 
 Tone & Style: [INJECT ADMIN_CONFIG.GLOBAL_TONE AND LANGUAGE].
 
 **Concierge Narrative Assembly:**
-1. STORYTELLING: Write ONE flowing journey (e.g. "Your evening in Dallas begins at 6 PM..."). Do not list products like a receipt or bullet points. One continuous narrative that walks the user through the experience in order.
+1. STORYTELLING: Write ONE flowing journey through the sequence implied by the categories and location in context (time-of-day only if the user or context gave it). Do not list products like a receipt or bullet points. One continuous narrative that walks the user through the experience in order.
 2. GROUNDEDNESS: Use ONLY the product names and the "features" list from the Product data below. Do NOT invent amenities (e.g. do not mention "champagne" unless it appears in that product's features). If no features are listed for a product, describe only its name and role in the flow.
 3. TRANSPARENCY: Calculate and display a single Total Cost of Ownership (TCO) that sums all vendors in the bundle. Show it once at the end (e.g. "Total for your evening: USD 247.00"). No per-product price list in the narrative.
 
@@ -74,7 +74,7 @@ def _build_context(result: Dict[str, Any]) -> str:
     proposed_plan = intent.get("proposed_plan") or data.get("proposed_plan")
     if isinstance(proposed_plan, list) and proposed_plan:
         parts.append(f"Current plan — use ONLY these categories in your reply: {', '.join(str(p) for p in proposed_plan)}.")
-    # Bundle themes from intent (e.g. Romantic Date Night, Casual, Adventure) — pass labels + descriptions so we can present them to the user
+    # Bundle themes from intent — labels + descriptions only (no invented occasion types)
     bundle_opts = intent.get("bundle_options") or []
     if isinstance(bundle_opts, list) and bundle_opts and intent_type == "discover_composite":
         theme_entries = []
@@ -84,15 +84,18 @@ def _build_context(result: Dict[str, Any]) -> str:
             label = str(o.get("label", "")).strip()
             desc = (o.get("description") or "").strip() or "A curated experience for you."
             theme_entries.append(f"• {label}: {desc[:120]}")
-        # When Intent returns only 1 option, add fallback themed options so user gets 2–3 choices
+        # When Intent returns only 1 option, add generic tier variants (same categories, different emphasis)—no domain-specific scripts
         sq = intent.get("search_queries") or []
         if len(theme_entries) == 1 and len(sq) >= 2:
-            exp_name = (intent.get("experience_name") or "date night").lower()
-            if "date" in exp_name or "night" in exp_name or any(c in str(sq).lower() for c in ("flowers", "dinner", "limo")):
-                theme_entries.extend([
-                    "• Casual Date Night: A laid-back evening with dinner and flowers, no limo.",
-                    "• Luxury Date Night: Premium dinner and limo, with optional flowers.",
-                ])
+            first_opt = bundle_opts[0] if isinstance(bundle_opts[0], dict) else {}
+            base_label = str(first_opt.get("label", "")).strip() or "Primary option"
+            cat_hint = ", ".join(str(x) for x in sq[:6] if x)
+            theme_entries.extend(
+                [
+                    f"• {base_label} (streamlined): Core categories only ({cat_hint})—lighter selection, faster path.",
+                    f"• {base_label} (expanded): Same categories ({cat_hint})—fuller coverage and upgraded picks where available.",
+                ]
+            )
         if theme_entries:
             # When a flow rule says skip_date_area_probe (e.g. gift), do not ask for date/area in this line
             try:
@@ -111,6 +114,8 @@ def _build_context(result: Dict[str, Any]) -> str:
                 "Themed experience options — you MUST present ALL of these to the user (2–3+ options), never pick or default to one:\n"
                 + "\n".join(theme_entries)
                 + theme_suffix
+                + "\nGROUNDING: If the user asks what is inside each option, theme, or tier, answer ONLY using the labels and descriptions above plus category/search_queries from intent. "
+                "Do NOT add new theme names, occasions, or product types that are not in this context."
             )
 
     last_suggestion = result.get("last_suggestion")
@@ -170,8 +175,8 @@ def _build_context(result: Dict[str, Any]) -> str:
         else:
             parts.append(
                 "User is browsing (open-ended). Base your response on their actual message above. "
-                "Probe what experience they want — e.g. date night, gift, celebration — but phrase it in your own words, not a script. "
-                "Do NOT list categories or suggest fetching products until they indicate an experience."
+                "Probe what outcome or experience type they want; phrase it naturally. "
+                "Do NOT list categories or suggest fetching products until they narrow direction."
             )
     elif intent_type == "discover_composite":
         exp_name = products.get("experience_name", "experience")
@@ -179,6 +184,25 @@ def _build_context(result: Dict[str, Any]) -> str:
         product_list = products.get("products") if isinstance(products, dict) else []
         cat_names = [c.get("query", "") for c in categories if isinstance(c, dict) and c.get("query")]
         suggested_bundles = engagement.get("suggested_bundle_options") or []
+        if isinstance(suggested_bundles, list) and len(suggested_bundles) > 1:
+            tier_lines: List[str] = []
+            for i, sb in enumerate(suggested_bundles[:8]):
+                if not isinstance(sb, dict):
+                    continue
+                lbl = str(sb.get("label", f"Option {i + 1}")).strip()
+                desc = str(sb.get("description", "")).strip()[:220]
+                pnames = sb.get("product_names") or []
+                if isinstance(pnames, list) and pnames:
+                    tier_lines.append(
+                        f"— {lbl}: {desc} | Items: {', '.join(str(x) for x in pnames[:10] if x)}"
+                    )
+                else:
+                    tier_lines.append(f"— {lbl}: {desc}")
+            if tier_lines:
+                parts.append(
+                    "Multiple bundle tiers are in this turn. If the user asks what each option includes, use ONLY this list—do not invent other themes:\n"
+                    + "\n".join(tier_lines)
+                )
         product_ids: List[str] = []
         if suggested_bundles:
             # Concierge Narrative: bundle with product features from UCPProduct schema (groundedness)
@@ -236,7 +260,7 @@ def _build_context(result: Dict[str, Any]) -> str:
                 f"User asked for {exp_name}. Curated bundle ready. "
                 f"Product data (use ONLY these names and features; do NOT invent amenities): {product_data_str}. "
                 f"Total Cost of Ownership (TCO) for the entire bundle: {total_str}. "
-                "Write ONE flowing narrative (e.g. 'Your evening in Dallas begins at 6 PM...'). Do NOT list products with prices in the body. "
+                "Write ONE flowing narrative through the timed flow only if date/time is in context; otherwise stay location- and sequence-grounded. Do NOT list products with prices in the body. "
                 + req_cta_line
                 + "End with the single TCO and 'Add this bundle' CTA."
             )

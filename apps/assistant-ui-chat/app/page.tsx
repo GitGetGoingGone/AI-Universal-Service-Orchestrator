@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { History, Settings, Sparkles } from "lucide-react";
-import { takeCancelAgentIdsForRequest } from "@/components/AgentHuddle";
+import { takeMaCancelNextForSend } from "@/lib/ma-cancel-queue";
 import {
   AssistantRuntimeProvider,
   ThreadPrimitive,
@@ -337,6 +337,10 @@ function ChatContent({
     []
   );
 
+  /** Snapshot cancel_agent_ids once per outbound user send (prepare may run more than once). */
+  const maCancelAttachKeyRef = useRef<string>("");
+  const maCancelSnapRef = useRef<string[]>([]);
+
   const transport = useMemo(
     () =>
       new AssistantChatTransport({
@@ -363,8 +367,16 @@ function ChatContent({
             body.explore_product_id = epid;
             exploreProductIdRef.current = null;
           }
-          const cancelIds = takeCancelAgentIdsForRequest();
-          if (cancelIds.length) body.cancel_agent_ids = cancelIds;
+          if (text.trim()) {
+            const attachKey = `${messages.length}:${text.slice(0, 500)}`;
+            if (attachKey !== maCancelAttachKeyRef.current) {
+              maCancelAttachKeyRef.current = attachKey;
+              maCancelSnapRef.current = takeMaCancelNextForSend();
+            }
+            if (maCancelSnapRef.current.length) {
+              body.cancel_agent_ids = [...maCancelSnapRef.current];
+            }
+          }
           const cfg = maCfgRef.current;
           if (cfg.multi_agent_mode) body.multi_agent_mode = true;
           if (typeof window !== "undefined") {
