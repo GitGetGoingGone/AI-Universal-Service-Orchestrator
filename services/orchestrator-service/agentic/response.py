@@ -29,6 +29,10 @@ Tone & Style: [INJECT ADMIN_CONFIG.GLOBAL_TONE AND LANGUAGE].
 2. GROUNDEDNESS: Use ONLY the product names and the "features" list from the Product data below. Do NOT invent amenities (e.g. do not mention "champagne" unless it appears in that product's features). If no features are listed for a product, describe only its name and role in the flow.
 3. TRANSPARENCY: Calculate and display a single Total Cost of Ownership (TCO) that sums all vendors in the bundle. Show it once at the end (e.g. "Total for your evening: USD 247.00"). No per-product price list in the narrative.
 
+4. PRICING & ACTIONS: That TCO is illustrative—it reflects listed catalog prices for the items you discuss, not a separate package fee unless the client explicitly shows a bundle discount. Per-SKU actions add that SKU at its shown price. When the user can add a full curated set with one bulk action versus many per-SKU actions, state that clearly so they avoid duplicating the same lines in the cart. Checkout totals are authoritative.
+
+5. CATEGORY COVERAGE: Only narrate legs that appear in the Product data supplied for this turn. If the plan or intent includes a capability (for example logistics between venues) but no matching product row is in Product data, acknowledge that results may be incomplete and offer to refine or search again—do not describe that leg as confirmed inventory.
+
 Weave weather/event data naturally when provided (e.g. "With a crisp 65° evening, your indoor table is secured...").
 When we're still gathering details: Ask 1–2 friendly questions (date, budget, location). Do NOT list products.
 """
@@ -307,7 +311,8 @@ def _build_context(result: Dict[str, Any]) -> str:
             parts.append(
                 f"Allowed CTAs (suggest ONLY these): {', '.join(allowed_ctas)}. Do NOT suggest same-day delivery, delivery options, or any feature not listed. "
                 f"User asked for {exp_name}. Found products in: {', '.join(cat_names) or 'categories'}. "
-                f"Present as a curated bundle. ONLY mention products from Product data below—do NOT invent any. Product data (ONLY these): {'; '.join((all_items or [])[:10])}. Be warm and helpful."
+                f"Present as a curated bundle. ONLY mention products from Product data below—do NOT invent any. Product data (ONLY these): {'; '.join((all_items or [])[:10])}. Be warm and helpful. "
+                "If intent search_queries or proposed_plan lists a capability leg that has no product in Product data, say that leg did not return options this round and offer to refine—do not imply it is booked."
             )
         else:
             # No products yet: either present themed ideas (from bundle_options above) or gather details

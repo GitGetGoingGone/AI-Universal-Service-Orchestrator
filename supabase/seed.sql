@@ -297,6 +297,25 @@ VALUES (
 )
 ON CONFLICT (id) DO UPDATE SET description = EXCLUDED.description, experience_tags = EXCLUDED.experience_tags, updated_at = NOW();
 
+-- Transport (demo) — ensures minimal Phase-2 DB still has a transport SKU for composite discovery
+INSERT INTO products (id, partner_id, name, description, price, currency, capabilities, experience_tags, is_eligible_search, is_eligible_checkout, availability, created_at, updated_at)
+VALUES (
+  'c4eebc99-9c0b-4ef8-bb6d-6bb9bd380a35',
+  'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
+  'Demo evening car service',
+  'Point-to-point private car for an evening out — demo catalog transport',
+  199.00,
+  'USD',
+  '["limo"]'::jsonb,
+  '["luxury", "night out", "travel", "romantic"]'::jsonb,
+  true,
+  true,
+  'in_stock',
+  NOW(),
+  NOW()
+)
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, price = EXCLUDED.price, capabilities = EXCLUDED.capabilities, experience_tags = EXCLUDED.experience_tags, updated_at = NOW();
+
 -- Bundle (flowers + chocolates)
 INSERT INTO bundles (id, user_id, bundle_name, total_price, currency, status, created_at)
 VALUES (

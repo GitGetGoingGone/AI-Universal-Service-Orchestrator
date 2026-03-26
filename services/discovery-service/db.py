@@ -1,5 +1,6 @@
 """Supabase database client for discovery service."""
 
+import re
 import uuid as uuid_module
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, cast
@@ -114,6 +115,68 @@ async def check_connection() -> bool:
         return False
 
 
+def _product_query_tokens(query: str) -> List[str]:
+    """Split a composite/joined search string into tokens for OR-style matching (2+ chars each)."""
+    if not query or not isinstance(query, str):
+        return []
+    return [t for t in re.split(r"\s+", query.strip()) if len(t) > 1][:8]
+
+
+def _apply_name_description_ilike(q: Any, query: str) -> Any:
+    """Match name OR description. Multiple tokens → OR each token so joined queries still hit rows."""
+    if not query or not query.strip() or is_browse_query(query):
+        return q
+    tokens = _product_query_tokens(query)
+    if not tokens:
+        return q
+    if len(tokens) == 1:
+        pattern = f"%{tokens[0]}%"
+        return q.or_(f"name.ilike.{pattern},description.ilike.{pattern}")
+    or_parts: List[str] = []
+    for t in tokens:
+        pat = f"%{t}%"
+        or_parts.append(f"name.ilike.{pat}")
+        or_parts.append(f"description.ilike.{pat}")
+    return q.or_(",".join(or_parts))
+
+
+async def _capability_fallback_for_query(
+    client: Client,
+    query: str,
+    limit: int,
+    select_cols: str,
+    partner_id: Optional[str],
+    exclude_partner_id: Optional[str],
+    tags_to_apply: List[str],
+) -> List[Dict[str, Any]]:
+    """When text search is empty, match capabilities; for multi-token queries union per token."""
+    if not query or not query.strip() or is_browse_query(query):
+        return []
+    tokens = _product_query_tokens(query)
+    if len(tokens) <= 1:
+        return await _search_products_by_capability(
+            client, (tokens[0] if tokens else query.strip()), limit, select_cols,
+            partner_id, exclude_partner_id, tags_to_apply,
+        )
+    seen: set = set()
+    out: List[Dict[str, Any]] = []
+    fetch_cap = max(limit, 24)
+    for tok in tokens:
+        chunk = await _search_products_by_capability(
+            client, tok, fetch_cap, select_cols,
+            partner_id, exclude_partner_id, tags_to_apply,
+        )
+        for row in chunk:
+            rid = row.get("id")
+            key = str(rid) if rid is not None else None
+            if key and key not in seen:
+                seen.add(key)
+                out.append(row)
+            if len(out) >= limit:
+                return out
+    return out[:limit]
+
+
 async def search_products(
     query: str,
     limit: int = 20,
@@ -148,9 +211,7 @@ async def search_products(
             .select(f"{select_cols}, sold_count")
             .is_("deleted_at", "null")
         )
-        if query and not is_browse_query(query):
-            pattern = f"%{query}%"
-            q = q.or_(f"name.ilike.{pattern},description.ilike.{pattern}")
+        q = _apply_name_description_ilike(q, query)
         if partner_id:
             q = q.eq("partner_id", partner_id)
         if exclude_partner_id:
@@ -162,9 +223,9 @@ async def search_products(
         for row in data:
             if "sold_count" not in row:
                 row["sold_count"] = 0
-        # Fallback: when name/description search returns nothing, match by capability (e.g. "flowers", "chocolates")
+        # Fallback: when name/description search returns nothing, match by capability per token
         if not data and query and not is_browse_query(query) and query.strip():
-            data = await _search_products_by_capability(
+            data = await _capability_fallback_for_query(
                 client, query.strip(), limit, select_cols,
                 partner_id, exclude_partner_id, tags_to_apply,
             )
@@ -176,9 +237,7 @@ async def search_products(
                 .select(select_cols)
                 .is_("deleted_at", "null")
             )
-            if query and not is_browse_query(query):
-                pattern = f"%{query}%"
-                q = q.or_(f"name.ilike.{pattern},description.ilike.{pattern}")
+            q = _apply_name_description_ilike(q, query)
             if partner_id:
                 q = q.eq("partner_id", partner_id)
             if exclude_partner_id:
@@ -191,7 +250,7 @@ async def search_products(
                 if "sold_count" not in row:
                     row["sold_count"] = 0
             if not data and query and not is_browse_query(query) and query.strip():
-                data = await _search_products_by_capability(
+                data = await _capability_fallback_for_query(
                     client, query.strip(), limit, select_cols,
                     partner_id, exclude_partner_id, tags_to_apply,
                 )

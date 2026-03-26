@@ -31,6 +31,7 @@ function ProductListRenderer({ data }: { data: { products?: Product[] } }) {
       {products.slice(0, 6).map((p, i) => (
         <div
           key={p.id ?? i}
+          data-assistant-card-surface
           className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm"
         >
           {p.image_url && (
@@ -40,8 +41,8 @@ function ProductListRenderer({ data }: { data: { products?: Product[] } }) {
               className="mb-2 h-24 w-full rounded bg-[var(--background)] object-cover"
             />
           )}
-          <div className="font-medium text-[var(--card-foreground)]">{p.name ?? "Product"}</div>
-          <div className="text-sm text-[var(--card-foreground)]/80">
+          <div className="font-medium">{p.name ?? "Product"}</div>
+          <div className="assistant-card-muted text-sm">
             {p.currency ?? "USD"} {(p.price ?? 0).toFixed(2)}
           </div>
           {onAction && p.id && (
@@ -68,7 +69,7 @@ function ProductListRenderer({ data }: { data: { products?: Product[] } }) {
                     product_name: p.name,
                   });
                 }}
-                className="rounded border border-[var(--border)] bg-[var(--muted)]/20 px-2 py-1 text-xs font-medium text-[var(--card-foreground)] hover:bg-[var(--muted)]/35"
+                className="rounded border border-[var(--border)] bg-[var(--muted)]/20 px-2 py-1 text-xs font-medium hover:bg-[var(--muted)]/35"
               >
                 Explore
               </button>
@@ -91,13 +92,12 @@ function ThematicOptionsRenderer({
       {options.map((opt, i) => (
         <div
           key={i}
+          data-assistant-card-surface
           className="flex flex-col rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm"
         >
-          <div className="mb-3 flex-1 font-medium text-[var(--card-foreground)]">
-            {opt.option_label ?? `Option ${i + 1}`}
-          </div>
+          <div className="mb-3 flex-1 font-medium">{opt.option_label ?? `Option ${i + 1}`}</div>
           {opt.description != null && String(opt.description).trim() !== "" ? (
-            <div className="mb-3 text-sm text-[var(--card-foreground)]/80">{String(opt.description)}</div>
+            <div className="assistant-card-muted mb-3 text-sm">{String(opt.description)}</div>
           ) : null}
           {onAction && (
             <button
@@ -108,7 +108,7 @@ function ThematicOptionsRenderer({
                   option_label: opt.option_label ?? `Option ${i + 1}`,
                 })
               }
-              className="mt-auto rounded border border-[var(--border)] bg-[var(--muted)]/20 px-3 py-2 text-sm font-medium text-[var(--card-foreground)] hover:bg-[var(--muted)]/35"
+              className="mt-auto rounded border border-[var(--border)] bg-[var(--muted)]/20 px-3 py-2 text-sm font-medium hover:bg-[var(--muted)]/35"
             >
               Explore more options
             </button>
@@ -182,20 +182,26 @@ function ExperienceSessionRenderer({ data }: { data: ExperienceSessionData }) {
   const legs = (data?.legs ?? []) as ExperienceLeg[];
   if (legs.length === 0) {
     return (
-      <div className="assistant-themed-surface my-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm text-[var(--card-foreground)]/85">
-        <span className="font-medium text-[var(--card-foreground)]">Experience Session</span>
+      <div
+        data-assistant-card-surface
+        className="assistant-themed-surface my-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm"
+      >
+        <span className="font-medium">Experience Session</span>
         <p className="mt-1">
           Status: <span className="font-mono">{data?.status ?? "active"}</span>
         </p>
-        <p className="mt-2 text-xs text-[var(--card-foreground)]/70">
+        <p className="assistant-card-muted mt-2 text-xs">
           No legs yet. Add products to your bundle to see progress.
         </p>
       </div>
     );
   }
   return (
-    <div className="assistant-themed-surface my-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm text-[var(--card-foreground)]/85">
-      <span className="font-medium text-[var(--card-foreground)]">Experience Session</span>
+    <div
+      data-assistant-card-surface
+      className="assistant-themed-surface my-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm"
+    >
+      <span className="font-medium">Experience Session</span>
       <p className="mt-1 text-xs">
         Status: <span className="font-mono">{data?.status ?? "active"}</span>
       </p>
@@ -214,10 +220,8 @@ function ExperienceSessionRenderer({ data }: { data: ExperienceSessionData }) {
               }`}
               aria-hidden
             />
-            <span className="font-medium text-[var(--card-foreground)]">
-              {leg.partner_name ?? "Partner"}
-            </span>
-            <span className="text-xs text-[var(--card-foreground)]/65">— {leg.status ?? "pending"}</span>
+            <span className="font-medium">{leg.partner_name ?? "Partner"}</span>
+            <span className="assistant-card-muted text-xs">— {leg.status ?? "pending"}</span>
           </li>
         ))}
       </ul>
