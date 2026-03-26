@@ -540,7 +540,7 @@ function ChatContent({
                           key={i}
                           type="button"
                           onClick={() => sendSuggestion(label)}
-                          className="rounded-full border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm text-[var(--foreground)] shadow-sm transition-colors hover:bg-zinc-100 hover:dark:bg-zinc-800"
+                          className="rounded-full border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm text-[var(--card-foreground)] shadow-sm transition-colors hover:opacity-90"
                         >
                           {label}
                         </button>
