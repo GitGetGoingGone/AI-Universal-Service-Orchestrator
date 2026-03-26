@@ -21,7 +21,7 @@ type AgentOp = {
   timestamp?: number;
 };
 
-type AgentRow = {
+export type AgentRow = {
   id?: string;
   label?: string;
   status?: string;
@@ -31,9 +31,9 @@ type AgentRow = {
   trace?: AgentOp[];
 };
 
-type TodoItem = { label?: string; status?: "pending" | "in_progress" | "done" };
+export type TodoItem = { label?: string; status?: "pending" | "in_progress" | "done" };
 
-type ThoughtLine = { label?: string; duration_ms?: number; detail?: string };
+export type ThoughtLine = { label?: string; duration_ms?: number; detail?: string };
 
 const STORAGE_CANCEL_NEXT = "uso_ma_cancel_next";
 

@@ -4,7 +4,7 @@ import React from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { useGatewayAction } from "@/contexts/GatewayActionContext";
 import { PaymentFormInline } from "./PaymentFormInline";
-import { AgentHuddle } from "./AgentHuddle";
+import { AgentHuddle, type AgentRow, type TodoItem, type ThoughtLine } from "./AgentHuddle";
 
 type Product = {
   id?: string;
@@ -253,6 +253,18 @@ function PaymentFormRenderer({
 }
 
 type DataPartProps = { name?: string; data?: unknown; isLive?: boolean };
+
+/** AI SDK stream chunks use `type: "data-<name>"`; legacy parts may use `type: "data"` + `name`. */
+function getDataStreamPartName(part: { type?: string; name?: string }): string | null {
+  if (part.type === "data" && typeof part.name === "string" && part.name.length > 0) {
+    return part.name;
+  }
+  if (typeof part.type === "string" && part.type.startsWith("data-")) {
+    return part.type.slice("data-".length);
+  }
+  return null;
+}
+
 const DATA_RENDERERS_BY_NAME: Record<string, React.ComponentType<DataPartProps>> = {
   product_list: ProductListRenderer as React.ComponentType<DataPartProps>,
   thematic_options: ThematicOptionsRenderer as React.ComponentType<DataPartProps>,
@@ -279,11 +291,16 @@ function AgentHuddleRenderer({
     credit_usage?: { estimated_total_tokens?: number; note?: string };
   };
 }) {
+  const agents = data.multi_agent_status?.agents;
+  const status =
+    agents && Array.isArray(agents)
+      ? { agents: agents as AgentRow[] }
+      : undefined;
   return (
     <AgentHuddle
-      multi_agent_status={data.multi_agent_status}
-      todos={data.todos}
-      thought_timelines={data.thought_timelines}
+      multi_agent_status={status}
+      todos={data.todos as TodoItem[] | undefined}
+      thought_timelines={data.thought_timelines as ThoughtLine[] | undefined}
       memory_health={data.memory_health}
       credit_usage={data.credit_usage}
     />
@@ -319,18 +336,16 @@ export function GatewayMessageParts() {
     return null;
   }
 
-  const hasThinkingParts = content.some(
-    (part) => typeof part === "object" && part !== null && (part as { name?: string }).name === "thinking"
-  );
+  const hasThinkingParts = content.some((part) => {
+    if (typeof part !== "object" || part === null) return false;
+    return getDataStreamPartName(part as { type?: string; name?: string }) === "thinking";
+  });
 
   // Only show the latest thinking part so status messages don't stack
-  const lastThinkingIndex = content.reduce<number>(
-    (last, part, i) =>
-      typeof part === "object" && part !== null && (part as { type?: string; name?: string }).type === "data" && (part as { name?: string }).name === "thinking"
-        ? i
-        : last,
-    -1
-  );
+  const lastThinkingIndex = content.reduce<number>((last, part, i) => {
+    if (typeof part !== "object" || part === null) return last;
+    return getDataStreamPartName(part as { type?: string; name?: string }) === "thinking" ? i : last;
+  }, -1);
 
   return (
     <div className="space-y-1">
@@ -350,16 +365,17 @@ export function GatewayMessageParts() {
             </div>
           );
         }
-        if (p.type === "data" && p.name) {
-          if (p.name === "thinking") {
+        const dataName = getDataStreamPartName(p);
+        if (dataName) {
+          if (dataName === "thinking") {
             if (!showThinking) return null;
             // Only render the latest thinking part so status messages don't stack
             if (index !== lastThinkingIndex) return null;
             const Renderer = DATA_RENDERERS_BY_NAME.thinking;
-            return <Renderer key={index} name={p.name} data={p.data ?? {}} isLive />;
+            return <Renderer key={index} name={dataName} data={p.data ?? {}} isLive />;
           }
-          const Renderer = DATA_RENDERERS_BY_NAME[p.name] ?? DataPartFallback;
-          return <Renderer key={index} name={p.name} data={p.data ?? {}} />;
+          const Renderer = DATA_RENDERERS_BY_NAME[dataName] ?? DataPartFallback;
+          return <Renderer key={index} name={dataName} data={p.data ?? {}} />;
         }
         return null;
       })}

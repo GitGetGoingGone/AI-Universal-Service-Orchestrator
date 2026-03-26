@@ -299,8 +299,7 @@ export async function POST(req: Request) {
           const creditUsage = doneData.credit_usage as Record<string, unknown> | undefined;
           if (maStatus && Array.isArray((maStatus as { agents?: unknown[] }).agents) && (maStatus as { agents: unknown[] }).agents.length > 0) {
             writer.write({
-              type: "data",
-              name: "agent_huddle",
+              type: "data-agent_huddle",
               data: {
                 multi_agent_status: maStatus,
                 todos,
@@ -308,7 +307,7 @@ export async function POST(req: Request) {
                 memory_health: memoryHealth,
                 credit_usage: creditUsage,
               },
-            } as Parameters<typeof writer.write>[0]);
+            });
           }
 
           if (Array.isArray(suggestedCtas) && suggestedCtas.length > 0) {

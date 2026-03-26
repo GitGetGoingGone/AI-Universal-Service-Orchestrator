@@ -43,7 +43,12 @@ type ThreadItem = { id: string; title: string; has_completed_order: boolean };
 function extractThreadMetadataFromMessage(msg: { content?: unknown; parts?: unknown }): { thread_id?: string; thread_title?: string } | null {
   const parts = (msg.content ?? msg.parts) as Array<{ type?: string; name?: string; data?: Record<string, unknown> }> | undefined;
   if (!Array.isArray(parts)) return null;
-  const part = parts.find((p) => p?.type === "data" && (p?.name === "thread_metadata" || (p?.data as Record<string, unknown>)?.thread_id));
+  const part = parts.find((p) => {
+    const d = p?.data as Record<string, unknown> | undefined;
+    if (d && typeof d.thread_id === "string") return true;
+    if (p?.type === "data-thread_metadata") return true;
+    return p?.type === "data" && p?.name === "thread_metadata";
+  });
   const data = (part as { data?: Record<string, unknown> })?.data;
   if (!data || typeof data.thread_id !== "string") return null;
   return { thread_id: data.thread_id as string, thread_title: data.thread_title as string | undefined };
