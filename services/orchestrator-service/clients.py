@@ -85,22 +85,25 @@ async def discover_products_via_rpc(
     return result
 
 
-async def get_experience_categories() -> List[str]:
+_CATALOG_CTX_CACHE_TTL_SEC = 60
+
+
+async def get_catalog_planning_context() -> Dict[str, List[str]]:
     """
-    Fetch available experience categories from Discovery (GET /api/v1/experience-categories).
-    Used to pre-fill intent resolve so the LLM knows available tags for theme bundles.
-    Returns empty list if Discovery is unavailable or endpoint errors.
-    Cached for 60s to avoid repeated GETs when many chat requests hit resolve_intent.
+    Fetch experience_tags + product capability slugs from Discovery (GET /api/v1/experience-categories).
+    Used for intent composite planning: search_queries / proposed_plan should align with catalog legs.
+    UCP/MCP capabilities appear here once partner inventory is represented in products.
+    Cached briefly to avoid hammering Discovery on each message.
     """
-    _EXP_CAT_CACHE_TTL_SEC = 60
     now = time.monotonic()
-    cache = getattr(get_experience_categories, "_cache", None)
-    if cache is not None and (now - getattr(get_experience_categories, "_cache_ts", 0)) < _EXP_CAT_CACHE_TTL_SEC:
-        return list(cache)
+    cache = getattr(get_catalog_planning_context, "_cache", None)
+    if cache is not None and (now - getattr(get_catalog_planning_context, "_cache_ts", 0)) < _CATALOG_CTX_CACHE_TTL_SEC:
+        return dict(cache)
 
     url = f"{settings.discovery_service_url}/api/v1/experience-categories"
     path = "/api/v1/experience-categories"
     headers = _gateway_headers_for_discovery("GET", path)
+    out: Dict[str, List[str]] = {"experience_categories": [], "capability_tags": []}
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.get(url, headers=headers)
@@ -108,17 +111,30 @@ async def get_experience_categories() -> List[str]:
             data = r.json()
         inner = data.get("data") or data
         cats = inner.get("experience_categories")
+        caps = inner.get("capability_tags")
         if isinstance(cats, list):
-            result = [str(t).strip() for t in cats if t and str(t).strip()]
-            setattr(get_experience_categories, "_cache", result)
-            setattr(get_experience_categories, "_cache_ts", now)
-            return result
-        return []
+            out["experience_categories"] = [str(t).strip() for t in cats if t and str(t).strip()]
+        if isinstance(caps, list):
+            out["capability_tags"] = [str(t).strip() for t in caps if t and str(t).strip()]
+        setattr(get_catalog_planning_context, "_cache", out)
+        setattr(get_catalog_planning_context, "_cache_ts", now)
+        return dict(out)
     except Exception as e:
-        logger.debug("Could not fetch experience categories from Discovery: %s", e)
+        logger.debug("Could not fetch catalog planning context from Discovery: %s", e)
         if cache is not None:
-            return list(cache)
-        return []
+            return dict(cache)
+        return out
+
+
+async def get_experience_categories() -> List[str]:
+    """
+    Fetch available experience categories from Discovery (GET /api/v1/experience-categories).
+    Used to pre-fill intent resolve so the LLM knows available tags for theme bundles.
+    Returns empty list if Discovery is unavailable or endpoint errors.
+    Cached for 60s to avoid repeated GETs when many chat requests hit resolve_intent.
+    """
+    ctx = await get_catalog_planning_context()
+    return list(ctx.get("experience_categories") or [])
 
 
 async def discover_products_broadcast(
@@ -239,11 +255,15 @@ async def resolve_intent_with_fallback(
     Resolve intent via Intent service. On 502/timeout/unavailable, use local fallback
     so chat still returns products (Intent service outage resilience).
     When force_model=True (ChatGPT/Gemini with force_model_based_intent), do not fall back.
-    Automatically fetches experience_categories from Discovery and passes to Intent for theme-bundle prompts.
+    Automatically fetches experience_categories and capability_tags from Discovery and passes to Intent
+    so composite search_queries / proposed_plan align with local (and synced) catalog legs.
     """
     experience_categories: List[str] = []
+    catalog_capability_tags: List[str] = []
     if getattr(settings, "discovery_service_url", None):
-        experience_categories = await get_experience_categories()
+        ctx = await get_catalog_planning_context()
+        experience_categories = list(ctx.get("experience_categories") or [])
+        catalog_capability_tags = list(ctx.get("capability_tags") or [])
     try:
         return await resolve_intent(
             text,
@@ -253,6 +273,7 @@ async def resolve_intent_with_fallback(
             probe_count=probe_count,
             thread_context=thread_context,
             experience_categories=experience_categories,
+            catalog_capability_tags=catalog_capability_tags,
             force_model=force_model,
         )
     except (httpx.HTTPStatusError, httpx.RequestError, RuntimeError) as e:
@@ -281,6 +302,7 @@ async def resolve_intent(
     probe_count: Optional[int] = None,
     thread_context: Optional[Dict[str, Any]] = None,
     experience_categories: Optional[List[str]] = None,
+    catalog_capability_tags: Optional[List[str]] = None,
     force_model: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -288,6 +310,7 @@ async def resolve_intent(
     Raises on 4xx/5xx. Callers should catch and use local fallback when Intent is unavailable.
     When force_model=True, intent service will not fall back to heuristics on LLM failure.
     experience_categories: optional list of experience tags (from GET experience-categories) for theme bundle options.
+    catalog_capability_tags: distinct product.capabilities values for dynamic composite legs.
     """
     url = f"{settings.intent_service_url}/api/v1/resolve"
     payload: Dict[str, Any] = {"text": text, "user_id": user_id, "persist": True}
@@ -301,6 +324,8 @@ async def resolve_intent(
         payload["thread_context"] = thread_context
     if experience_categories:
         payload["experience_categories"] = experience_categories
+    if catalog_capability_tags:
+        payload["catalog_capability_tags"] = catalog_capability_tags
     if force_model:
         payload["force_model"] = True
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
@@ -364,7 +389,22 @@ async def discover_products(
     headers = _gateway_headers_for_discovery("GET", path)
     for attempt in range(DISCOVERY_RETRY_ATTEMPTS):
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            r = await client.get(url, params=params, headers=headers)
+            try:
+                r = await client.get(url, params=params, headers=headers)
+            except httpx.RequestError as e:
+                if attempt < DISCOVERY_RETRY_ATTEMPTS - 1:
+                    delay = min(20, 2 * (2**attempt))
+                    logger.warning(
+                        "Discovery request error (%s), retry %s/%s in %ss",
+                        e,
+                        attempt + 1,
+                        DISCOVERY_RETRY_ATTEMPTS,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning("Discovery unreachable after retries: %s", e)
+                return _empty_discovery_fallback(query)
             if r.status_code == 429 and attempt < DISCOVERY_RETRY_ATTEMPTS - 1:
                 delay = DISCOVERY_RETRY_BASE_DELAY
                 retry_after = r.headers.get("Retry-After")
@@ -380,6 +420,25 @@ async def discover_products(
                 continue
             if r.status_code == 429:
                 logger.warning("Discovery rate limited (429) after %s retries, returning empty", DISCOVERY_RETRY_ATTEMPTS)
+                return _empty_discovery_fallback(query)
+            # Render cold starts / transient proxy 502: short backoff then empty fallback
+            if r.status_code in (502, 503, 504) and attempt < DISCOVERY_RETRY_ATTEMPTS - 1:
+                delay = min(20, 3 * (2**attempt))
+                logger.warning(
+                    "Discovery unavailable (%s), retry %s/%s in %ss",
+                    r.status_code,
+                    attempt + 1,
+                    DISCOVERY_RETRY_ATTEMPTS,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            if r.status_code in (502, 503, 504):
+                logger.warning(
+                    "Discovery returned %s after %s retries, returning empty catalog",
+                    r.status_code,
+                    DISCOVERY_RETRY_ATTEMPTS,
+                )
                 return _empty_discovery_fallback(query)
             r.raise_for_status()
             out = r.json()

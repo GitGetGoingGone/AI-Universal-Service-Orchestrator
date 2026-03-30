@@ -24,6 +24,10 @@ class ResolveRequest(BaseModel):
     probe_count: Optional[int] = Field(None, description="Number of probing rounds so far")
     thread_context: Optional[Dict[str, Any]] = Field(None, description="Thread context: order_id, bundle_id")
     experience_categories: Optional[List[str]] = Field(None, description="Available experience tags for theme bundles (e.g. baby, celebration); injected into prompt when set")
+    catalog_capability_tags: Optional[List[str]] = Field(
+        None,
+        description="Distinct product.capabilities from Discovery; composite search_queries/proposed_plan must align with these slugs",
+    )
     persist: bool = Field(True, description="Persist intent to database")
     force_model: bool = Field(False, description="When true, use LLM only; do not fall back to heuristics on failure (for ChatGPT/Gemini)")
 
@@ -53,8 +57,13 @@ async def resolve(
         probe_count=body.probe_count,
         thread_context=body.thread_context,
         experience_categories=body.experience_categories,
+        catalog_capability_tags=body.catalog_capability_tags,
         force_model=body.force_model,
     )
+
+    llm_usage = None
+    if isinstance(resolved, dict):
+        llm_usage = resolved.pop("_internal_llm_usage", None)
 
     # Safety: never return empty intent
     if not resolved or not isinstance(resolved, dict) or not resolved.get("intent_type"):
@@ -123,8 +132,13 @@ async def resolve(
         data["recommended_next_action"] = resolved["recommended_next_action"]
     if resolved.get("proposed_plan") is not None and "proposed_plan" not in data:
         data["proposed_plan"] = resolved.get("proposed_plan", [])
+    extra: Dict[str, Any] = {}
+    if llm_usage:
+        extra["llm_usage"] = llm_usage
+
     return chat_first_response(
         data=data,
         machine_readable=machine_readable,
         request_id=request_id,
+        **extra,
     )

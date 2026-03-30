@@ -152,6 +152,83 @@ def get_intent_heuristic_config() -> Dict[str, Any]:
     }
 
 
+def _constrain_discover_composite_for_catalog(
+    data: Dict[str, Any],
+    catalog_capability_tags: Optional[List[str]],
+) -> Dict[str, Any]:
+    """
+    When Discovery supplies capability slugs, composite intents must only use legs that exist in catalog
+    (local products + inventory synced into products). Drops unknown legs; if none left, uses first
+    available capabilities so discovery can still run.
+    """
+    if not catalog_capability_tags or not isinstance(data, dict):
+        return data
+    caps = [str(c).strip() for c in catalog_capability_tags if c and str(c).strip()]
+    if not caps:
+        return data
+    it = data.get("intent_type")
+    if it not in ("discover_composite", "refine_composite"):
+        return data
+
+    allowed_lower = {c.lower() for c in caps}
+
+    def _canon(tok: str) -> Optional[str]:
+        t = (tok or "").strip()
+        if not t:
+            return None
+        lo = t.lower()
+        if lo not in allowed_lower:
+            return None
+        for c in caps:
+            if c.lower() == lo:
+                return c.lower()
+        return lo
+
+    cfg = get_intent_heuristic_config()
+    c2l: Dict[str, str] = dict(cfg.get("cat_to_label") or {})
+
+    sq = data.get("search_queries")
+    if not isinstance(sq, list) or not sq:
+        opts = data.get("bundle_options")
+        if isinstance(opts, list) and opts and isinstance(opts[0], dict):
+            cats0 = opts[0].get("categories")
+            if isinstance(cats0, list) and cats0:
+                data = {**data, "search_queries": [str(c) for c in cats0 if c]}
+                sq = data["search_queries"]
+
+    if isinstance(sq, list):
+        sq2: List[str] = []
+        for x in sq:
+            c = _canon(str(x))
+            if c:
+                sq2.append(c)
+        if not sq2:
+            sq2 = [c.lower() for c in caps[: min(3, len(caps))]]
+        data = {**data, "search_queries": sq2}
+        data["proposed_plan"] = [c2l.get(q, q.capitalize()) for q in sq2]
+        data["search_query"] = " ".join(sq2)
+
+    opts = data.get("bundle_options")
+    if isinstance(opts, list):
+        new_opts: List[Dict[str, Any]] = []
+        for o in opts:
+            if not isinstance(o, dict):
+                new_opts.append(o)
+                continue
+            cats = o.get("categories")
+            if isinstance(cats, list):
+                cats2 = []
+                for x in cats:
+                    c = _canon(str(x))
+                    if c:
+                        cats2.append(c)
+                o = {**o, "categories": cats2}
+            new_opts.append(o)
+        data = {**data, "bundle_options": new_opts}
+
+    return data
+
+
 def _heuristic_resolve(
     text: str,
     *,
@@ -516,12 +593,14 @@ async def _llm_resolve_intent(
     last_suggestion: Optional[str] = None,
     recent_conversation: Optional[List[Dict[str, Any]]] = None,
     experience_categories: Optional[List[str]] = None,
+    catalog_capability_tags: Optional[List[str]] = None,
     client: Any = None,
     llm_config: Optional[Dict[str, Any]] = None,
     force_model: bool = False,
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], Optional[Dict[str, int]]]:
     """
     LLM-only path: call configured LLM for intent classification and return parsed result.
+    Second tuple element is token usage for orchestrator billing when present.
     Raises on failure (no heuristic fallback). Used by resolve_intent when LLM is configured.
     """
     if not llm_config:
@@ -550,7 +629,17 @@ async def _llm_resolve_intent(
         user_content += f"\nRecent conversation: {conv_str}"
     if experience_categories:
         user_content += f"\nAvailable experience categories (use for theme bundle options experience_tags): {', '.join(str(t) for t in experience_categories)}"
+    if catalog_capability_tags:
+        cap_s = ", ".join(str(t) for t in catalog_capability_tags[:48])
+        user_content += (
+            f"\nCatalog capability legs from live inventory (use ONLY these lowercase slugs for discover_composite "
+            f"search_queries, bundle_options[].categories, and align proposed_plan labels to these legs): {cap_s}. "
+            "Do not invent legs that are not listed."
+        )
     user_content += "\n\nReturn valid JSON only. For discover_composite, include bundle_options with label, description, categories, and optionally experience_tags (e.g. [\"romantic\"]) per option. For multi-tag intents (e.g. 'luxury travel-friendly night out') you may set theme_experience_tags to an array of tags (AND filter; e.g. [\"luxury\", \"travel-friendly\"]); otherwise use theme_experience_tag (single string)."
+
+    usage_out: Optional[Dict[str, int]] = None
+    raw = ""
 
     if provider in ("azure", "openrouter", "custom", "openai"):
         def _call():
@@ -565,6 +654,17 @@ async def _llm_resolve_intent(
             )
         response = await asyncio.to_thread(_call)
         raw = (response.choices[0].message.content or "").strip()
+        u = getattr(response, "usage", None)
+        if u is not None:
+            pt = getattr(u, "prompt_tokens", None)
+            ct = getattr(u, "completion_tokens", None)
+            tt = getattr(u, "total_tokens", None)
+            if pt is not None or ct is not None:
+                usage_out = {
+                    "prompt_tokens": int(pt or 0),
+                    "completion_tokens": int(ct or 0),
+                    "total_tokens": int(tt if tt is not None else (int(pt or 0) + int(ct or 0))),
+                }
     elif provider == "gemini":
         gen_model = chat_client.GenerativeModel(model)
         def _call():
@@ -574,6 +674,23 @@ async def _llm_resolve_intent(
             )
         resp = await asyncio.to_thread(_call)
         raw = (getattr(resp, "text", None) or "").strip()
+        try:
+            um = getattr(resp, "usage_metadata", None)
+            if um is not None:
+                pt = int(getattr(um, "prompt_token_count", None) or 0)
+                ct = int(
+                    getattr(um, "candidates_token_count", None)
+                    or getattr(um, "candidates_tokens", None)
+                    or 0
+                )
+                if pt or ct:
+                    usage_out = {
+                        "prompt_tokens": pt,
+                        "completion_tokens": ct,
+                        "total_tokens": pt + ct,
+                    }
+        except Exception:
+            pass
     else:
         raise RuntimeError("Unsupported LLM provider")
 
@@ -583,7 +700,7 @@ async def _llm_resolve_intent(
     parsed = json.loads(raw)
     if not isinstance(parsed, dict) or not parsed.get("intent_type"):
         raise ValueError("Invalid parsed intent")
-    return parsed
+    return parsed, usage_out
 
 
 async def resolve_intent(
@@ -595,6 +712,7 @@ async def resolve_intent(
     probe_count: Optional[int] = None,
     thread_context: Optional[Dict[str, Any]] = None,
     experience_categories: Optional[List[str]] = None,
+    catalog_capability_tags: Optional[List[str]] = None,
     force_model: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -610,12 +728,15 @@ async def resolve_intent(
 
     # Heuristic-only path when no LLM configured
     if not llm_config or not llm_config.get("api_key"):
-        return _heuristic_resolve(
-            text,
-            last_suggestion=last_suggestion,
-            recent_conversation=recent_conversation,
-            probe_count=probe_count,
-            thread_context=thread_context,
+        return _constrain_discover_composite_for_catalog(
+            _heuristic_resolve(
+                text,
+                last_suggestion=last_suggestion,
+                recent_conversation=recent_conversation,
+                probe_count=probe_count,
+                thread_context=thread_context,
+            ),
+            catalog_capability_tags,
         )
 
     # Refinement short-circuit: "no limo" / "remove flowers" in composite context -> use heuristic so we get refine_composite
@@ -634,33 +755,44 @@ async def resolve_intent(
                             in_composite = True
                         break
             if in_composite:
-                return _heuristic_resolve(
-                    text,
-                    last_suggestion=last_suggestion,
-                    recent_conversation=recent_conversation,
-                    probe_count=probe_count,
-                    thread_context=thread_context,
+                return _constrain_discover_composite_for_catalog(
+                    _heuristic_resolve(
+                        text,
+                        last_suggestion=last_suggestion,
+                        recent_conversation=recent_conversation,
+                        probe_count=probe_count,
+                        thread_context=thread_context,
+                    ),
+                    catalog_capability_tags,
                 )
             break
 
     # LLM path: call LLM; on failure fall back to heuristic unless force_model
     try:
-        return await _llm_resolve_intent(
+        parsed, llm_usage = await _llm_resolve_intent(
             text,
             last_suggestion=last_suggestion,
             recent_conversation=recent_conversation,
             experience_categories=experience_categories,
+            catalog_capability_tags=catalog_capability_tags,
             client=client,
             llm_config=llm_config,
             force_model=force_model,
         )
+        out = _constrain_discover_composite_for_catalog(parsed, catalog_capability_tags)
+        if llm_usage:
+            out = {**out, "_internal_llm_usage": llm_usage}
+        return out
     except Exception:
         if force_model:
             raise
-        return _heuristic_resolve(
-            text,
-            last_suggestion=last_suggestion,
-            recent_conversation=recent_conversation,
-            probe_count=probe_count,
-            thread_context=thread_context,
+        return _constrain_discover_composite_for_catalog(
+            _heuristic_resolve(
+                text,
+                last_suggestion=last_suggestion,
+                recent_conversation=recent_conversation,
+                probe_count=probe_count,
+                thread_context=thread_context,
+            ),
+            catalog_capability_tags,
         )

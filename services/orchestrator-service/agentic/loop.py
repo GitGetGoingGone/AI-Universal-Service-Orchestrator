@@ -23,6 +23,7 @@ def _debug_log(location: str, message: str, data: dict, hypothesis_id: str = "")
         pass
 # #endregion
 from .planner import plan_next_action
+from .turn_usage import TurnUsageAccumulator, ingest_intent_api_usage
 from .tools import execute_tool
 
 logger = logging.getLogger(__name__)
@@ -68,10 +69,37 @@ async def _web_search(query: str, max_results: int = 5) -> Dict[str, Any]:
         return {"error": str(e)}
 
 
+def _is_placeholder_weather_location(location: str) -> bool:
+    """True when we should not call an external weather API (probing / unknown area)."""
+    t = (location or "").strip().lower()
+    if not t:
+        return True
+    if t in (
+        "your area",
+        "your_area",
+        "your city",
+        "your town",
+        "your location",
+        "unknown",
+        "tbd",
+        "n/a",
+        "na",
+        "none",
+        "here",
+        "local",
+    ):
+        return True
+    return False
+
+
 async def _get_weather(location: str) -> Dict[str, Any]:
     """Call weather API. Supports WeatherAPI.com and OpenWeatherMap via extra_config.provider."""
     from db import get_supabase
     from packages.shared.external_api import get_external_api_config
+
+    loc_in = (location or "").strip()
+    if _is_placeholder_weather_location(loc_in):
+        return {"error": "Weather skipped until the user shares a specific city or area (not a placeholder)."}
 
     client = get_supabase()
     cfg = get_external_api_config(client, "weather") if client else None
@@ -81,16 +109,27 @@ async def _get_weather(location: str) -> Dict[str, Any]:
     base_url = (cfg.get("base_url") or "https://api.openweathermap.org").rstrip("/")
     api_key = cfg.get("api_key", "")
     extra = cfg.get("extra_config") or {}
-    provider = (extra.get("provider") or "").lower()
+    provider = (extra.get("provider") or "").lower().strip()
+    # Admin UI can set base_url to WeatherAPI but omit provider — avoid OpenWeather path on wrong host (401).
+    host = base_url.lower()
+    if "weatherapi.com" in host:
+        provider = "weatherapi"
+        if host.startswith("http://api.weatherapi.com"):
+            base_url = "https://" + base_url.split("://", 1)[-1]
+    elif "openweathermap.org" in host:
+        if provider == "weatherapi":
+            provider = "openweathermap"
+        elif not provider:
+            provider = "openweathermap"
 
     if provider == "weatherapi":
         # WeatherAPI.com: /current.json?key=...&q=...
         path = "/current.json"
-        params = {"key": api_key, "q": location}
+        params = {"key": api_key, "q": loc_in}
     else:
         # OpenWeatherMap (default): /data/2.5/weather?q=...&appid=...
         path = "/data/2.5/weather"
-        params = {"q": location, "appid": api_key, "units": extra.get("units", "imperial")}
+        params = {"q": loc_in, "appid": api_key, "units": extra.get("units", "imperial")}
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as http:
@@ -106,7 +145,7 @@ async def _get_weather(location: str) -> Dict[str, Any]:
                 feels_f = round(feels_c * 9 / 5 + 32, 1) if feels_c is not None else temp_f
                 return {
                     "data": {
-                        "location": location,
+                        "location": loc_in,
                         "temp": temp_f,
                         "feels_like": feels_f,
                         "description": cond.get("text", ""),
@@ -117,7 +156,7 @@ async def _get_weather(location: str) -> Dict[str, Any]:
             weather = (data.get("weather") or [{}])[0]
             return {
                 "data": {
-                    "location": location,
+                    "location": loc_in,
                     "temp": main.get("temp"),
                     "feels_like": main.get("feels_like"),
                     "description": weather.get("description", ""),
@@ -490,6 +529,7 @@ async def run_agentic_loop(
     on_thinking: Optional[Callable[[str, Optional[Dict]], Awaitable[None]]] = None,
     thinking_messages: Optional[Dict[str, str]] = None,
     on_multi_agent_intent_ready: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    turn_usage: Optional[TurnUsageAccumulator] = None,
 ) -> Dict[str, Any]:
     """
     Run the agentic decision loop until completion.
@@ -536,6 +576,7 @@ async def run_agentic_loop(
             limit=limit,
             resolve_intent_fn=resolve_intent_fn,
             discover_products_fn=discover_products_fn,
+            turn_usage=turn_usage,
         )
 
     # Derive last_suggestion and probe_count from conversation history
@@ -666,6 +707,7 @@ async def run_agentic_loop(
                 probe_count=probe_count,
                 thread_context=thread_context if thread_context else None,
             )
+            ingest_intent_api_usage(turn_usage, intent_result if isinstance(intent_result, dict) else {})
             intent_data = intent_result.get("data", intent_result)
             if not intent_data or not isinstance(intent_data, dict) or not intent_data.get("intent_type"):
                 intent_data = {
@@ -851,7 +893,11 @@ async def run_agentic_loop(
             elif rec == "handle_unrelated":
                 await _emit_thinking(on_thinking, "before_handle_unrelated", ctx, thinking_messages or {})
             plan = await plan_next_action(
-                user_message, state, max_iterations=max_iterations, llm_config=llm_config
+                user_message,
+                state,
+                max_iterations=max_iterations,
+                llm_config=llm_config,
+                turn_usage=turn_usage,
             )
 
         if iteration == 0 and intent_data is not None and on_multi_agent_intent_ready is not None:
@@ -1107,6 +1153,7 @@ async def run_agentic_loop(
                 break
 
             if tool_name == "resolve_intent":
+                ingest_intent_api_usage(turn_usage, result if isinstance(result, dict) else {})
                 intent_data = result.get("data", result)
                 # Refinement leak patch: persist purged search_queries and proposed_plan so subsequent turns use them
                 if intent_data and intent_data.get("intent_type") == "refine_composite" and intent_data.get("removed_categories"):
@@ -1457,12 +1504,14 @@ async def _direct_flow(
     limit: int = 20,
     resolve_intent_fn=None,
     discover_products_fn=None,
+    turn_usage: Optional[TurnUsageAccumulator] = None,
 ) -> Dict[str, Any]:
     """Direct flow without agentic planning (original intent → discover)."""
     if not resolve_intent_fn or not discover_products_fn:
         return {"error": "Services not configured"}
 
     intent_response = await resolve_intent_fn(user_message)
+    ingest_intent_api_usage(turn_usage, intent_response if isinstance(intent_response, dict) else {})
     intent_data = intent_response.get("data", intent_response)
     intent_type = intent_data.get("intent_type", "unknown")
     # Empty/generic → "browse" (Discovery returns sample products)

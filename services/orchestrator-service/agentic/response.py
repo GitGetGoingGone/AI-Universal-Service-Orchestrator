@@ -7,6 +7,8 @@ import queue
 import threading
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
+from .turn_usage import TurnUsageAccumulator
+
 logger = logging.getLogger(__name__)
 
 RESPONSE_SYSTEM = """You are a friendly shopping assistant. Given the user's message and what was found/done, write a brief, natural 1-3 sentence response to the user.
@@ -491,6 +493,7 @@ async def generate_engagement_response(
     llm_config: Optional[Dict[str, Any]] = None,
     allow_markdown: bool = False,
     return_debug: bool = False,
+    turn_usage: Optional[TurnUsageAccumulator] = None,
 ):
     """
     Generate a natural, engaging response using the LLM.
@@ -612,6 +615,8 @@ async def generate_engagement_response(
                 )
             response = await asyncio.to_thread(_call_openai_engagement)
             text = (response.choices[0].message.content or "").strip()
+            if turn_usage is not None and getattr(response, "usage", None):
+                turn_usage.add_openai_usage("engagement", response.usage)
             if return_debug:
                 return (text if text else None, {"prompt_sent": prompt_sent, "response_received": text or ""})
             return text if text else None
@@ -626,6 +631,23 @@ async def generate_engagement_response(
             resp = await asyncio.to_thread(_call_gemini_engagement)
             if resp and resp.candidates:
                 text = (getattr(resp, "text", None) or "").strip()
+                if turn_usage is not None:
+                    try:
+                        um = getattr(resp, "usage_metadata", None)
+                        if um is not None:
+                            pt = int(getattr(um, "prompt_token_count", None) or 0)
+                            ct = int(
+                                getattr(um, "candidates_token_count", None)
+                                or getattr(um, "candidates_tokens", None)
+                                or 0
+                            )
+                            if pt or ct:
+                                turn_usage.add_usage_dict(
+                                    "engagement",
+                                    {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": pt + ct},
+                                )
+                    except Exception:
+                        pass
                 if return_debug:
                     return (text if text else None, {"prompt_sent": prompt_sent, "response_received": text or ""})
                 return text if text else None
@@ -641,6 +663,7 @@ async def stream_engagement_response(
     result: Dict[str, Any],
     llm_config: Optional[Dict[str, Any]] = None,
     allow_markdown: bool = False,
+    turn_usage: Optional[TurnUsageAccumulator] = None,
 ) -> AsyncIterator[str]:
     """
     Stream engagement response tokens/chunks. Yields each delta; caller can accumulate for full summary.
@@ -745,9 +768,11 @@ async def stream_engagement_response(
         if provider in ("azure", "openrouter", "custom", "openai"):
             thread_safe_q: queue.Queue = queue.Queue()
 
+            stream_usage: List[Any] = []
+
             def _openai_stream() -> None:
                 try:
-                    stream = client.chat.completions.create(  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
+                    base_kw = dict(
                         model=model,
                         messages=[
                             {"role": "system", "content": system_prompt},
@@ -757,7 +782,18 @@ async def stream_engagement_response(
                         max_tokens=max_tokens,
                         stream=True,
                     )
+                    try:
+                        stream = client.chat.completions.create(  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
+                            **base_kw,
+                            stream_options={"include_usage": True},
+                        )
+                    except TypeError:
+                        stream = client.chat.completions.create(**base_kw)  # type: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]
                     for chunk in stream:
+                        u = getattr(chunk, "usage", None)
+                        if u is not None:
+                            stream_usage.clear()
+                            stream_usage.append(u)
                         if chunk.choices and len(chunk.choices) > 0:
                             delta = getattr(chunk.choices[0].delta, "content", None)
                             if delta:
@@ -780,7 +816,13 @@ async def stream_engagement_response(
                     return
                 chunks.append(item)
                 yield item
-            _log_engagement(prompt_sent, "".join(chunks))
+            full_text = "".join(chunks)
+            if turn_usage is not None:
+                if stream_usage:
+                    turn_usage.add_openai_usage("engagement", stream_usage[-1])
+                elif full_text:
+                    turn_usage.add_engagement_text_fallback(full_text)
+            _log_engagement(prompt_sent, full_text)
             return
 
         if provider == "gemini":
@@ -800,6 +842,8 @@ async def stream_engagement_response(
 
             text = await asyncio.to_thread(_gemini_generate)
             if text:
+                if turn_usage is not None:
+                    turn_usage.add_engagement_text_fallback(text)
                 _log_engagement(prompt_sent, text)
                 yield text
     except Exception as e:

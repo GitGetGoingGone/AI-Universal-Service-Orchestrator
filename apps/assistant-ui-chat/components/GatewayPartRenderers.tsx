@@ -285,20 +285,14 @@ function readMultiAgentInFlight(): boolean {
 /** Shown while the assistant message streams and multi-agent mode was requested, before the final huddle part arrives. */
 function MultiAgentFlightPlaceholder() {
   return (
-    <section
-      className="agent-huddle-root assistant-themed-surface my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 text-[var(--card-foreground)] shadow-sm"
+    <div
+      className="agent-huddle-root my-2 flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--muted)]/25 px-3 py-2 text-xs text-[var(--foreground)]"
       aria-live="polite"
       aria-label="Concierge scouts in progress"
     >
-      <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-2 text-sm font-medium text-[var(--foreground)]">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--primary,#2563eb)]" aria-hidden />
-        <span>Working with your concierge team</span>
-      </div>
-      <p className="text-sm leading-relaxed text-[var(--foreground)]/90">
-        Scouts are checking inventory, partner catalogs, and context. Full status, memory, and reasoning traces
-        will appear here as each step completes.
-      </p>
-    </section>
+      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--primary,#2563eb)]" aria-hidden />
+      <span className="font-medium">Orchestrating agents — status will appear below as steps complete.</span>
+    </div>
   );
 }
 

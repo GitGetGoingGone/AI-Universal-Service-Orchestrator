@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from config import settings
 from db import (
     get_distinct_experience_tags,  # type: ignore[reportAttributeAccessIssue]
+    get_distinct_product_capabilities,  # type: ignore[reportAttributeAccessIssue]
     get_product_by_id,  # type: ignore[reportAttributeAccessIssue]
     get_products_for_acp_export,  # type: ignore[reportAttributeAccessIssue]
     add_product_to_bundle,  # type: ignore[reportAttributeAccessIssue]
@@ -43,11 +44,18 @@ def _product_for_public_response(product: dict) -> dict:
 
 @router.get("/experience-categories")
 async def get_experience_categories(request: Request):
-    """Return distinct experience categories (tags) for filtering discovery (e.g. baby, celebration)."""
+    """Return experience_tags and product capability slugs for theme filters and dynamic composite planning.
+
+    capability_tags come from local product rows (including catalog synced from UCP/MCP into products).
+    """
     categories = await get_distinct_experience_tags()
+    capability_tags = await get_distinct_product_capabilities()
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
     return {
-        "data": {"experience_categories": categories},
+        "data": {
+            "experience_categories": categories,
+            "capability_tags": capability_tags,
+        },
         "metadata": {
             "api_version": "v1",
             "timestamp": datetime.utcnow().isoformat() + "Z",

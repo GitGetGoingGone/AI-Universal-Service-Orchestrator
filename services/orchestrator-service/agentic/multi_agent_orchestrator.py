@@ -27,6 +27,7 @@ from .agents import (
     OperationProgress,
     trace_append,
 )
+from .turn_usage import TurnUsageAccumulator, heuristic_credit_usage
 
 logger = logging.getLogger(__name__)
 
@@ -239,12 +240,30 @@ async def _invoke_weather(
     for lbl in plan_labels or ["Location context", "Conditions lookup", "Comfort readout"]:
         trace_append(trace, "PLAN", lbl)
         await _maybe_emit_pao(emit_pao, trace, "Planning…")
-    loc = inv.location or "your area"
+    from agentic import loop as ag_loop
+
+    loc = (inv.location or "").strip()
+    if not loc or ag_loop._is_placeholder_weather_location(loc):
+        trace_append(
+            trace,
+            "OBSERVE",
+            "Skipping weather until the user shares a specific city or area.",
+        )
+        await _maybe_emit_pao(emit_pao, trace, "Weather: skipped (no location)")
+        return AgentResult(
+            id=AGENT_WEATHER,
+            label="Weather context",
+            kind="context",
+            status="succeeded",
+            summary="Weather: skipped — no specific location yet",
+            details={"skipped": True},
+            user_cancellable=True,
+            user_editable=True,
+            trace=trace,
+        )
     trace_append(trace, "ACTION", f"Checking current weather for {loc}")
     await _maybe_emit_pao(emit_pao, trace, "Resolving conditions…")
     try:
-        from agentic import loop as ag_loop
-
         raw = await ag_loop._get_weather(loc)  # noqa: SLF001
         if raw.get("error"):
             trace_append(trace, "OBSERVE", "Weather service is not configured or location could not be resolved.")
@@ -476,6 +495,7 @@ def _snapshot_to_progress_payload(
     include_full_meta: bool,
     in_flight: Optional[Dict[str, Dict[str, Any]]] = None,
     hide_pending_agents: bool = False,
+    turn_usage_acc: Optional[TurnUsageAccumulator] = None,
 ) -> Dict[str, Any]:
     """Build multi_agent_status (+ optional meta) for streaming or final response.
 
@@ -548,14 +568,15 @@ def _snapshot_to_progress_payload(
         }
     ]
 
-    approx_tokens_in = message_count * 180 + 400
-    approx_tokens_out = 650
-    credit_usage = {
-        "estimated_input_tokens": approx_tokens_in,
-        "estimated_output_tokens": approx_tokens_out,
-        "estimated_total_tokens": approx_tokens_in + approx_tokens_out,
-        "note": "Heuristic estimate for this turn (Status Narrator / Module 14 visibility).",
-    }
+    if turn_usage_acc is not None:
+        credit_usage = turn_usage_acc.to_credit_usage_dict(
+            message_count=message_count,
+            partial_note_suffix="Excludes final assistant reply until engagement completes."
+            if hide_pending_agents
+            else "",
+        )
+    else:
+        credit_usage = heuristic_credit_usage(message_count)
 
     if message_count > 24:
         memory_health = {
@@ -600,6 +621,7 @@ async def run_multi_agent_bundle(
     agent_skills_overrides: Optional[Dict[str, Any]],
     message_count: int = 0,
     on_progress: MultiAgentProgressCallback = None,
+    turn_usage_acc: Optional[TurnUsageAccumulator] = None,
 ) -> Dict[str, Any]:
     """
     Returns multi_agent_status, todos, thought_timelines, memory_health, credit_usage, narrative, merged_hints.
@@ -696,6 +718,7 @@ async def run_multi_agent_bundle(
                     include_full_meta=True,
                     in_flight=dict(in_flight_partial),
                     hide_pending_agents=True,
+                    turn_usage_acc=turn_usage_acc,
                 )
             await _emit(snap)
 
@@ -716,6 +739,7 @@ async def run_multi_agent_bundle(
                     include_full_meta=True,
                     in_flight=dict(in_flight_partial),
                     hide_pending_agents=True,
+                    turn_usage_acc=turn_usage_acc,
                 )
             await _emit(snap_start)
 
@@ -782,6 +806,7 @@ async def run_multi_agent_bundle(
                             include_full_meta=True,
                             in_flight=dict(in_flight_partial),
                             hide_pending_agents=True,
+                            turn_usage_acc=turn_usage_acc,
                         )
                     await _emit(done_snap)
                 else:
@@ -805,6 +830,7 @@ async def run_multi_agent_bundle(
                             include_full_meta=True,
                             in_flight=dict(in_flight_partial),
                             hide_pending_agents=True,
+                            turn_usage_acc=turn_usage_acc,
                         )
                     await _emit(done_snap)
                 else:
@@ -817,6 +843,7 @@ async def run_multi_agent_bundle(
         message_count=message_count,
         t0=t0,
         include_full_meta=True,
+        turn_usage_acc=turn_usage_acc,
     )
     agent_payload = base["multi_agent_status"]["agents"]
     ok = sum(1 for a in agent_payload if isinstance(a, dict) and a.get("status") == "succeeded")
@@ -879,6 +906,7 @@ async def attach_multi_agent_to_chat_result(
     message_count: int = 0,
     on_multi_agent_progress: MultiAgentProgressCallback = None,
     precomputed_extra: Optional[Dict[str, Any]] = None,
+    turn_usage_acc: Optional[TurnUsageAccumulator] = None,
 ) -> Dict[str, Any]:
     """
     precomputed_extra: when set, merge this bundle output and skip running scouts again
@@ -913,6 +941,7 @@ async def attach_multi_agent_to_chat_result(
         agent_skills_overrides=agent_skills_overrides,
         message_count=message_count,
         on_progress=on_multi_agent_progress,
+        turn_usage_acc=turn_usage_acc,
     )
     if not extra:
         return out

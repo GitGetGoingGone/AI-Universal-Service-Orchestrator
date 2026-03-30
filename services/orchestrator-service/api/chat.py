@@ -45,6 +45,7 @@ from agentic.multi_agent_orchestrator import (
     should_run_multi_agent,
 )
 from agentic.response import generate_engagement_response, stream_engagement_response
+from agentic.turn_usage import TurnUsageAccumulator, apply_final_credit_usage_to_result
 from packages.shared.utils.api_response import chat_first_response, request_id_from_request
 from packages.shared.json_ld.error import error_ld
 from packages.shared.discovery import NO_USER_INPUT_FALLBACK_MESSAGE
@@ -118,6 +119,7 @@ async def _finalize_with_multi_agent(
     *,
     on_multi_agent_progress: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     precomputed_multi_agent_extra: Optional[Dict[str, Any]] = None,
+    turn_usage_acc: Optional[TurnUsageAccumulator] = None,
 ) -> Dict[str, Any]:
     if not isinstance(result, dict) or result.get("error"):
         return result
@@ -136,6 +138,7 @@ async def _finalize_with_multi_agent(
             message_count=len(body.messages or []),
             on_multi_agent_progress=on_multi_agent_progress,
             precomputed_extra=precomputed_multi_agent_extra,
+            turn_usage_acc=turn_usage_acc,
         )
         if body.thread_id and isinstance(out, dict):
             agents = (out.get("multi_agent_status") or {}).get("agents") or []
@@ -189,6 +192,7 @@ async def _stream_chat_events(
     ma_scheduled: List[bool] = [False]
     ma_bundle_extra: List[Optional[Dict[str, Any]]] = [None]
     ma_task: List[Optional[asyncio.Task]] = [None]
+    turn_usage_acc = TurnUsageAccumulator()
 
     async def on_thinking(msg: str, ctx: Optional[Dict]) -> None:
         await queue.put(("thinking", {"text": msg, "step": (ctx or {}).get("step", "")}))
@@ -222,6 +226,7 @@ async def _stream_chat_events(
                     agent_skills_overrides=body.agent_skills_overrides if isinstance(body.agent_skills_overrides, dict) else {},
                     message_count=len(body.messages or []),
                     on_progress=on_multi_agent_progress,
+                    turn_usage_acc=turn_usage_acc,
                 )
                 ma_bundle_extra[0] = ex if ex is not None else {}
             except Exception as e:
@@ -252,6 +257,7 @@ async def _stream_chat_events(
                 explore_product_id=body.explore_product_id,
                 on_thinking=on_thinking,
                 on_multi_agent_intent_ready=on_multi_agent_intent_ready,
+                turn_usage=turn_usage_acc,
             )
             if ma_task[0] is not None:
                 try:
@@ -269,6 +275,7 @@ async def _stream_chat_events(
                 effective_user_message,
                 on_multi_agent_progress=on_multi_agent_progress,
                 precomputed_multi_agent_extra=precomputed_ma,
+                turn_usage_acc=turn_usage_acc,
             )
         except Exception as e:
             err_holder[0] = e
@@ -349,7 +356,12 @@ async def _stream_chat_events(
         summary_chunks: List[str] = []
         if body.debug:
             engagement_res = await generate_engagement_response(
-                effective_user_message, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards, return_debug=True
+                effective_user_message,
+                result,
+                llm_config=llm_config,
+                allow_markdown=not use_adaptive_cards,
+                return_debug=True,
+                turn_usage=turn_usage_acc,
             )
             if isinstance(engagement_res, tuple):
                 summary_sync, engagement_debug = engagement_res
@@ -377,7 +389,11 @@ async def _stream_chat_events(
                 request_id=request_id,
             )
             async for delta in stream_engagement_response(
-                effective_user_message, result, llm_config=llm_config, allow_markdown=not use_adaptive_cards
+                effective_user_message,
+                result,
+                llm_config=llm_config,
+                allow_markdown=not use_adaptive_cards,
+                turn_usage=turn_usage_acc,
             ):
                 summary_chunks.append(delta)
                 yield f"event: summary_delta\ndata: {json.dumps({'delta': delta})}\n\n"
@@ -391,6 +407,16 @@ async def _stream_chat_events(
                 }
         if not summary:
             summary = "I'm here to help. What would you like to explore?"
+        apply_final_credit_usage_to_result(result, turn_usage_acc, len(body.messages or []))
+        if body.thread_id and isinstance(result, dict):
+            agents2 = (result.get("multi_agent_status") or {}).get("agents") or []
+            merge_thread_conversation_metrics(
+                body.thread_id,
+                thought_timelines=result.get("thought_timelines"),
+                memory_health=result.get("memory_health"),
+                credit_usage=result.get("credit_usage"),
+                multi_agent_agent_count=len(agents2) if isinstance(agents2, list) else 0,
+            )
         response_data = chat_first_response(
             data=result.get("data", {}),
             machine_readable=result.get("machine_readable", {}),
@@ -623,6 +649,7 @@ async def chat(
         )
 
     try:
+        turn_usage_ns = TurnUsageAccumulator()
         result = await run_agentic_loop(
             effective_message,
             user_id=user_id,
@@ -638,8 +665,16 @@ async def chat(
             bundle_id=body.bundle_id,
             order_id=body.order_id,
             explore_product_id=body.explore_product_id,
+            turn_usage=turn_usage_ns,
         )
-        result = await _finalize_with_multi_agent(result, body, user_id, _discover, effective_message)
+        result = await _finalize_with_multi_agent(
+            result,
+            body,
+            user_id,
+            _discover,
+            effective_message,
+            turn_usage_acc=turn_usage_ns,
+        )
     except Exception as e:
         return chat_first_response(
             data={"intent": None, "products": None, "error": str(e)},
@@ -695,7 +730,12 @@ async def chat(
     planner_message = (result.get("planner_complete_message") or "").strip()
     generic_messages = ("processed your request.", "processed your request", "done.", "done", "complete.", "complete")
     engagement_res_ns = await generate_engagement_response(
-        effective_message, result, llm_config=llm_config_ns, allow_markdown=not use_adaptive_cards, return_debug=True
+        effective_message,
+        result,
+        llm_config=llm_config_ns,
+        allow_markdown=not use_adaptive_cards,
+        return_debug=True,
+        turn_usage=turn_usage_ns,
     )
     if isinstance(engagement_res_ns, tuple):
         summary, engagement_debug_ns = engagement_res_ns
@@ -719,6 +759,16 @@ async def chat(
         agent_reasoning=_agent_reasoning_from_result(result),
         request_id=request_id,
     )
+    apply_final_credit_usage_to_result(result, turn_usage_ns, len(body.messages or []))
+    if body.thread_id and isinstance(result, dict):
+        agents_ns = (result.get("multi_agent_status") or {}).get("agents") or []
+        merge_thread_conversation_metrics(
+            body.thread_id,
+            thought_timelines=result.get("thought_timelines"),
+            memory_health=result.get("memory_health"),
+            credit_usage=result.get("credit_usage"),
+            multi_agent_agent_count=len(agents_ns) if isinstance(agents_ns, list) else 0,
+        )
     response_data_ns = chat_first_response(
         data=result.get("data", {}),
         machine_readable=result.get("machine_readable", {}),

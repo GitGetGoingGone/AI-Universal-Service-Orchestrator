@@ -3,7 +3,10 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from .turn_usage import TurnUsageAccumulator
 
 from .tools import TOOL_DEFS
 
@@ -99,6 +102,7 @@ async def plan_next_action(
     *,
     max_iterations: int = 5,
     llm_config: Optional[Dict[str, Any]] = None,
+    turn_usage: Optional["TurnUsageAccumulator"] = None,
 ) -> Dict[str, Any]:
     """
     Use LLM to plan and execute next action. Returns final result or intermediate state.
@@ -234,6 +238,8 @@ async def plan_next_action(
                     max_tokens=500,
                 )
             )
+            if turn_usage is not None and getattr(response, "usage", None):
+                turn_usage.add_openai_usage("planner", response.usage)
             choice = response.choices[0]
             msg = choice.message
 
@@ -258,7 +264,14 @@ async def plan_next_action(
             }
 
         if provider == "gemini":
-            return await _plan_with_gemini(client, user_content, model=model, temperature=temperature, system_prompt=planner_prompt)
+            return await _plan_with_gemini(
+                client,
+                user_content,
+                model=model,
+                temperature=temperature,
+                system_prompt=planner_prompt,
+                turn_usage=turn_usage,
+            )
     except Exception as e:
         logger.warning("Planner LLM failed: %s", e)
         return _fallback_plan(user_message, state)
@@ -273,6 +286,7 @@ async def _plan_with_gemini(
     model: str,
     temperature: float = 0.1,
     system_prompt: Optional[str] = None,
+    turn_usage: Optional["TurnUsageAccumulator"] = None,
 ) -> Dict[str, Any]:
     """Use Gemini for planning (function calling). Requires google-generativeai."""
     from .tools import TOOL_DEFS
@@ -300,6 +314,24 @@ async def _plan_with_gemini(
         return resp
 
     response = await asyncio.to_thread(_call)
+
+    if turn_usage is not None:
+        try:
+            um = getattr(response, "usage_metadata", None)
+            if um is not None:
+                pt = int(getattr(um, "prompt_token_count", None) or 0)
+                ct = int(
+                    getattr(um, "candidates_token_count", None)
+                    or getattr(um, "candidates_tokens", None)
+                    or 0
+                )
+                if pt or ct:
+                    turn_usage.add_usage_dict(
+                        "planner",
+                        {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": pt + ct},
+                    )
+        except Exception:
+            pass
 
     if not response.candidates:
         return {"action": "complete", "message": "Done.", "reasoning": ""}

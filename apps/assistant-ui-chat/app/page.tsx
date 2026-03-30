@@ -14,6 +14,7 @@ import {
 } from "@assistant-ui/react";
 import { useChatRuntime, AssistantChatTransport } from "@assistant-ui/react-ai-sdk";
 import { GatewayMessageParts } from "@/components/GatewayPartRenderers";
+import { UserPromptCard } from "@/components/UserPromptCard";
 import { PaymentFormInline } from "@/components/PaymentFormInline";
 import { GatewayActionProvider, type ActionPayload } from "@/contexts/GatewayActionContext";
 import { CHAT_STORAGE_MA_IN_FLIGHT } from "@/lib/chat-storage-keys";
@@ -78,8 +79,8 @@ function ThreadMetadataListener({
 
 function AssistantMessage() {
   return (
-    <MessagePrimitive.Root className="flex justify-start">
-      <div className="msg-assistant w-full">
+    <MessagePrimitive.Root className="flex w-full justify-start">
+      <div className="msg-assistant w-full min-w-0 px-1">
         <GatewayMessageParts />
       </div>
     </MessagePrimitive.Root>
@@ -88,9 +89,9 @@ function AssistantMessage() {
 
 function UserMessage() {
   return (
-    <MessagePrimitive.Root className="flex justify-end">
-      <div className="msg-user w-fit">
-        <MessagePrimitive.Parts />
+    <MessagePrimitive.Root className="flex w-full justify-end">
+      <div className="msg-user w-full min-w-0 max-w-full px-1">
+        <UserPromptCard />
       </div>
     </MessagePrimitive.Root>
   );

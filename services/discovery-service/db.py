@@ -15,6 +15,7 @@ __all__ = [
     "check_connection",
     "search_products",
     "get_distinct_experience_tags",
+    "get_distinct_product_capabilities",
     "get_internal_agent_urls",
     "get_ucp_partners_with_tokens",
     "onboard_ucp_partner",
@@ -312,6 +313,19 @@ async def get_distinct_experience_tags() -> List[str]:
         result = client.rpc("get_distinct_experience_tags").execute()
         data = _table_data(result.data)
         return [str(row.get("tag", "")).strip() for row in data if row.get("tag")]
+    except Exception:
+        return []
+
+
+async def get_distinct_product_capabilities() -> List[str]:
+    """Return distinct capability slugs from products.capabilities (for catalog-driven composite planning)."""
+    client = get_supabase()
+    if not client:
+        return []
+    try:
+        result = client.rpc("get_distinct_product_capabilities").execute()
+        data = _table_data(result.data)
+        return [str(row.get("capability", "")).strip() for row in data if row.get("capability")]
     except Exception:
         return []
 
